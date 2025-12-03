@@ -108,7 +108,7 @@ struct ResourceTests {
         let personClass = EClass(name: personClassName)
         
         // Add multiple objects
-        for i in 0..<3 {
+        for _ in 0..<3 {
             let person = DynamicEObject(eClass: personClass)
             await resource.add(person)
         }
@@ -144,7 +144,7 @@ struct ResourceTests {
         let resolved = await resource.resolve(person.id, as: DynamicEObject.self)
         
         #expect(resolved?.id == person.id)
-        #expect(resolved is DynamicEObject)
+        #expect(resolved != nil)
     }
     
     @Test func testResolveNonexistentObject() async {
@@ -161,7 +161,7 @@ struct ResourceTests {
         let personClass = EClass(name: personClassName)
         
         var addedObjects: [DynamicEObject] = []
-        for i in 0..<3 {
+        for _ in 0..<3 {
             let person = DynamicEObject(eClass: personClass)
             addedObjects.append(person)
             await resource.add(person)

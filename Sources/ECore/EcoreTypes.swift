@@ -98,6 +98,7 @@ extension ELong: EcoreValue {}
 extension EBigDecimal: EcoreValue {}
 extension EBigInteger: EcoreValue {}
 extension EUUID: EcoreValue {}
+extension Array: EcoreValue where Element: EcoreValue {}
 
 /// Type conversion utilities for Ecore primitive types.
 ///
