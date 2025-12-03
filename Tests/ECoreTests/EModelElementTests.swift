@@ -93,161 +93,168 @@ struct MockNamedElement: ENamedElement {
     }
 }
 
-// MARK: - EAnnotation Tests
+// MARK: - Test Suite
 
-@Test func testEAnnotationCreation() {
+@Suite("EModelElement Tests")
+struct EModelElementTests {
+
+    // MARK: - EAnnotation Tests
+
+    @Test func testEAnnotationCreation() {
     let annotation = EAnnotation(source: testUrlSource)
 
-    #expect(annotation.source == testUrlSource)
-    #expect(annotation.details.isEmpty)
+        #expect(annotation.source == testUrlSource)
+        #expect(annotation.details.isEmpty)
 }
 
-@Test func testEAnnotationWithDetails() {
-    let annotation = EAnnotation(
-        source: testUrlSource,
-        details: [key1: value1, key2: value2]
-    )
+    @Test func testEAnnotationWithDetails() {
+        let annotation = EAnnotation(
+            source: testUrlSource,
+            details: [key1: value1, key2: value2]
+        )
 
-    #expect(annotation.details[key1] == value1)
-    #expect(annotation.details[key2] == value2)
+        #expect(annotation.details[key1] == value1)
+        #expect(annotation.details[key2] == value2)
 }
 
-@Test func testEAnnotationEquality() {
-    let id = EUUID()
-    let annotation1 = EAnnotation(id: id, source: testUrlSource)
-    let annotation2 = EAnnotation(id: id, source: testUrlSource)
+    @Test func testEAnnotationEquality() {
+        let id = EUUID()
+        let annotation1 = EAnnotation(id: id, source: testUrlSource)
+        let annotation2 = EAnnotation(id: id, source: testUrlSource)
 
-    #expect(annotation1 == annotation2)
+        #expect(annotation1 == annotation2)
 }
 
-@Test func testEAnnotationInequality() {
-    let annotation1 = EAnnotation(source: testUrl1Source)
-    let annotation2 = EAnnotation(source: testUrl2Source)
+    @Test func testEAnnotationInequality() {
+        let annotation1 = EAnnotation(source: testUrl1Source)
+        let annotation2 = EAnnotation(source: testUrl2Source)
 
-    #expect(annotation1 != annotation2)
+        #expect(annotation1 != annotation2)
 }
 
-@Test func testEAnnotationHash() {
-    let id = EUUID()
-    let annotation1 = EAnnotation(id: id, source: testUrlSource)
-    let annotation2 = EAnnotation(id: id, source: testUrlSource)
+    @Test func testEAnnotationHash() {
+        let id = EUUID()
+        let annotation1 = EAnnotation(id: id, source: testUrlSource)
+        let annotation2 = EAnnotation(id: id, source: testUrlSource)
 
-    #expect(annotation1.hashValue == annotation2.hashValue)
+        #expect(annotation1.hashValue == annotation2.hashValue)
 }
 
-@Test func testEAnnotationIsEcoreValue() {
-    let annotation = EAnnotation(source: testUrlSource)
-    let value: any EcoreValue = annotation
+    @Test func testEAnnotationIsEcoreValue() {
+        let annotation = EAnnotation(source: testUrlSource)
+        let value: any EcoreValue = annotation
 
-    #expect(value is EAnnotation)
+        #expect(value is EAnnotation)
 }
 
 // MARK: - EModelElement Tests
 
-@Test func testEModelElementAnnotations() {
-    var element = MockNamedElement(name: testElementName)
+    @Test func testEModelElementAnnotations() {
+        var element = MockNamedElement(name: testElementName)
 
-    #expect(element.eAnnotations.isEmpty)
+        #expect(element.eAnnotations.isEmpty)
 
-    let annotation = EAnnotation(source: testUrlSource)
-    element.eAnnotations.append(annotation)
+        let annotation = EAnnotation(source: testUrlSource)
+        element.eAnnotations.append(annotation)
 
-    #expect(element.eAnnotations.count == expectedAnnotationCount1)
+        #expect(element.eAnnotations.count == expectedAnnotationCount1)
 }
 
-@Test func testEModelElementGetAnnotation() {
-    let annotation1 = EAnnotation(source: testUrl1Source)
-    let annotation2 = EAnnotation(source: testUrl2Source)
+    @Test func testEModelElementGetAnnotation() {
+        let annotation1 = EAnnotation(source: testUrl1Source)
+        let annotation2 = EAnnotation(source: testUrl2Source)
 
-    let element = MockNamedElement(
-        name: testElementName,
-        eAnnotations: [annotation1, annotation2]
-    )
+        let element = MockNamedElement(
+            name: testElementName,
+            eAnnotations: [annotation1, annotation2]
+        )
 
-    let found = element.getEAnnotation(source: testUrl1Source)
-    #expect(found?.source == testUrl1Source)
+        let found = element.getEAnnotation(source: testUrl1Source)
+        #expect(found?.source == testUrl1Source)
 }
 
-@Test func testEModelElementGetAnnotationNotFound() {
-    let element = MockNamedElement(name: testElementName)
+    @Test func testEModelElementGetAnnotationNotFound() {
+        let element = MockNamedElement(name: testElementName)
 
-    let found = element.getEAnnotation(source: notFoundUrlSource)
-    #expect(found == nil)
+        let found = element.getEAnnotation(source: notFoundUrlSource)
+        #expect(found == nil)
 }
 
-@Test func testEModelElementMultipleAnnotations() {
-    let annotation1 = EAnnotation(source: testUrl1Source)
-    let annotation2 = EAnnotation(source: testUrl2Source)
-    let annotation3 = EAnnotation(source: testUrl3Source)
+    @Test func testEModelElementMultipleAnnotations() {
+        let annotation1 = EAnnotation(source: testUrl1Source)
+        let annotation2 = EAnnotation(source: testUrl2Source)
+        let annotation3 = EAnnotation(source: testUrl3Source)
 
-    let element = MockNamedElement(
-        name: testElementName,
-        eAnnotations: [annotation1, annotation2, annotation3]
-    )
+        let element = MockNamedElement(
+            name: testElementName,
+            eAnnotations: [annotation1, annotation2, annotation3]
+        )
 
-    #expect(element.eAnnotations.count == expectedAnnotationCount3)
+        #expect(element.eAnnotations.count == expectedAnnotationCount3)
+        #expect(element.getEAnnotation(source: testUrl1Source) != nil)
+        #expect(element.getEAnnotation(source: testUrl2Source) != nil)
     #expect(element.getEAnnotation(source: testUrl2Source)?.source == testUrl2Source)
 }
 
 // MARK: - ENamedElement Tests
 
-@Test func testENamedElementCreation() {
-    let element = MockNamedElement(name: testElementName)
+    @Test func testENamedElementCreation() {
+        let element = MockNamedElement(name: testElementName)
 
-    #expect(element.name == testElementName)
+        #expect(element.name == testElementName)
 }
 
-@Test func testENamedElementNameChange() {
-    var element = MockNamedElement(name: oldElementName)
+    @Test func testENamedElementNameChange() {
+        var element = MockNamedElement(name: oldElementName)
 
-    element.name = newElementName
+        element.name = newElementName
 
-    #expect(element.name == newElementName)
+        #expect(element.name == newElementName)
 }
 
-@Test func testENamedElementEquality() {
-    let id = EUUID()
-    let element1 = MockNamedElement(id: id, name: test1Name)
-    let element2 = MockNamedElement(id: id, name: test1Name)
+    @Test func testENamedElementEquality() {
+        let id = EUUID()
+        let element1 = MockNamedElement(id: id, name: test1Name)
+        let element2 = MockNamedElement(id: id, name: test1Name)
 
-    #expect(element1 == element2)
+        #expect(element1 == element2)
 }
 
-@Test func testENamedElementInequality() {
-    let element1 = MockNamedElement(name: test1Name)
-    let element2 = MockNamedElement(name: test2Name)
+    @Test func testENamedElementInequality() {
+        let element1 = MockNamedElement(name: test1Name)
+        let element2 = MockNamedElement(name: test2Name)
 
-    #expect(element1 != element2)
+        #expect(element1 != element2)
 }
 
-@Test func testENamedElementIsEObject() {
-    let element = MockNamedElement(name: test1Name)
-    let obj: any EObject = element
+    @Test func testENamedElementIsEObject() {
+        let element = MockNamedElement(name: test1Name)
+        let obj: any EObject = element
 
-    #expect(obj is MockNamedElement)
+        #expect(obj is MockNamedElement)
 }
 
-@Test func testENamedElementIsEModelElement() {
-    let element = MockNamedElement(name: test1Name)
-    let modelElement: any EModelElement = element
+    @Test func testENamedElementIsEModelElement() {
+        let element = MockNamedElement(name: test1Name)
+        let modelElement: any EModelElement = element
 
-    #expect(modelElement is MockNamedElement)
+        #expect(modelElement is MockNamedElement)
 }
 
-@Test func testENamedElementWithAnnotations() {
-    let annotation = EAnnotation(
-        source: testUrlSource,
-        details: [documentationKey: documentationValue]
-    )
+    @Test func testENamedElementWithAnnotations() {
+        let annotation = EAnnotation(
+            source: testUrlSource,
+            details: [documentationKey: documentationValue]
+        )
 
-    let element = MockNamedElement(
-        name: documentedElementName,
-        eAnnotations: [annotation]
-    )
+        let element = MockNamedElement(
+            name: documentedElementName,
+            eAnnotations: [annotation]
+        )
 
-    #expect(element.name == documentedElementName)
-    #expect(element.eAnnotations.count == expectedAnnotationCount1)
-
-    let found = element.getEAnnotation(source: testUrlSource)
-    #expect(found?.details[documentationKey] == documentationValue)
+        #expect(element.eAnnotations.count == expectedAnnotationCount1)
+        let found = element.getEAnnotation(source: testUrlSource)
+        #expect(found?.details[documentationKey] == documentationValue)
+        #expect(element.name == documentedElementName)
+    }
 }

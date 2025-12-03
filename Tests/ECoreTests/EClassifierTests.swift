@@ -57,253 +57,258 @@ private let expectedAnnotationCount1 = 1
 private let firstIndex = 0
 private let secondIndex = 1
 
-// MARK: - EDataType Tests
+// MARK: - Test Suite
 
-@Test func testEDataTypeCreation() {
-    let dataType = EDataType(
-        name: eStringTypeName,
-        instanceClassName: swiftStringClassName
-    )
+@Suite("EClassifier Tests")
+struct EClassifierTests {
 
-    #expect(dataType.name == eStringTypeName)
-    #expect(dataType.instanceClassName == swiftStringClassName)
-    #expect(dataType.serialisable == true)  // Default value
-}
+    // MARK: - EDataType Tests
 
-@Test func testEDataTypeWithDefaultValue() {
-    let dataType = EDataType(
-        name: eIntTypeName,
-        defaultValueLiteral: zeroLiteral
-    )
+        @Test func testEDataTypeCreation() {
+            let dataType = EDataType(
+                name: eStringTypeName,
+                instanceClassName: swiftStringClassName
+            )
 
-    #expect(dataType.defaultValueLiteral == zeroLiteral)
-}
+            #expect(dataType.name == eStringTypeName)
+            #expect(dataType.instanceClassName == swiftStringClassName)
+            #expect(dataType.serialisable == true)  // Default value
+        }
 
-@Test func testEDataTypeNonSerialisable() {
-    let dataType = EDataType(
-        name: complexTypeName,
-        serialisable: false
-    )
+    @Test func testEDataTypeWithDefaultValue() {
+        let dataType = EDataType(
+            name: eIntTypeName,
+            defaultValueLiteral: zeroLiteral
+        )
 
-    #expect(dataType.serialisable == false)
-}
+        #expect(dataType.defaultValueLiteral == zeroLiteral)
+    }
 
-@Test func testEDataTypeEquality() {
-    let id = EUUID()
-    let dataType1 = EDataType(id: id, name: eStringTypeName)
-    let dataType2 = EDataType(id: id, name: eStringTypeName)
+    @Test func testEDataTypeNonSerialisable() {
+        let dataType = EDataType(
+            name: complexTypeName,
+            serialisable: false
+        )
 
-    #expect(dataType1 == dataType2)
-    #expect(dataType1.hashValue == dataType2.hashValue)
-}
+        #expect(dataType.serialisable == false)
+    }
 
-@Test func testEDataTypeInequality() {
-    let dataType1 = EDataType(name: eStringTypeName)
-    let dataType2 = EDataType(name: eIntTypeName)
+    @Test func testEDataTypeEquality() {
+        let id = EUUID()
+        let dataType1 = EDataType(id: id, name: eStringTypeName)
+        let dataType2 = EDataType(id: id, name: eStringTypeName)
 
-    #expect(dataType1 != dataType2)
-}
+        #expect(dataType1 == dataType2)
+        #expect(dataType1.hashValue == dataType2.hashValue)
+    }
 
-@Test func testEDataTypeIsENamedElement() {
-    let dataType = EDataType(name: eStringTypeName)
-    let namedElement: any ENamedElement = dataType
+    @Test func testEDataTypeInequality() {
+        let dataType1 = EDataType(name: eStringTypeName)
+        let dataType2 = EDataType(name: eIntTypeName)
 
-    #expect(namedElement is EDataType)
-    #expect(namedElement.name == eStringTypeName)
-}
+        #expect(dataType1 != dataType2)
+    }
 
-@Test func testEDataTypeWithAnnotations() {
-    let annotation = EAnnotation(
-        source: genModelSource,
-        details: [documentationKey: stringDataTypeDoc]
-    )
+    @Test func testEDataTypeIsENamedElement() {
+        let dataType = EDataType(name: eStringTypeName)
+        let namedElement: any ENamedElement = dataType
 
-    let dataType = EDataType(
-        name: eStringTypeName,
-        eAnnotations: [annotation]
-    )
+        #expect(namedElement is EDataType)
+        #expect(namedElement.name == eStringTypeName)
+    }
 
-    #expect(dataType.eAnnotations.count == expectedAnnotationCount1)
-    let found = dataType.getEAnnotation(source: genModelSource)
-    #expect(found?.details[documentationKey] == stringDataTypeDoc)
-}
+    @Test func testEDataTypeWithAnnotations() {
+        let annotation = EAnnotation(
+            source: genModelSource,
+            details: [documentationKey: stringDataTypeDoc]
+        )
+
+        let dataType = EDataType(
+            name: eStringTypeName,
+            eAnnotations: [annotation]
+        )
+
+        #expect(dataType.eAnnotations.count == 1)
+        #expect(dataType.eAnnotations[0].source == genModelSource)
+    }
 
 // MARK: - EEnumLiteral Tests
 
-@Test func testEEnumLiteralCreation() {
-    let literal = EEnumLiteral(
-        name: blackbirdName,
-        value: blackbirdValue
-    )
+    @Test func testEEnumLiteralCreation() {
+        let literal = EEnumLiteral(
+            name: blackbirdName,
+            value: blackbirdValue
+        )
 
-    #expect(literal.name == blackbirdName)
-    #expect(literal.value == blackbirdValue)
-    #expect(literal.literal == nil)  // No explicit literal provided
-}
+        #expect(literal.name == blackbirdName)
+        #expect(literal.value == blackbirdValue)
+        #expect(literal.literal == nil)  // No explicit literal provided
+    }
 
-@Test func testEEnumLiteralWithLiteral() {
-    let literal = EEnumLiteral(
-        name: blackbirdName,
-        value: blackbirdValue,
-        literal: blackbirdUppercase
-    )
+    @Test func testEEnumLiteralWithLiteral() {
+        let literal = EEnumLiteral(
+            name: blackbirdName,
+            value: blackbirdValue,
+            literal: blackbirdUppercase
+        )
 
-    #expect(literal.name == blackbirdName)
-    #expect(literal.literal == blackbirdUppercase)
-}
+        #expect(literal.name == blackbirdName)
+        #expect(literal.literal == blackbirdUppercase)
+    }
 
-@Test func testEEnumLiteralEquality() {
-    let id = EUUID()
-    let literal1 = EEnumLiteral(id: id, name: blackbirdName, value: blackbirdValue)
-    let literal2 = EEnumLiteral(id: id, name: blackbirdName, value: blackbirdValue)
+    @Test func testEEnumLiteralEquality() {
+        let id = EUUID()
+        let literal1 = EEnumLiteral(id: id, name: blackbirdName, value: blackbirdValue)
+        let literal2 = EEnumLiteral(id: id, name: blackbirdName, value: blackbirdValue)
 
-    #expect(literal1 == literal2)
-    #expect(literal1.hashValue == literal2.hashValue)
-}
+        #expect(literal1 == literal2)
+        #expect(literal1.hashValue == literal2.hashValue)
+    }
 
-@Test func testEEnumLiteralInequality() {
-    let literal1 = EEnumLiteral(name: blackbirdName, value: blackbirdValue)
-    let literal2 = EEnumLiteral(name: thrushName, value: thrushValue)
+    @Test func testEEnumLiteralInequality() {
+        let literal1 = EEnumLiteral(name: blackbirdName, value: blackbirdValue)
+        let literal2 = EEnumLiteral(name: thrushName, value: thrushValue)
 
-    #expect(literal1 != literal2)
-}
+        #expect(literal1 != literal2)
+    }
 
 // MARK: - EEnum Tests
 
-@Test func testEEnumCreation() {
-    let birdType = EEnum(name: birdTypeName)
+    @Test func testEEnumCreation() {
+        let birdType = EEnum(name: birdTypeName)
 
-    #expect(birdType.name == birdTypeName)
-    #expect(birdType.literals.isEmpty)
-}
+        #expect(birdType.name == birdTypeName)
+        #expect(birdType.literals.isEmpty)
+    }
 
-@Test func testEEnumWithLiterals() {
-    let birdType = EEnum(
-        name: birdTypeName,
-        literals: [
-            EEnumLiteral(name: blackbirdName, value: blackbirdValue),
-            EEnumLiteral(name: thrushName, value: thrushValue),
-            EEnumLiteral(name: bluebirdName, value: bluebirdValue)
-        ]
-    )
+    @Test func testEEnumWithLiterals() {
+        let birdType = EEnum(
+            name: birdTypeName,
+            literals: [
+                EEnumLiteral(name: blackbirdName, value: blackbirdValue),
+                EEnumLiteral(name: thrushName, value: thrushValue),
+                EEnumLiteral(name: bluebirdName, value: bluebirdValue)
+            ]
+        )
 
-    #expect(birdType.literals.count == expectedLiteralCount3)
-    #expect(birdType.literals[firstIndex].name == blackbirdName)
-    #expect(birdType.literals[secondIndex].value == thrushValue)
-}
+        #expect(birdType.literals.count == expectedLiteralCount3)
+        #expect(birdType.literals[0].name == blackbirdName)
+        #expect(birdType.literals[1].name == thrushName)
+    }
 
-@Test func testEEnumGetLiteralByName() {
-    let birdType = EEnum(
-        name: birdTypeName,
-        literals: [
-            EEnumLiteral(name: blackbirdName, value: blackbirdValue),
-            EEnumLiteral(name: thrushName, value: thrushValue),
-            EEnumLiteral(name: bluebirdName, value: bluebirdValue)
-        ]
-    )
+    @Test func testEEnumGetLiteralByName() {
+        let birdType = EEnum(
+            name: birdTypeName,
+            literals: [
+                EEnumLiteral(name: blackbirdName, value: blackbirdValue),
+                EEnumLiteral(name: thrushName, value: thrushValue),
+                EEnumLiteral(name: bluebirdName, value: bluebirdValue)
+            ]
+        )
 
-    let literal = birdType.getLiteral(name: thrushName)
-    #expect(literal?.name == thrushName)
-    #expect(literal?.value == thrushValue)
-}
+        let literal = birdType.getLiteral(name: thrushName)
+        #expect(literal?.name == thrushName)
+        #expect(literal?.value == thrushValue)
+    }
 
-@Test func testEEnumGetLiteralByValue() {
-    let birdType = EEnum(
-        name: birdTypeName,
-        literals: [
-            EEnumLiteral(name: blackbirdName, value: blackbirdValue),
-            EEnumLiteral(name: thrushName, value: thrushValue),
-            EEnumLiteral(name: bluebirdName, value: bluebirdValue)
-        ]
-    )
+    @Test func testEEnumGetLiteralByValue() {
+        let birdType = EEnum(
+            name: birdTypeName,
+            literals: [
+                EEnumLiteral(name: blackbirdName, value: blackbirdValue),
+                EEnumLiteral(name: thrushName, value: thrushValue),
+                EEnumLiteral(name: bluebirdName, value: bluebirdValue)
+            ]
+        )
 
-    let literal = birdType.getLiteral(value: thrushValue)
-    #expect(literal?.name == thrushName)
-}
+        let literal = birdType.getLiteral(value: thrushValue)
+        #expect(literal?.name == thrushName)
+    }
 
-@Test func testEEnumGetLiteralNotFound() {
-    let birdType = EEnum(
-        name: birdTypeName,
-        literals: [
-            EEnumLiteral(name: blackbirdName, value: blackbirdValue)
-        ]
-    )
+    @Test func testEEnumGetLiteralNotFound() {
+        let birdType = EEnum(
+            name: birdTypeName,
+            literals: [
+                EEnumLiteral(name: blackbirdName, value: blackbirdValue)
+            ]
+        )
 
-    let literalByName = birdType.getLiteral(name: robinName)
-    #expect(literalByName == nil)
+        let literalByName = birdType.getLiteral(name: robinName)
+        #expect(literalByName == nil)
 
-    let literalByValue = birdType.getLiteral(value: nonExistentValue)
-    #expect(literalByValue == nil)
-}
+        let literalByValue = birdType.getLiteral(value: nonExistentValue)
+        #expect(literalByValue == nil)
+    }
 
-@Test func testEEnumEquality() {
-    let id = EUUID()
-    let enum1 = EEnum(id: id, name: birdTypeName)
-    let enum2 = EEnum(id: id, name: birdTypeName)
+    @Test func testEEnumEquality() {
+        let id = EUUID()
+        let enum1 = EEnum(id: id, name: birdTypeName)
+        let enum2 = EEnum(id: id, name: birdTypeName)
 
-    #expect(enum1 == enum2)
-    #expect(enum1.hashValue == enum2.hashValue)
-}
+        #expect(enum1 == enum2)
+        #expect(enum1.hashValue == enum2.hashValue)
+    }
 
-@Test func testEEnumInequality() {
-    let enum1 = EEnum(name: birdTypeName)
-    let enum2 = EEnum(name: colorTypeName)
+    @Test func testEEnumInequality() {
+        let enum1 = EEnum(name: birdTypeName)
+        let enum2 = EEnum(name: colorTypeName)
 
-    #expect(enum1 != enum2)
-}
+        #expect(enum1 != enum2)
+    }
 
-@Test func testEEnumIsENamedElement() {
-    let birdType = EEnum(name: birdTypeName)
-    let namedElement: any ENamedElement = birdType
+    @Test func testEEnumIsENamedElement() {
+        let birdType = EEnum(name: birdTypeName)
+        let namedElement: any ENamedElement = birdType
 
-    #expect(namedElement is EEnum)
-    #expect(namedElement.name == birdTypeName)
-}
+        #expect(namedElement is EEnum)
+        #expect(namedElement.name == birdTypeName)
+    }
 
-// MARK: - Integration Test
+    // MARK: - Integration Test
 
-@Test func testBirdEnumerationFromEmf4cpp() {
-    // Based on: /Users/rh/Library/CloudStorage/Dropbox/Developer/src/other/MetaModels/emf4cpp/emf4cpp.tests/enumeration/enumeration.ecore
-    let birdType = EEnum(
-        name: birdTypeName,
-        literals: [
-            EEnumLiteral(name: blackbirdName, value: blackbirdValue, literal: blackbirdName),
-            EEnumLiteral(name: thrushName, value: thrushValue, literal: thrushName),
-            EEnumLiteral(name: bluebirdName, value: bluebirdValue, literal: bluebirdName),
-            EEnumLiteral(name: redbreastName, value: redbreastValue, literal: redbreastName),
-            EEnumLiteral(name: nightingaleName, value: nightingaleValue, literal: nightingaleName)
-        ]
-    )
+    @Test func testBirdEnumerationFromEmf4cpp() {
+        // Based on: /Users/rh/Library/CloudStorage/Dropbox/Developer/src/other/MetaModels/emf4cpp/emf4cpp.tests/enumeration/enumeration.ecore
+        let birdType = EEnum(
+            name: birdTypeName,
+            literals: [
+                EEnumLiteral(name: blackbirdName, value: blackbirdValue, literal: blackbirdName),
+                EEnumLiteral(name: thrushName, value: thrushValue, literal: thrushName),
+                EEnumLiteral(name: bluebirdName, value: bluebirdValue, literal: bluebirdName),
+                EEnumLiteral(name: redbreastName, value: redbreastValue, literal: redbreastName),
+                EEnumLiteral(name: nightingaleName, value: nightingaleValue, literal: nightingaleName)
+            ]
+        )
 
-    #expect(birdType.name == birdTypeName)
-    #expect(birdType.literals.count == expectedLiteralCount5)
+        #expect(birdType.name == birdTypeName)
+        #expect(birdType.literals.count == expectedLiteralCount5)
 
-    // Test lookup by name
-    let blackbird = birdType.getLiteral(name: blackbirdName)
-    #expect(blackbird?.value == blackbirdValue)
+        // Test lookup by name
+        let blackbird = birdType.getLiteral(name: blackbirdName)
+        #expect(blackbird?.value == blackbirdValue)
 
-    // Test lookup by value
-    let nightingale = birdType.getLiteral(value: nightingaleValue)
-    #expect(nightingale?.name == nightingaleName)
-}
+        // Test lookup by value
+        let nightingale = birdType.getLiteral(value: nightingaleValue)
+        #expect(nightingale?.name == nightingaleName)
+    }
 
-@Test func testEDataTypeIsEcoreValue() {
-    let dataType = EDataType(name: eStringTypeName)
-    let value: any EcoreValue = dataType
+    @Test func testEDataTypeIsEcoreValue() {
+        let dataType = EDataType(name: eStringTypeName)
+        let value: any EcoreValue = dataType
 
-    #expect(value is EDataType)
-}
+        #expect(value is EDataType)
+    }
 
-@Test func testEEnumIsEcoreValue() {
-    let birdType = EEnum(name: birdTypeName)
-    let value: any EcoreValue = birdType
+    @Test func testEEnumIsEcoreValue() {
+        let birdType = EEnum(name: birdTypeName)
+        let value: any EcoreValue = birdType
 
-    #expect(value is EEnum)
-}
+        #expect(value is EEnum)
+    }
 
-@Test func testEEnumLiteralIsEcoreValue() {
-    let literal = EEnumLiteral(name: blackbirdName, value: blackbirdValue)
-    let value: any EcoreValue = literal
+    @Test func testEEnumLiteralIsEcoreValue() {
+        let literal = EEnumLiteral(name: blackbirdName, value: blackbirdValue)
+        let value: any EcoreValue = literal
 
-    #expect(value is EEnumLiteral)
+        #expect(value is EEnumLiteral)
+    }
 }

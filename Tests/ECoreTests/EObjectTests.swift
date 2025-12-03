@@ -81,203 +81,211 @@ struct MockEObject: EObject {
 }
 
 // MARK: - Tests
+// MARK: - Test Suite
 
-@Test func testEObjectHasID() {
-    let classifier = MockClassifier(name: testClassName)
-    let obj = MockEObject(classifier: classifier)
+@Suite("EObject Tests")
+struct EObjectTests {
 
-    #expect(obj.id != nullUUID)
-}
+    // MARK: - EObject Tests
 
-@Test func testEObjectHasEClass() {
-    let classifier = MockClassifier(name: testClassName)
-    let obj = MockEObject(classifier: classifier)
+    @Test func testEObjectHasID() {
+        let classifier = MockClassifier(name: testClassName)
+        let obj = MockEObject(classifier: classifier)
 
-    #expect(obj.eClass.name == testClassName)
-}
+        #expect(obj.id != nullUUID)
+    }
 
-@Test func testEObjectSetAndGetFeature() {
-    let classifier = MockClassifier(name: testClassName)
-    var obj = MockEObject(classifier: classifier)
-    let feature = MockFeature(name: nameFeatureName)
+    @Test func testEObjectHasEClass() {
+        let classifier = MockClassifier(name: testClassName)
+        let obj = MockEObject(classifier: classifier)
 
-    // Initially not set
-    #expect(obj.eGet(feature) == nil)
+        #expect(obj.eClass.name == testClassName)
+    }
 
-    // Set a value
-    obj.eSet(feature, testValue)
+    @Test func testEObjectSetAndGetFeature() {
+        let classifier = MockClassifier(name: testClassName)
+        var obj = MockEObject(classifier: classifier)
+        let feature = MockFeature(name: nameFeatureName)
 
-    // Get the value
-    let value = obj.eGet(feature) as? String
-    #expect(value == testValue)
-}
+        // Initially not set
+        #expect(obj.eGet(feature) == nil)
 
-@Test func testEObjectIsSet() {
-    let classifier = MockClassifier(name: testClassName)
-    var obj = MockEObject(classifier: classifier)
-    let feature = MockFeature(name: nameFeatureName)
+        // Set a value
+        obj.eSet(feature, testValue)
 
-    // Initially not set
-    #expect(obj.eIsSet(feature) == false)
+        // Get the value
+        let retrieved = obj.eGet(feature) as? String
+        #expect(retrieved == testValue)
+    }
 
-    // Set a value
-    obj.eSet(feature, testString)
+    @Test func testEObjectIsSet() {
+        let classifier = MockClassifier(name: testClassName)
+        var obj = MockEObject(classifier: classifier)
+        let feature = MockFeature(name: nameFeatureName)
 
-    // Now it's set
-    #expect(obj.eIsSet(feature) == true)
-}
+        // Initially not set
+        #expect(obj.eIsSet(feature) == false)
 
-@Test func testEObjectUnset() {
-    let classifier = MockClassifier(name: testClassName)
-    var obj = MockEObject(classifier: classifier)
-    let feature = MockFeature(name: nameFeatureName)
+        // Set a value
+        obj.eSet(feature, testString)
 
-    // Set a value
-    obj.eSet(feature, testString)
-    #expect(obj.eIsSet(feature) == true)
+        // Check if set
+        #expect(obj.eIsSet(feature) == true)
+    }
 
-    // Unset the value
-    obj.eUnset(feature)
+    @Test func testEObjectUnset() {
+        let classifier = MockClassifier(name: testClassName)
+        var obj = MockEObject(classifier: classifier)
+        let feature = MockFeature(name: nameFeatureName)
 
-    // Now it's not set
-    #expect(obj.eIsSet(feature) == false)
-    #expect(obj.eGet(feature) == nil)
-}
+        // Set a value
+        obj.eSet(feature, testString)
+        #expect(obj.eIsSet(feature) == true)
 
-@Test func testEObjectMultipleFeatures() {
-    let classifier = MockClassifier(name: testClassName)
-    var obj = MockEObject(classifier: classifier)
-    let nameFeature = MockFeature(name: nameFeatureName)
-    let ageFeature = MockFeature(name: ageFeatureName)
+        // Unset the value
+        obj.eUnset(feature)
 
-    // Set multiple features
-    obj.eSet(nameFeature, johnName)
-    obj.eSet(ageFeature, ageValue)
+        // Verify it's no longer set
+        #expect(obj.eIsSet(feature) == false)
+        #expect(obj.eGet(feature) == nil)
+    }
 
-    // Get multiple features
-    #expect(obj.eGet(nameFeature) as? String == johnName)
-    #expect(obj.eGet(ageFeature) as? Int == ageValue)
+    @Test func testEObjectMultipleFeatures() {
+        let classifier = MockClassifier(name: testClassName)
+        var obj = MockEObject(classifier: classifier)
+        let nameFeature = MockFeature(name: nameFeatureName)
+        let ageFeature = MockFeature(name: ageFeatureName)
 
-    // Both are set
-    #expect(obj.eIsSet(nameFeature) == true)
-    #expect(obj.eIsSet(ageFeature) == true)
-}
+        // Set multiple features
+        obj.eSet(nameFeature, johnName)
+        obj.eSet(ageFeature, ageValue)
 
-@Test func testEObjectSetNilUnsetsFeature() {
-    let classifier = MockClassifier(name: testClassName)
-    var obj = MockEObject(classifier: classifier)
-    let feature = MockFeature(name: nameFeatureName)
+        // Get multiple features
+        #expect(obj.eGet(nameFeature) as? String == johnName)
+        #expect(obj.eGet(ageFeature) as? Int == ageValue)
 
-    // Set a value
-    obj.eSet(feature, testString)
-    #expect(obj.eIsSet(feature) == true)
+        // Both are set
+        #expect(obj.eIsSet(nameFeature) == true)
+        #expect(obj.eIsSet(ageFeature) == true)
+    }
 
-    // Set to nil
-    obj.eSet(feature, nil)
+    @Test func testEObjectSetNilUnsetsFeature() {
+        let classifier = MockClassifier(name: testClassName)
+        var obj = MockEObject(classifier: classifier)
+        let feature = MockFeature(name: nameFeatureName)
 
-    // Now it's not set
-    #expect(obj.eIsSet(feature) == false)
-    #expect(obj.eGet(feature) == nil)
-}
+        // Set a value
+        obj.eSet(feature, testString)
+        #expect(obj.eIsSet(feature) == true)
 
-@Test func testEObjectEquality() {
-    let classifier = MockClassifier(name: testClassName)
-    let id = UUID()
+        // Set to nil
+        obj.eSet(feature, nil)
 
-    let obj1 = MockEObject(id: id, classifier: classifier)
-    let obj2 = MockEObject(id: id, classifier: classifier)
+        // Verify it's unset
+        #expect(obj.eIsSet(feature) == false)
+        #expect(obj.eGet(feature) == nil)
+    }
+    // MARK: - Equality and Hashing Tests
 
-    // Same ID means equal
-    #expect(obj1 == obj2)
-    #expect(obj1.hashValue == obj2.hashValue)
-}
+    @Test func testEObjectEquality() {
+        let classifier = MockClassifier(name: testClassName)
+        let id = UUID()
 
-@Test func testEObjectInequality() {
-    let classifier = MockClassifier(name: testClassName)
+        let obj1 = MockEObject(id: id, classifier: classifier)
+        let obj2 = MockEObject(id: id, classifier: classifier)
 
-    let obj1 = MockEObject(classifier: classifier)
-    let obj2 = MockEObject(classifier: classifier)
+        // Same ID means equal
+        #expect(obj1 == obj2)
+        #expect(obj1.hashValue == obj2.hashValue)
+    }
 
-    // Different IDs means not equal
-    #expect(obj1 != obj2)
-}
+    @Test func testEObjectInequality() {
+        let classifier = MockClassifier(name: testClassName)
 
-@Test func testEObjectStorageInitialization() {
-    let storage = EObjectStorage()
-    let featureID = UUID()
+        let obj1 = MockEObject(classifier: classifier)
+        let obj2 = MockEObject(classifier: classifier)
 
-    #expect(storage.get(feature: featureID) == nil)
-    #expect(storage.isSet(feature: featureID) == false)
-}
+        // Different IDs means not equal
+        #expect(obj1 != obj2)
+    }
 
-@Test func testEObjectStorageSetAndGet() {
-    var storage = EObjectStorage()
-    let featureID = UUID()
+    @Test func testEObjectStorageInitialization() {
+        let storage = EObjectStorage()
+        let featureID = UUID()
 
-    storage.set(feature: featureID, value: testString)
+        #expect(storage.get(feature: featureID) == nil)
+        #expect(storage.isSet(feature: featureID) == false)
+    }
 
-    #expect(storage.get(feature: featureID) as? String == testString)
-    #expect(storage.isSet(feature: featureID) == true)
-}
+    @Test func testEObjectStorageSetAndGet() {
+        var storage = EObjectStorage()
+        let featureID = UUID()
 
-@Test func testEObjectStorageUnset() {
-    var storage = EObjectStorage()
-    let featureID = UUID()
+        storage.set(feature: featureID, value: testString)
 
-    storage.set(feature: featureID, value: testString)
-    storage.unset(feature: featureID)
+        #expect(storage.get(feature: featureID) as? String == testString)
+        #expect(storage.isSet(feature: featureID) == true)
+    }
 
-    #expect(storage.get(feature: featureID) == nil)
-    #expect(storage.isSet(feature: featureID) == false)
-}
+    @Test func testEObjectStorageUnset() {
+        var storage = EObjectStorage()
+        let featureID = UUID()
 
-@Test func testEObjectStorageEquality() {
-    var storage1 = EObjectStorage()
-    var storage2 = EObjectStorage()
-    let featureID = UUID()
+        storage.set(feature: featureID, value: testString)
+        storage.unset(feature: featureID)
 
-    storage1.set(feature: featureID, value: testString)
-    storage2.set(feature: featureID, value: testString)
+        #expect(storage.get(feature: featureID) == nil)
+        #expect(storage.isSet(feature: featureID) == false)
+    }
 
-    #expect(storage1 == storage2)
-}
+    @Test func testEObjectStorageEquality() {
+        var storage1 = EObjectStorage()
+        var storage2 = EObjectStorage()
+        let featureID = UUID()
 
-@Test func testEObjectStorageInequality() {
-    var storage1 = EObjectStorage()
-    var storage2 = EObjectStorage()
-    let featureID = UUID()
+        storage1.set(feature: featureID, value: testString)
+        storage2.set(feature: featureID, value: testString)
 
-    storage1.set(feature: featureID, value: testString)
-    storage2.set(feature: featureID, value: differentValue)
+        #expect(storage1 == storage2)
+    }
 
-    #expect(storage1 != storage2)
-}
+    @Test func testEObjectStorageInequality() {
+        var storage1 = EObjectStorage()
+        var storage2 = EObjectStorage()
+        let featureID = UUID()
 
-@Test func testEObjectStorageHash() {
-    var storage1 = EObjectStorage()
-    var storage2 = EObjectStorage()
-    let featureID = UUID()
+        storage1.set(feature: featureID, value: testString)
+        storage2.set(feature: featureID, value: differentValue)
 
-    storage1.set(feature: featureID, value: testString)
-    storage2.set(feature: featureID, value: testString)
+        #expect(storage1 != storage2)
+    }
 
-    #expect(storage1.hashValue == storage2.hashValue)
-}
+    @Test func testEObjectStorageHash() {
+        var storage1 = EObjectStorage()
+        var storage2 = EObjectStorage()
+        let featureID = UUID()
 
-@Test func testEObjectIsEcoreValue() {
-    // EObject types are automatically EcoreValues, allowing them to be stored
-    let classifier = MockClassifier(name: testClassName)
-    let obj = MockEObject(classifier: classifier)
+        storage1.set(feature: featureID, value: testString)
+        storage2.set(feature: featureID, value: testString)
 
-    // Can be stored as an EcoreValue
-    let value: any EcoreValue = obj
-    #expect(value is MockEObject)
+        #expect(storage1.hashValue == storage2.hashValue)
+    }
 
-    // Can be stored in another object's storage
-    var storage = EObjectStorage()
-    let featureID = UUID()
-    storage.set(feature: featureID, value: obj)
+    @Test func testEObjectIsEcoreValue() {
+        // EObject types are automatically EcoreValues, allowing them to be stored
+        let classifier = MockClassifier(name: testClassName)
+        let obj = MockEObject(classifier: classifier)
 
-    let retrieved = storage.get(feature: featureID)
-    #expect(retrieved is MockEObject)
+        // Can be stored as an EcoreValue
+        let value: any EcoreValue = obj
+        #expect(value is MockEObject)
+
+        // Can be stored in another object's storage
+        var storage = EObjectStorage()
+        let featureID = UUID()
+        storage.set(feature: featureID, value: obj)
+
+        let retrieved = storage.get(feature: featureID) as? MockEObject
+        #expect(retrieved?.id == obj.id)
+    }
 }

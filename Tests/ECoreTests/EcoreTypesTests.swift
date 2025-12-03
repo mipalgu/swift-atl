@@ -35,120 +35,125 @@ private let invalidBoolString = "not a bool"
 private let invalidFloatString = "not a float"
 private let invalidBigIntString = "not a big integer"
 
-@Test func testStringTypeAlias() {
-    let value: EString = testString
-    #expect(value == testString)
-}
+// MARK: - Test Suite
 
-@Test func testIntTypeAlias() {
-    let value: EInt = intValue
-    #expect(value == intValue)
-}
+@Suite("Ecore Types Tests")
+struct EcoreTypesTests {
 
-@Test func testBooleanTypeAlias() {
-    let value: EBoolean = true
-    #expect(value == true)
-}
+    @Test func testStringTypeAlias() {
+        let value: EString = testString
+        #expect(value == testString)
+    }
 
-@Test func testFloatTypeAlias() {
-    let value: EFloat = floatValue
-    #expect(value == floatValue)
-}
+    @Test func testIntTypeAlias() {
+        let value: EInt = intValue
+        #expect(value == intValue)
+    }
 
-@Test func testDoubleTypeAlias() {
-    let value: EDouble = doubleValue
-    #expect(value == doubleValue)
-}
+    @Test func testBooleanTypeAlias() {
+        let value: EBoolean = true
+        #expect(value == true)
+    }
 
-@Test func testByteTypeAlias() {
-    let value: EByte = byteValue
-    #expect(value == byteValue)
-}
+    @Test func testFloatTypeAlias() {
+        let value: EFloat = floatValue
+        #expect(value == floatValue)
+    }
 
-@Test func testShortTypeAlias() {
-    let value: EShort = shortValue
-    #expect(value == shortValue)
-}
+    @Test func testDoubleTypeAlias() {
+        let value: EDouble = doubleValue
+        #expect(value == doubleValue)
+    }
 
-@Test func testLongTypeAlias() {
-    let value: ELong = longValue
-    #expect(value == longValue)
-}
+    @Test func testByteTypeAlias() {
+        let value: EByte = byteValue
+        #expect(value == byteValue)
+    }
 
-@Test func testTypeConversionFromString() {
-    let convertedInt = EcoreTypeConverter.fromString(intString, as: EInt.self)
-    #expect(convertedInt == intValue)
+    @Test func testShortTypeAlias() {
+        let value: EShort = shortValue
+        #expect(value == shortValue)
+    }
 
-    let boolValue = EcoreTypeConverter.fromString(trueString, as: EBoolean.self)
-    #expect(boolValue == true)
+    @Test func testLongTypeAlias() {
+        let value: ELong = longValue
+        #expect(value == longValue)
+    }
 
-    let convertedFloat = EcoreTypeConverter.fromString(floatString, as: EFloat.self)
-    #expect(convertedFloat == floatValue)
+    @Test func testTypeConversionFromString() {
+        let convertedInt = EcoreTypeConverter.fromString(intString, as: EInt.self)
+        #expect(convertedInt == intValue)
 
-    let stringValue = EcoreTypeConverter.fromString(helloString, as: EString.self)
-    #expect(stringValue == helloString)
-}
+        let boolValue = EcoreTypeConverter.fromString(trueString, as: EBoolean.self)
+        #expect(boolValue == true)
 
-@Test func testTypeConversionToString() {
-    let convertedIntString = EcoreTypeConverter.toString(intValue)
-    #expect(convertedIntString == intString)
+        let convertedFloat = EcoreTypeConverter.fromString(floatString, as: EFloat.self)
+        #expect(convertedFloat == floatValue)
 
-    let boolString = EcoreTypeConverter.toString(true)
-    #expect(boolString == trueString)
+        let stringValue = EcoreTypeConverter.fromString(helloString, as: EString.self)
+        #expect(stringValue == helloString)
+    }
 
-    let convertedFloatString = EcoreTypeConverter.toString(floatValue)
-    #expect(convertedFloatString.starts(with: floatString))
+    @Test func testTypeConversionToString() {
+        let convertedIntString = EcoreTypeConverter.toString(intValue)
+        #expect(convertedIntString == intString)
 
-    let stringString = EcoreTypeConverter.toString(helloString)
-    #expect(stringString == helloString)
-}
+        let boolString = EcoreTypeConverter.toString(true)
+        #expect(boolString == trueString)
 
-@Test func testInvalidConversions() {
-    let invalidInt = EcoreTypeConverter.fromString(invalidNumber, as: EInt.self)
-    #expect(invalidInt == nil)
+        let convertedFloatString = EcoreTypeConverter.toString(floatValue)
+        #expect(convertedFloatString.starts(with: floatString))
 
-    let invalidBool = EcoreTypeConverter.fromString(invalidBoolString, as: EBoolean.self)
-    #expect(invalidBool == nil)
+        let stringString = EcoreTypeConverter.toString(helloString)
+        #expect(stringString == helloString)
+    }
 
-    let invalidFloat = EcoreTypeConverter.fromString(invalidFloatString, as: EFloat.self)
-    #expect(invalidFloat == nil)
+    @Test func testInvalidConversions() {
+        let invalidInt = EcoreTypeConverter.fromString(invalidNumber, as: EInt.self)
+        #expect(invalidInt == nil)
 
-    let invalidBigInt = EcoreTypeConverter.fromString(invalidBigIntString, as: EBigInteger.self)
-    #expect(invalidBigInt == nil)
-}
+        let invalidBool = EcoreTypeConverter.fromString(invalidBoolString, as: EBoolean.self)
+        #expect(invalidBool == nil)
 
-@Test func testBigIntegerTypeAlias() {
-    let value: EBigInteger = bigIntValue
-    #expect(value == bigIntValue)
-}
+        let invalidFloat = EcoreTypeConverter.fromString(invalidFloatString, as: EFloat.self)
+        #expect(invalidFloat == nil)
 
-@Test func testBigIntegerFromString() {
-    let convertedBigInt = EcoreTypeConverter.fromString(bigIntString, as: EBigInteger.self)
-    #expect(convertedBigInt == bigIntValue)
-}
+        let invalidBigInt = EcoreTypeConverter.fromString(invalidBigIntString, as: EBigInteger.self)
+        #expect(invalidBigInt == nil)
+    }
 
-@Test func testBigIntegerToString() {
-    let bigIntStringResult = EcoreTypeConverter.toString(bigIntValue)
-    #expect(bigIntStringResult == bigIntString)
-}
+    @Test func testBigIntegerTypeAlias() {
+        let value: EBigInteger = bigIntValue
+        #expect(value == bigIntValue)
+    }
 
-@Test func testBigIntegerIsEcoreValue() {
-    let value: any EcoreValue = bigIntValue
-    #expect(value as? BigInt == bigIntValue)
-}
+    @Test func testBigIntegerFromString() {
+        let convertedBigInt = EcoreTypeConverter.fromString(bigIntString, as: EBigInteger.self)
+        #expect(convertedBigInt == bigIntValue)
+    }
 
-@Test func testVeryLargeBigInteger() {
-    let value: EBigInteger = veryLargeBigIntValue
-    #expect(value == veryLargeBigIntValue)
-    
-    // Verify it's much larger than Int.max
-    #expect(veryLargeBigIntValue > BigInt(Int.max))
-    
-    // Test string conversion round trip
-    let stringResult = EcoreTypeConverter.toString(veryLargeBigIntValue)
-    #expect(stringResult == veryLargeBigIntString)
-    
-    // Test parsing from string
-    let parsedValue = EcoreTypeConverter.fromString(veryLargeBigIntString, as: EBigInteger.self)
-    #expect(parsedValue == veryLargeBigIntValue)
+    @Test func testBigIntegerToString() {
+        let bigIntStringResult = EcoreTypeConverter.toString(bigIntValue)
+        #expect(bigIntStringResult == bigIntString)
+    }
+
+    @Test func testBigIntegerIsEcoreValue() {
+        let value: any EcoreValue = bigIntValue
+        #expect(value as? BigInt == bigIntValue)
+    }
+
+    @Test func testVeryLargeBigInteger() {
+        let value: EBigInteger = veryLargeBigIntValue
+        #expect(value == veryLargeBigIntValue)
+        
+        // Verify it's much larger than Int.max
+        #expect(veryLargeBigIntValue > BigInt(Int.max))
+        
+        // Test string conversion round trip
+        let stringResult = EcoreTypeConverter.toString(veryLargeBigIntValue)
+        #expect(stringResult == veryLargeBigIntString)
+        
+        let parsedBack = EcoreTypeConverter.fromString(veryLargeBigIntString, as: EBigInteger.self)
+        #expect(parsedBack == veryLargeBigIntValue)
+    }
 }

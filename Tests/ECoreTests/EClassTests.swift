@@ -19,348 +19,352 @@ private let animalClassName = "Animal"
 private let birdClassName = "Bird"
 private let comparableInterfaceName = "Comparable"
 
-// MARK: - EClass Creation Tests
+// MARK: - Test Suite
 
-@Test func testEClassCreation() {
-    let eClass = EClass(name: personClassName)
+@Suite("EClass Tests")
+struct EClassTests {
 
-    #expect(eClass.name == personClassName)
-    #expect(eClass.isAbstract == false)
-    #expect(eClass.isInterface == false)
-    #expect(eClass.eSuperTypes.isEmpty)
-    #expect(eClass.eStructuralFeatures.isEmpty)
-    #expect(eClass.eOperations.isEmpty)
-    #expect(eClass.eAnnotations.isEmpty)
-}
+    // MARK: - EClass Creation Tests
 
-@Test func testEClassWithAbstract() {
-    let eClass = EClass(
-        name: animalClassName,
-        isAbstract: true
-    )
+        @Test func testEClassCreation() {
+            let eClass = EClass(name: personClassName)
 
-    #expect(eClass.name == animalClassName)
-    #expect(eClass.isAbstract == true)
-    #expect(eClass.isInterface == false)
-}
+            #expect(eClass.name == personClassName)
+            #expect(eClass.isAbstract == false)
+            #expect(eClass.isInterface == false)
+            #expect(eClass.eSuperTypes.isEmpty)
+            #expect(eClass.eStructuralFeatures.isEmpty)
+            #expect(eClass.eOperations.isEmpty)
+            #expect(eClass.eAnnotations.isEmpty)
+        }
 
-@Test func testEClassAsInterface() {
-    let eClass = EClass(
-        name: comparableInterfaceName,
-        isInterface: true
-    )
+    @Test func testEClassWithAbstract() {
+        let eClass = EClass(
+            name: animalClassName,
+            isAbstract: true
+        )
 
-    #expect(eClass.name == comparableInterfaceName)
-    #expect(eClass.isAbstract == false)
-    #expect(eClass.isInterface == true)
-}
+        #expect(eClass.name == animalClassName)
+        #expect(eClass.isAbstract == true)
+        #expect(eClass.isInterface == false)
+    }
 
-@Test func testEClassWithAnnotations() {
-    let genModelSource = "http://www.eclipse.org/emf/2002/GenModel"
-    let documentationDetail = "Represents a person in the system"
-    let annotation = EAnnotation(
-        source: genModelSource,
-        details: ["documentation": documentationDetail]
-    )
+    @Test func testEClassAsInterface() {
+        let eClass = EClass(
+            name: comparableInterfaceName,
+            isInterface: true
+        )
 
-    let eClass = EClass(
-        name: personClassName,
-        eAnnotations: [annotation]
-    )
+        #expect(eClass.name == comparableInterfaceName)
+        #expect(eClass.isAbstract == false)
+        #expect(eClass.isInterface == true)
+    }
 
-    #expect(eClass.eAnnotations.count == 1)
-    let found = eClass.getEAnnotation(source: genModelSource)
-    #expect(found?.details["documentation"] == documentationDetail)
-}
+    @Test func testEClassWithAnnotations() {
+        let genModelSource = "http://www.eclipse.org/emf/2002/GenModel"
+        let documentationDetail = "Represents a person in the system"
+        let annotation = EAnnotation(
+            source: genModelSource,
+            details: ["documentation": documentationDetail]
+        )
+
+        let eClass = EClass(
+            name: personClassName,
+            eAnnotations: [annotation]
+        )
+
+        #expect(eClass.eAnnotations.count == 1)
+        #expect(eClass.eAnnotations[0].source == genModelSource)
+        #expect(eClass.eAnnotations[0].details["documentation"] == documentationDetail)
+    }
 
 // MARK: - Inheritance Tests
 
-@Test func testEClassWithSingleSupertype() {
-    let person = EClass(name: personClassName)
-    let employee = EClass(
-        name: employeeClassName,
-        eSuperTypes: [person]
-    )
+    @Test func testEClassWithSingleSupertype() {
+        let person = EClass(name: personClassName)
+        let employee = EClass(
+            name: employeeClassName,
+            eSuperTypes: [person]
+        )
 
-    #expect(employee.eSuperTypes.count == 1)
-    #expect(employee.eSuperTypes[0].name == personClassName)
-}
+        #expect(employee.eSuperTypes.count == 1)
+        #expect(employee.eSuperTypes[0].name == personClassName)
+    }
 
-@Test func testEClassWithMultipleSupertypes() {
-    let person = EClass(name: personClassName)
-    let comparable = EClass(name: comparableInterfaceName, isInterface: true)
-    let employee = EClass(
-        name: employeeClassName,
-        eSuperTypes: [person, comparable]
-    )
+    @Test func testEClassWithMultipleSupertypes() {
+        let person = EClass(name: personClassName)
+        let comparable = EClass(name: comparableInterfaceName, isInterface: true)
+        let employee = EClass(
+            name: employeeClassName,
+            eSuperTypes: [person, comparable]
+        )
 
-    #expect(employee.eSuperTypes.count == 2)
-    #expect(employee.eSuperTypes[0].name == personClassName)
-    #expect(employee.eSuperTypes[1].name == comparableInterfaceName)
-}
+        #expect(employee.eSuperTypes.count == 2)
+        #expect(employee.eSuperTypes[0].name == personClassName)
+        #expect(employee.eSuperTypes[1].name == comparableInterfaceName)
+    }
 
-@Test func testAllSuperTypesDirectOnly() {
-    let person = EClass(name: personClassName)
-    let employee = EClass(
-        name: employeeClassName,
-        eSuperTypes: [person]
-    )
+    @Test func testAllSuperTypesDirectOnly() {
+        let person = EClass(name: personClassName)
+        let employee = EClass(
+            name: employeeClassName,
+            eSuperTypes: [person]
+        )
 
-    let allSuper = employee.allSuperTypes
-    #expect(allSuper.count == 1)
-    #expect(allSuper[0].name == personClassName)
-}
+        let allSuper = employee.allSuperTypes
+        #expect(allSuper.count == 1)
+        #expect(allSuper[0].name == personClassName)
+    }
 
-@Test func testAllSuperTypesTransitive() {
-    let person = EClass(name: personClassName)
-    let employee = EClass(
-        name: employeeClassName,
-        eSuperTypes: [person]
-    )
-    let manager = EClass(
-        name: managerClassName,
-        eSuperTypes: [employee]
-    )
+    @Test func testAllSuperTypesTransitive() {
+        let person = EClass(name: personClassName)
+        let employee = EClass(
+            name: employeeClassName,
+            eSuperTypes: [person]
+        )
+        let manager = EClass(
+            name: managerClassName,
+            eSuperTypes: [employee]
+        )
 
-    let allSuper = manager.allSuperTypes
-    #expect(allSuper.count == 2)
-    #expect(allSuper.contains(where: { $0.name == employeeClassName }))
-    #expect(allSuper.contains(where: { $0.name == personClassName }))
-}
+        let allSuper = manager.allSuperTypes
+        #expect(allSuper.count == 2)
+        #expect(allSuper.contains(where: { $0.name == personClassName }))
+        #expect(allSuper.contains(where: { $0.name == employeeClassName }))
+    }
 
-@Test func testAllSuperTypesMultipleInheritance() {
-    let person = EClass(name: personClassName)
-    let comparable = EClass(name: comparableInterfaceName, isInterface: true)
-    let employee = EClass(
-        name: employeeClassName,
-        eSuperTypes: [person, comparable]
-    )
+    @Test func testAllSuperTypesMultipleInheritance() {
+        let person = EClass(name: personClassName)
+        let comparable = EClass(name: comparableInterfaceName, isInterface: true)
+        let employee = EClass(
+            name: employeeClassName,
+            eSuperTypes: [person, comparable]
+        )
 
-    let allSuper = employee.allSuperTypes
-    #expect(allSuper.count == 2)
-    #expect(allSuper.contains(where: { $0.name == personClassName }))
-    #expect(allSuper.contains(where: { $0.name == comparableInterfaceName }))
-}
+        let allSuper = employee.allSuperTypes
+        #expect(allSuper.count == 2)
+        #expect(allSuper.contains(where: { $0.name == personClassName }))
+        #expect(allSuper.contains(where: { $0.name == comparableInterfaceName }))
+    }
 
-@Test func testIsSuperTypeOfDirect() {
-    let person = EClass(name: personClassName)
-    let employee = EClass(
-        name: employeeClassName,
-        eSuperTypes: [person]
-    )
+    @Test func testIsSuperTypeOfDirect() {
+        let person = EClass(name: personClassName)
+        let employee = EClass(
+            name: employeeClassName,
+            eSuperTypes: [person]
+        )
 
-    #expect(person.isSuperTypeOf(employee) == true)
-    #expect(employee.isSuperTypeOf(person) == false)
-}
+        #expect(person.isSuperTypeOf(employee) == true)
+        #expect(employee.isSuperTypeOf(person) == false)
+    }
 
-@Test func testIsSuperTypeOfTransitive() {
-    let person = EClass(name: personClassName)
-    let employee = EClass(
-        name: employeeClassName,
-        eSuperTypes: [person]
-    )
-    let manager = EClass(
-        name: managerClassName,
-        eSuperTypes: [employee]
-    )
+    @Test func testIsSuperTypeOfTransitive() {
+        let person = EClass(name: personClassName)
+        let employee = EClass(
+            name: employeeClassName,
+            eSuperTypes: [person]
+        )
+        let manager = EClass(
+            name: managerClassName,
+            eSuperTypes: [employee]
+        )
 
-    #expect(person.isSuperTypeOf(manager) == true)
-    #expect(employee.isSuperTypeOf(manager) == true)
-    #expect(manager.isSuperTypeOf(person) == false)
-}
+        #expect(person.isSuperTypeOf(manager) == true)
+        #expect(manager.isSuperTypeOf(person) == false)
+    }
 
-@Test func testIsSuperTypeOfUnrelated() {
-    let person = EClass(name: personClassName)
-    let animal = EClass(name: animalClassName)
+    @Test func testIsSuperTypeOfUnrelated() {
+        let person = EClass(name: personClassName)
+        let animal = EClass(name: animalClassName)
 
-    #expect(person.isSuperTypeOf(animal) == false)
-    #expect(animal.isSuperTypeOf(person) == false)
-}
+        #expect(person.isSuperTypeOf(animal) == false)
+        #expect(animal.isSuperTypeOf(person) == false)
+    }
 
 // MARK: - Feature Access Tests
 
-@Test func testEmptyStructuralFeatures() {
-    let eClass = EClass(name: personClassName)
+    @Test func testEmptyStructuralFeatures() {
+        let eClass = EClass(name: personClassName)
 
-    #expect(eClass.eStructuralFeatures.isEmpty)
-    #expect(eClass.allStructuralFeatures.isEmpty)
-    #expect(eClass.allAttributes.isEmpty)
-    #expect(eClass.allReferences.isEmpty)
-}
+        #expect(eClass.eStructuralFeatures.isEmpty)
+        #expect(eClass.allStructuralFeatures.isEmpty)
+        #expect(eClass.allAttributes.isEmpty)
+        #expect(eClass.allReferences.isEmpty)
+    }
 
-@Test func testGetStructuralFeatureNotFound() {
-    let eClass = EClass(name: personClassName)
+    @Test func testGetStructuralFeatureNotFound() {
+        let eClass = EClass(name: personClassName)
 
-    let feature = eClass.getStructuralFeature(name: "nonexistent")
-    #expect(feature == nil)
-}
+        let feature = eClass.getStructuralFeature(name: "nonexistent")
+        #expect(feature == nil)
+    }
 
-@Test func testGetEAttributeNotFound() {
-    let eClass = EClass(name: personClassName)
+    @Test func testGetEAttributeNotFound() {
+        let eClass = EClass(name: personClassName)
 
-    let attribute = eClass.getEAttribute(name: "nonexistent")
-    #expect(attribute == nil)
-}
+        let attribute = eClass.getEAttribute(name: "nonexistent")
+        #expect(attribute == nil)
+    }
 
-@Test func testGetEReferenceNotFound() {
-    let eClass = EClass(name: personClassName)
+    @Test func testGetEReferenceNotFound() {
+        let eClass = EClass(name: personClassName)
 
-    let reference = eClass.getEReference(name: "nonexistent")
-    #expect(reference == nil)
-}
+        let reference = eClass.getEReference(name: "nonexistent")
+        #expect(reference == nil)
+    }
 
-@Test func testAllContainmentsEmpty() {
-    let eClass = EClass(name: personClassName)
+    @Test func testAllContainmentsEmpty() {
+        let eClass = EClass(name: personClassName)
 
-    // Class with no features has no containments
-    #expect(eClass.allContainments.isEmpty)
-}
+        // Class with no features has no containments
+        #expect(eClass.allContainments.isEmpty)
+    }
 
 // MARK: - Equality and Hashing Tests
 
-@Test func testEClassEquality() {
-    let id = EUUID()
-    let class1 = EClass(id: id, name: personClassName)
-    let class2 = EClass(id: id, name: personClassName)
-
-    #expect(class1 == class2)
-    #expect(class1.hashValue == class2.hashValue)
-}
-
-@Test func testEClassInequality() {
-    let class1 = EClass(name: personClassName)
-    let class2 = EClass(name: employeeClassName)
-
-    #expect(class1 != class2)
-}
-
-@Test func testEClassEqualityIgnoresProperties() {
-    let id = EUUID()
-    let class1 = EClass(id: id, name: personClassName, isAbstract: false)
-    let class2 = EClass(id: id, name: employeeClassName, isAbstract: true)
-
-    // Same ID means equal, even with different properties
-    #expect(class1 == class2)
-}
-
-// MARK: - ENamedElement Protocol Tests
-
-@Test func testEClassIsENamedElement() {
-    let eClass = EClass(name: personClassName)
-    let namedElement: any ENamedElement = eClass
-
-    #expect(namedElement is EClass)
-    #expect(namedElement.name == personClassName)
-}
-
-// MARK: - EObject Protocol Tests
-
-@Test func testEClassReflectiveAPI() {
-    // Mock feature for testing
-    struct MockFeature: EStructuralFeature {
+    @Test func testEClassEquality() {
         let id = EUUID()
-        let name = "testFeature"
+        let class1 = EClass(id: id, name: personClassName)
+        let class2 = EClass(id: id, name: personClassName)
+
+        #expect(class1 == class2)
+        #expect(class1.hashValue == class2.hashValue)
     }
 
-    var eClass = EClass(name: personClassName)
-    let feature = MockFeature()
-    let testValue: EString = "testValue"
+    @Test func testEClassInequality() {
+        let class1 = EClass(name: personClassName)
+        let class2 = EClass(name: employeeClassName)
 
-    // Initially not set
-    #expect(eClass.eIsSet(feature) == false)
-    #expect(eClass.eGet(feature) == nil)
+        #expect(class1 != class2)
+    }
 
-    // Set value
-    eClass.eSet(feature, testValue)
-    #expect(eClass.eIsSet(feature) == true)
-    #expect(eClass.eGet(feature) as? EString == testValue)
+    @Test func testEClassEqualityIgnoresProperties() {
+        let id = EUUID()
+        let class1 = EClass(id: id, name: personClassName, isAbstract: false)
+        let class2 = EClass(id: id, name: employeeClassName, isAbstract: true)
 
-    // Unset value
-    eClass.eUnset(feature)
-    #expect(eClass.eIsSet(feature) == false)
-    #expect(eClass.eGet(feature) == nil)
-}
+        // Same ID means equal, even with different properties
+        #expect(class1 == class2)
+    }
+    // MARK: - ENamedElement Protocol Tests
 
-// MARK: - Metaclass Tests
+    @Test func testEClassIsENamedElement() {
+        let eClass = EClass(name: personClassName)
+        let namedElement: any ENamedElement = eClass
 
-@Test func testEClassHasMetaclass() {
-    let eClass = EClass(name: personClassName)
+        #expect(namedElement is EClass)
+        #expect(namedElement.name == personClassName)
+    }
 
-    #expect(eClass.eClass.name == "EClass")
-}
+    // MARK: - EObject Protocol Tests
 
-// MARK: - EcoreValue Protocol Tests
+    @Test func testEClassReflectiveAPI() {
+        // Mock feature for testing
+        struct MockFeature: EStructuralFeature {
+            let id = EUUID()
+            let name = "testFeature"
+        }
 
-@Test func testEClassIsEcoreValue() {
-    let eClass = EClass(name: personClassName)
-    let value: any EcoreValue = eClass
+        var eClass = EClass(name: personClassName)
+        let feature = MockFeature()
+        let testValue: EString = "testValue"
 
-    #expect(value is EClass)
-}
+        // Initially not set
+        #expect(eClass.eIsSet(feature) == false)
+        #expect(eClass.eGet(feature) == nil)
 
-// MARK: - Integration Tests
+        // Set value
+        eClass.eSet(feature, testValue)
+        #expect(eClass.eIsSet(feature) == true)
+        #expect(eClass.eGet(feature) as? EString == testValue)
 
-@Test func testSimpleInheritanceHierarchy() {
-    // Create a simple hierarchy: Animal -> Bird
-    let animal = EClass(
-        name: animalClassName,
-        isAbstract: true
-    )
+        // Unset value
+        eClass.eUnset(feature)
+        #expect(eClass.eIsSet(feature) == false)
+        #expect(eClass.eGet(feature) == nil)
+    }
 
-    let bird = EClass(
-        name: birdClassName,
-        eSuperTypes: [animal]
-    )
+    // MARK: - Metaclass Tests
 
-    #expect(bird.eSuperTypes.count == 1)
-    #expect(bird.allSuperTypes.count == 1)
-    #expect(animal.isSuperTypeOf(bird))
-    #expect(!bird.isSuperTypeOf(animal))
-}
+    @Test func testEClassHasMetaclass() {
+        let eClass = EClass(name: personClassName)
 
-@Test func testCompanyMetamodelHierarchy() {
-    // Based on: emf4cpp/emf4cpp.tests/company/company.ecore
-    // Create: NamedElement -> Person -> Employee, Manager
-    let namedElement = EClass(
-        name: "NamedElement",
-        isAbstract: true
-    )
+        #expect(eClass.eClass.name == "EClass")
+    }
 
-    let person = EClass(
-        name: personClassName,
-        isAbstract: true,
-        eSuperTypes: [namedElement]
-    )
+    // MARK: - EcoreValue Protocol Tests
 
-    let employee = EClass(
-        name: employeeClassName,
-        eSuperTypes: [person]
-    )
+    @Test func testEClassIsEcoreValue() {
+        let eClass = EClass(name: personClassName)
+        let value: any EcoreValue = eClass
 
-    let manager = EClass(
-        name: managerClassName,
-        eSuperTypes: [employee]
-    )
+        #expect(value is EClass)
+    }
 
-    // Verify hierarchy
-    #expect(person.eSuperTypes.count == 1)
-    #expect(employee.eSuperTypes.count == 1)
-    #expect(manager.eSuperTypes.count == 1)
+    // MARK: - Integration Tests
 
-    // Verify transitive supertypes
-    #expect(employee.allSuperTypes.count == 2)  // Person, NamedElement
-    #expect(manager.allSuperTypes.count == 3)   // Employee, Person, NamedElement
+    @Test func testSimpleInheritanceHierarchy() {
+        // Create a simple hierarchy: Animal -> Bird
+        let animal = EClass(
+            name: animalClassName,
+            isAbstract: true
+        )
 
-    // Verify isSuperTypeOf
-    #expect(namedElement.isSuperTypeOf(person))
-    #expect(namedElement.isSuperTypeOf(employee))
-    #expect(namedElement.isSuperTypeOf(manager))
-    #expect(person.isSuperTypeOf(employee))
-    #expect(person.isSuperTypeOf(manager))
-    #expect(employee.isSuperTypeOf(manager))
+        let bird = EClass(
+            name: birdClassName,
+            eSuperTypes: [animal]
+        )
 
-    // Verify reverse is false
-    #expect(!manager.isSuperTypeOf(employee))
-    #expect(!employee.isSuperTypeOf(person))
-    #expect(!person.isSuperTypeOf(namedElement))
+        #expect(bird.eSuperTypes.count == 1)
+        #expect(bird.allSuperTypes.count == 1)
+        #expect(animal.isSuperTypeOf(bird))
+        #expect(!bird.isSuperTypeOf(animal))
+    }
+
+    @Test func testCompanyMetamodelHierarchy() {
+        // Based on: emf4cpp/emf4cpp.tests/company/company.ecore
+        // Create: NamedElement -> Person -> Employee, Manager
+        let namedElement = EClass(
+            name: "NamedElement",
+            isAbstract: true
+        )
+
+        let person = EClass(
+            name: personClassName,
+            isAbstract: true,
+            eSuperTypes: [namedElement]
+        )
+
+        let employee = EClass(
+            name: employeeClassName,
+            eSuperTypes: [person]
+        )
+
+        let manager = EClass(
+            name: managerClassName,
+            eSuperTypes: [employee]
+        )
+
+        // Verify hierarchy
+        #expect(person.eSuperTypes.count == 1)
+        #expect(employee.eSuperTypes.count == 1)
+        #expect(manager.eSuperTypes.count == 1)
+
+        // Verify transitive supertypes
+        #expect(employee.allSuperTypes.count == 2)  // Person, NamedElement
+        #expect(manager.allSuperTypes.count == 3)   // Employee, Person, NamedElement
+
+        // Verify isSuperTypeOf
+        #expect(namedElement.isSuperTypeOf(person))
+        #expect(namedElement.isSuperTypeOf(employee))
+        #expect(namedElement.isSuperTypeOf(manager))
+        #expect(person.isSuperTypeOf(employee))
+        #expect(person.isSuperTypeOf(manager))
+        #expect(employee.isSuperTypeOf(manager))
+
+        // Verify reverse is false
+        #expect(!manager.isSuperTypeOf(employee))
+        #expect(!employee.isSuperTypeOf(person))
+        #expect(!person.isSuperTypeOf(namedElement))
+    }
 }
