@@ -8,9 +8,11 @@ A pure Swift implementation of the Eclipse Modeling Framework (EMF) Ecore metamo
 - ✅ **Cross-Platform**: Full support for macOS and Linux
 - ✅ **Value Types**: Sendable structs and enums for thread safety
 - ✅ **BigInt Support**: Full arbitrary-precision integer support via swift-numerics
+- ✅ **Complete Metamodel**: EClass, EAttribute, EReference, EPackage, EEnum, EDataType
 - ✅ **Resource Infrastructure**: EMF-compliant object management and ID-based reference resolution
-- 🚧 **XMI Serialization**: Load and save .ecore and .xmi files (coming soon)
-- 🚧 **JSON Serialization**: Load and save JSON models (coming soon)
+- ✅ **JSON Serialization**: Load and save JSON models with full round-trip support
+- ✅ **Bidirectional References**: Automatic opposite reference management across resources
+- 🚧 **XMI Serialization**: Load .ecore and .xmi files (parser implemented, serializer in progress)
 - 🚧 **ATL Transformations**: Model-to-model transformations (coming soon)
 - 🚧 **Code Generation**: Generate Swift, C++, C, LLVM IR via ATL (coming soon)
 
