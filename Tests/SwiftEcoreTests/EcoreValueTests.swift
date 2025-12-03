@@ -1,13 +1,13 @@
 //
 // EcoreValueTests.swift
-// SwiftEcore
+// ECore
 //
 //  Created by Rene Hexel on 3/12/2025.
 //  Copyright © 2025 Rene Hexel. All rights reserved.
 //
 import Testing
 import Foundation
-@testable import SwiftEcore
+@testable import ECore
 
 // MARK: - Test Constants
 

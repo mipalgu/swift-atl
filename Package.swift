@@ -8,8 +8,8 @@ let package = Package(
     ],
     products: [
         .library(
-            name: "SwiftEcore",
-            targets: ["SwiftEcore"]
+            name: "ECore",
+            targets: ["ECore"]
         ),
         .executable(
             name: "swift-ecore",
@@ -22,7 +22,7 @@ let package = Package(
     ],
     targets: [
         .target(
-            name: "SwiftEcore",
+            name: "ECore",
             dependencies: [
                 .product(name: "BigInt", package: "BigInt"),
             ],
@@ -33,7 +33,7 @@ let package = Package(
         .executableTarget(
             name: "swift-ecore",
             dependencies: [
-                "SwiftEcore",
+                "ECore",
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
             ],
             swiftSettings: [
@@ -41,8 +41,8 @@ let package = Package(
             ]
         ),
         .testTarget(
-            name: "SwiftEcoreTests",
-            dependencies: ["SwiftEcore"],
+            name: "ECoreTests",
+            dependencies: ["ECore"],
             swiftSettings: [
                 .enableUpcomingFeature("StrictConcurrency")
             ]

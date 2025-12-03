@@ -1,12 +1,12 @@
 //
 // SwiftEcore.swift
-// SwiftEcore
+// ECore
 //
 //  Created by Rene Hexel on 3/12/2025.
 //  Copyright © 2025 Rene Hexel. All rights reserved.
 //
 import ArgumentParser
-import SwiftEcore
+import ECore
 
 @main
 struct SwiftEcoreCommand: ParsableCommand {
