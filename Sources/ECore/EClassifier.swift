@@ -433,19 +433,49 @@ public struct EEnum: EClassifier, ENamedElement {
 // MARK: - Classifier Types
 
 /// Metaclass for `EDataType`.
+///
+/// Describes the structure of `EDataType` itself within the metamodel hierarchy.
+/// This is the classifier that describes all `EDataType` instances.
 public struct EDataTypeClassifier: EClassifier {
+    /// Unique identifier for this metaclass.
+    ///
+    /// Each instance creates its own unique identifier.
     public let id: EUUID = EUUID()
+    
+    /// The name of this classifier.
+    ///
+    /// Always returns `"EDataType"` to identify this as the metaclass for data types.
     public var name: String { "EDataType" }
 }
 
 /// Metaclass for `EEnumLiteral`.
+///
+/// Describes the structure of `EEnumLiteral` itself within the metamodel hierarchy.
+/// This is the classifier that describes all `EEnumLiteral` instances.
 public struct EEnumLiteralClassifier: EClassifier {
+    /// Unique identifier for this metaclass.
+    ///
+    /// Each instance creates its own unique identifier.
     public let id: EUUID = EUUID()
+    
+    /// The name of this classifier.
+    ///
+    /// Always returns `"EEnumLiteral"` to identify this as the metaclass for enum literals.
     public var name: String { "EEnumLiteral" }
 }
 
 /// Metaclass for `EEnum`.
+///
+/// Describes the structure of `EEnum` itself within the metamodel hierarchy.
+/// This is the classifier that describes all `EEnum` instances.
 public struct EEnumClassifier: EClassifier {
+    /// Unique identifier for this metaclass.
+    ///
+    /// Each instance creates its own unique identifier.
     public let id: EUUID = EUUID()
+    
+    /// The name of this classifier.
+    ///
+    /// Always returns `"EEnum"` to identify this as the metaclass for enumerations.
     public var name: String { "EEnum" }
 }

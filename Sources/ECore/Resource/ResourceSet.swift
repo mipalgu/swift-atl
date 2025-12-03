@@ -407,14 +407,15 @@ public actor ResourceSet {
     /// Updates the opposite side of a bidirectional reference across resources.
     ///
     /// This method is used by Resource to coordinate opposite reference updates
-    /// when the target object is in a different resource.
+    /// when the target object is in a different resource. The method automatically
+    /// determines if the opposite reference is multi-valued by examining the
+    /// target object's metamodel.
     ///
     /// - Parameters:
-    ///   - targetId: The ID of the target object to update.
-    ///   - oppositeRefId: The ID of the opposite reference feature.
-    ///   - sourceId: The ID of the source object.
-    ///   - isMany: Whether the opposite reference is multi-valued.
-    ///   - add: Whether to add (true) or remove (false) the relationship.
+    ///   - targetId: The unique identifier of the target object to update.
+    ///   - oppositeRefId: The unique identifier of the opposite reference feature.
+    ///   - sourceId: The unique identifier of the source object establishing the relationship.
+    ///   - add: Whether to add (`true`) or remove (`false`) the bidirectional relationship.
     public func updateOpposite(targetId: EUUID, oppositeRefId: EUUID, sourceId: EUUID, add: Bool) async {
         // Find the resource containing the target object
         for resource in resources.values {
@@ -478,8 +479,15 @@ public actor ResourceSet {
     
     /// Loads a resource using registered factories.
     ///
-    /// - Parameter uri: The URI of the resource to load.
-    /// - Returns: The loaded resource, or `nil` if no factory can handle it.
+    /// Attempts to load a resource using registered resource factories.
+    ///
+    /// Converts the logical URI to a physical URI using the URI converter,
+    /// then searches through registered factories to find one that can handle
+    /// the resource format. If a suitable factory is found, it creates and
+    /// loads the resource into this resource set.
+    ///
+    /// - Parameter uri: The logical URI of the resource to load.
+    /// - Returns: The loaded resource, or `nil` if no factory can handle the URI format.
     private func loadResource(uri: String) -> Resource? {
         let physicalURI = convertURI(uri)
         
@@ -498,7 +506,16 @@ public actor ResourceSet {
         }
     }
     
-    /// Registers default resource factories for standard formats.
+    /// Registers default resource factories for standard EMF serialisation formats.
+    ///
+    /// Sets up built-in factories for common resource types such as XMI and JSON.
+    /// This method is called automatically when factories are first needed,
+    /// providing sensible defaults without requiring explicit configuration.
+    ///
+    /// ## Registered Factories
+    /// - XMI factory for `.xmi` and `.ecore` files
+    /// - JSON factory for `.json` files
+    /// - Generic factory for unknown formats (falls back to XMI)
     private func registerDefaultFactories() {
         // XMI factory would be registered here
         // JSON factory would be registered here

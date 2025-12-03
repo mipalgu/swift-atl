@@ -123,11 +123,6 @@ public protocol EObject: EcoreValue {
     mutating func eUnset(_ feature: some EStructuralFeature)
 }
 
-// Provide Identifiable conformance
-extension EObject {
-    public var id: EUUID { id }
-}
-
 // MARK: - Helper Types
 
 /// Internal storage for feature values in an `EObject`.

@@ -11,29 +11,49 @@ import Foundation
 
 /// Utilities for working with EMF-compliant URIs
 private enum EMFURIUtils {
-    /// Generates an EMF URI for a classifier within a package
-    /// Format: "nsURI#//ClassName"
+    /// Generates an EMF URI for a classifier within a package.
+    ///
+    /// Creates URIs following the EMF standard format: "nsURI#//ClassName".
+    /// If the package has no namespace URI, falls back to using just the classifier name.
+    ///
+    /// - Parameters:
+    ///   - classifier: The classifier to generate a URI for.
+    ///   - package: The package containing the classifier (optional).
+    /// - Returns: An EMF-compliant URI string for the classifier.
     static func generateURI(for classifier: any EClassifier, in package: EPackage?) -> String {
         guard let package = package, !package.nsURI.isEmpty else {
             return classifier.name // Fall back to simple name
         }
         return "\(package.nsURI)#//\(classifier.name)"
     }
-    
-    /// Extracts the class name from an EMF URI or returns the original string if it's a simple name
-    /// Examples:
-    /// - "http://mytest/1.0#//Person" -> "Person"
-    /// - "Person" -> "Person"
+
+    /// Extracts the class name from an EMF URI or returns the original string if it's a simple name.
+    ///
+    /// Parses EMF URIs to extract just the classifier name portion. If the input
+    /// doesn't follow EMF URI format, returns the input unchanged.
+    ///
+    /// ## Examples
+    /// - `"http://mytest/1.0#//Person"` → `"Person"`
+    /// - `"Person"` → `"Person"`
+    ///
+    /// - Parameter uri: The URI string to parse (may be a simple name or full EMF URI).
+    /// - Returns: The extracted class name from the URI fragment, or the original string.
     static func extractClassName(from uri: String) -> String {
         if let fragmentRange = uri.range(of: "#//") {
             return String(uri[fragmentRange.upperBound...])
         }
         return uri
     }
-    
-    /// Checks if a string is an EMF URI (contains "#//")
+
+    /// Checks if a string is an EMF URI by looking for the standard fragment separator.
+    ///
+    /// EMF URIs contain the fragment separator "#//" which distinguishes them from
+    /// simple class names or other URI formats.
+    ///
+    /// - Parameter string: The string to test for EMF URI format.
+    /// - Returns: `true` if the string contains the EMF fragment separator "#//", `false` otherwise.
     static func isEMFURI(_ string: String) -> Bool {
-        return string.contains("#//")
+        return URL(string: string) != nil && string.contains("#//")
     }
 }
 
@@ -132,9 +152,9 @@ public struct DynamicEObject: EObject {
     public mutating func eUnset(_ feature: some EStructuralFeature) {
         storage.unset(feature: feature.id)
     }
-    
+
     // MARK: - String-based Convenience Methods
-    
+
     /// Reflectively retrieves the value of a feature by name.
     ///
     /// - Parameter featureName: The name of the structural feature to retrieve.
@@ -145,7 +165,7 @@ public struct DynamicEObject: EObject {
         }
         return eGet(feature)
     }
-    
+
     /// Reflectively sets the value of a feature by name.
     ///
     /// - Parameters:
@@ -157,7 +177,7 @@ public struct DynamicEObject: EObject {
         }
         eSet(feature, value)
     }
-    
+
     /// Checks whether a feature has been explicitly set by name.
     ///
     /// - Parameter featureName: The name of the structural feature to check.
@@ -168,7 +188,7 @@ public struct DynamicEObject: EObject {
         }
         return eIsSet(feature)
     }
-    
+
     /// Unsets a feature by name, returning it to its default value.
     ///
     /// - Parameter featureName: The name of the structural feature to unset.
@@ -227,7 +247,7 @@ extension DynamicEObject: Codable {
 
         // Get package context from userInfo if available
         let package = encoder.userInfo[.ePackageKey] as? EPackage
-        
+
         // Encode the eClass as EMF URI or simple name
         let eClassIdentifier = EMFURIUtils.generateURI(for: eClass, in: package)
         try container.encode(eClassIdentifier, forKey: DynamicCodingKey(stringValue: "eClass")!)
@@ -318,7 +338,19 @@ extension DynamicEObject: Codable {
         }
     }
 
-    /// Helper to decode an attribute value.
+    /// Helper to decode an attribute value from JSON with type coercion.
+    ///
+    /// Decodes an attribute value from the JSON container, performing reasonable
+    /// type coercion when possible (e.g., converting numbers to strings for EString attributes).
+    /// Supports all standard Ecore data types with fallback to string representation.
+    ///
+    /// - Parameters:
+    ///   - attribute: The attribute metadata defining the expected type and constraints.
+    ///   - container: The keyed decoding container containing the JSON data.
+    ///   - key: The dynamic coding key identifying the attribute in the JSON.
+    ///   - decoder: The decoder instance for error reporting and context.
+    /// - Returns: The decoded value as an `EcoreValue`, or `nil` if the key is not present.
+    /// - Throws: `DecodingError` if the value cannot be converted to the expected type.
     private func decodeValue(
         for attribute: EAttribute,
         from container: KeyedDecodingContainer<DynamicCodingKey>,
@@ -426,15 +458,25 @@ extension DynamicEObject: Codable {
             )
         }
     }
-    
-    /// Helper to parse date from string using multiple formats (EMF-compatible)
+
+    /// Helper to parse date from string using multiple EMF-compatible formats.
+    ///
+    /// Attempts to parse date strings using various formats commonly used in EMF:
+    /// - ISO 8601 format (preferred)
+    /// - PyEcore format with microseconds
+    /// - Standard date-time format without microseconds
+    /// - Simple date format (yyyy-MM-dd)
+    ///
+    /// - Parameter dateString: The string representation of the date to parse.
+    /// - Returns: The parsed date as an `EDate`.
+    /// - Throws: `DecodingError` if the string cannot be parsed using any supported format.
     private func parseDate(from dateString: String) throws -> EDate {
         // Try ISO8601 first
         let iso8601Formatter = ISO8601DateFormatter()
         if let date = iso8601Formatter.date(from: dateString) {
             return date
         }
-        
+
         // Try pyecore format: %Y-%m-%dT%H:%M:%S.%f%z
         let pyecoreFormatter = DateFormatter()
         pyecoreFormatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSSSSSXXXXX"
@@ -442,19 +484,19 @@ extension DynamicEObject: Codable {
         if let date = pyecoreFormatter.date(from: dateString) {
             return date
         }
-        
+
         // Try without microseconds: %Y-%m-%dT%H:%M:%S%z
         pyecoreFormatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ssXXXXX"
         if let date = pyecoreFormatter.date(from: dateString) {
             return date
         }
-        
+
         // Try basic ISO format without timezone
         pyecoreFormatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
         if let date = pyecoreFormatter.date(from: dateString) {
             return date
         }
-        
+
         throw DecodingError.dataCorrupted(
             DecodingError.Context(
                 codingPath: [],
@@ -463,7 +505,19 @@ extension DynamicEObject: Codable {
         )
     }
 
-    /// Helper to decode a reference value.
+    /// Helper to decode a reference value from JSON.
+    ///
+    /// Decodes references as URI strings that can be resolved to actual objects.
+    /// Multi-valued references are represented as arrays of URI strings.
+    /// Currently simplified for basic URI-based cross-references.
+    ///
+    /// - Parameters:
+    ///   - reference: The reference metadata defining multiplicity and target type.
+    ///   - container: The keyed decoding container containing the JSON data.
+    ///   - key: The dynamic coding key identifying the reference in the JSON.
+    ///   - decoder: The decoder instance for error reporting and context.
+    /// - Returns: The decoded reference value(s), or `nil` if not implemented or not present.
+    /// - Throws: `DecodingError` if the reference structure is invalid.
     private func decodeReference(
         for reference: EReference,
         from container: KeyedDecodingContainer<DynamicCodingKey>,
@@ -488,7 +542,18 @@ extension DynamicEObject: Codable {
         }
     }
 
-    /// Helper to encode an attribute value.
+    /// Helper to encode an attribute value to JSON.
+    ///
+    /// Encodes attribute values using appropriate JSON representations for each
+    /// Ecore data type. Handles special cases like dates (ISO 8601 format) and
+    /// maintains type fidelity where possible.
+    ///
+    /// - Parameters:
+    ///   - value: The attribute value to encode.
+    ///   - attribute: The attribute metadata for type information.
+    ///   - container: The keyed encoding container to write the value to.
+    ///   - key: The dynamic coding key identifying the attribute in the JSON.
+    /// - Throws: `EncodingError` if the value cannot be encoded to the expected format.
     private func encodeValue(
         _ value: any EcoreValue,
         for attribute: EAttribute,
@@ -520,7 +585,18 @@ extension DynamicEObject: Codable {
         }
     }
 
-    /// Helper to encode a reference value.
+    /// Helper to encode a reference value to JSON.
+    ///
+    /// Encodes references as URI strings for cross-reference resolution.
+    /// Multi-valued references are encoded as JSON arrays of URI strings.
+    /// Currently simplified for basic URI-based serialisation.
+    ///
+    /// - Parameters:
+    ///   - value: The reference value(s) to encode.
+    ///   - reference: The reference metadata for multiplicity information.
+    ///   - container: The keyed encoding container to write the value to.
+    ///   - key: The dynamic coding key identifying the reference in the JSON.
+    /// - Throws: `EncodingError` if the reference structure cannot be serialised.
     private func encodeReference(
         _ value: any EcoreValue,
         for reference: EReference,
@@ -577,7 +653,7 @@ extension CodingUserInfoKey {
     /// let employee = try decoder.decode(DynamicEObject.self, from: jsonData)
     /// ```
     public static let eClassKey = CodingUserInfoKey(rawValue: "eClass")!
-    
+
     /// Key for providing EPackage context during JSON encoding.
     ///
     /// Use this key to pass the EPackage to the encoder's userInfo for EMF-compliant URIs:
