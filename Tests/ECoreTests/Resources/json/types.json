@@ -1,0 +1,9 @@
+{
+  "eClass": "http://mytest/1.0#//Record",
+  "stringValue": "Hello World",
+  "intValue": 42,
+  "doubleValue": 3.14159,
+  "floatValue": 2.718,
+  "booleanValue": true,
+  "dateValue": "2023-12-01T10:30:00Z"
+}

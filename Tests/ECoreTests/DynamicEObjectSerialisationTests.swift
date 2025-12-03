@@ -41,7 +41,10 @@ private let boolTypeName = "EBoolean"
     let encoder = JSONEncoder()
     encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
     let jsonData = try encoder.encode(person)
-    let jsonString = String(data: jsonData, encoding: .utf8)!
+    guard let jsonString = String(data: jsonData, encoding: .utf8) else {
+        #expect(Bool(false), "Failed to convert JSON data to string")
+        return
+    }
 
     // Verify JSON structure
     #expect(jsonString.contains("\"eClass\" : \"Person\""))
@@ -64,7 +67,10 @@ private let boolTypeName = "EBoolean"
 
     let encoder = JSONEncoder()
     let jsonData = try encoder.encode(person)
-    let jsonString = String(data: jsonData, encoding: .utf8)!
+    guard let jsonString = String(data: jsonData, encoding: .utf8) else {
+        #expect(Bool(false), "Failed to convert JSON data to string")
+        return
+    }
 
     #expect(jsonString.contains("\"eClass\""))
     #expect(jsonString.contains("\"name\""))
@@ -85,7 +91,10 @@ private let boolTypeName = "EBoolean"
 
     let encoder = JSONEncoder()
     let jsonData = try encoder.encode(person)
-    let jsonString = String(data: jsonData, encoding: .utf8)!
+    guard let jsonString = String(data: jsonData, encoding: .utf8) else {
+        #expect(Bool(false), "Failed to convert JSON data to string")
+        return
+    }
 
     #expect(jsonString.contains("\"active\""))
     #expect(jsonString.contains("true"))
@@ -110,7 +119,10 @@ private let boolTypeName = "EBoolean"
 
     let encoder = JSONEncoder()
     let jsonData = try encoder.encode(person)
-    let jsonString = String(data: jsonData, encoding: .utf8)!
+    guard let jsonString = String(data: jsonData, encoding: .utf8) else {
+        #expect(Bool(false), "Failed to convert JSON data to string")
+        return
+    }
 
     // Should only include set attributes
     #expect(jsonString.contains("\"name\""))
@@ -140,7 +152,10 @@ private let boolTypeName = "EBoolean"
         "age": 25
     }
     """
-    let jsonData = json.data(using: .utf8)!
+    guard let jsonData = json.data(using: .utf8) else {
+        #expect(Bool(false), "Failed to convert JSON string to data")
+        return
+    }
 
     // Decode
     let decoder = JSONDecoder()
@@ -173,7 +188,10 @@ private let boolTypeName = "EBoolean"
         "name": "Eve"
     }
     """
-    let jsonData = json.data(using: .utf8)!
+    guard let jsonData = json.data(using: .utf8) else {
+        #expect(Bool(false), "Failed to convert JSON string to data")
+        return
+    }
 
     // Decode
     let decoder = JSONDecoder()
@@ -261,7 +279,10 @@ private let boolTypeName = "EBoolean"
         "name": "Grace"
     }
     """
-    let jsonData = json.data(using: .utf8)!
+    guard let jsonData = json.data(using: .utf8) else {
+        #expect(Bool(false), "Failed to convert JSON string to data")
+        return
+    }
 
     let decoder = JSONDecoder()
     // Don't set userInfo - should fail
@@ -288,7 +309,10 @@ private let boolTypeName = "EBoolean"
         "name": "Henry"
     }
     """
-    let jsonData = json.data(using: .utf8)!
+    guard let jsonData = json.data(using: .utf8) else {
+        #expect(Bool(false), "Failed to convert JSON string to data")
+        return
+    }
 
     let decoder = JSONDecoder()
     decoder.userInfo[.eClassKey] = personClass

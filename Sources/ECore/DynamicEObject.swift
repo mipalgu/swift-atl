@@ -7,6 +7,36 @@
 //
 import Foundation
 
+// MARK: - EMF URI Utilities
+
+/// Utilities for working with EMF-compliant URIs
+private enum EMFURIUtils {
+    /// Generates an EMF URI for a classifier within a package
+    /// Format: "nsURI#//ClassName"
+    static func generateURI(for classifier: any EClassifier, in package: EPackage?) -> String {
+        guard let package = package, !package.nsURI.isEmpty else {
+            return classifier.name // Fall back to simple name
+        }
+        return "\(package.nsURI)#//\(classifier.name)"
+    }
+    
+    /// Extracts the class name from an EMF URI or returns the original string if it's a simple name
+    /// Examples:
+    /// - "http://mytest/1.0#//Person" -> "Person"
+    /// - "Person" -> "Person"
+    static func extractClassName(from uri: String) -> String {
+        if let fragmentRange = uri.range(of: "#//") {
+            return String(uri[fragmentRange.upperBound...])
+        }
+        return uri
+    }
+    
+    /// Checks if a string is an EMF URI (contains "#//")
+    static func isEMFURI(_ string: String) -> Bool {
+        return string.contains("#//")
+    }
+}
+
 // MARK: - DynamicEObject
 
 /// A dynamic implementation of `EObject` that stores feature values generically.
@@ -141,15 +171,20 @@ extension DynamicEObject: Codable {
 
     /// Encodes this object to JSON.
     ///
-    /// Produces JSON in pyecore format with the eClass name and feature values.
+    /// Produces JSON in EMF-compliant format with the eClass URI and feature values.
+    /// Uses EMF URI format when package context is available, otherwise falls back to simple name.
     ///
     /// - Parameter encoder: The encoder to write data to.
     /// - Throws: Encoding errors if serialization fails.
     public func encode(to encoder: Encoder) throws {
         var container = encoder.container(keyedBy: DynamicCodingKey.self)
 
-        // Encode the eClass name
-        try container.encode(eClass.name, forKey: DynamicCodingKey(stringValue: "eClass")!)
+        // Get package context from userInfo if available
+        let package = encoder.userInfo[.ePackageKey] as? EPackage
+        
+        // Encode the eClass as EMF URI or simple name
+        let eClassIdentifier = EMFURIUtils.generateURI(for: eClass, in: package)
+        try container.encode(eClassIdentifier, forKey: DynamicCodingKey(stringValue: "eClass")!)
 
         // Encode all set attributes
         for attribute in eClass.allAttributes {
@@ -187,8 +222,8 @@ extension DynamicEObject: Codable {
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: DynamicCodingKey.self)
 
-        // Decode the eClass name (for validation)
-        let eClassName = try container.decode(String.self, forKey: DynamicCodingKey(stringValue: "eClass")!)
+        // Decode the eClass identifier (can be EMF URI or simple name)
+        let eClassIdentifier = try container.decode(String.self, forKey: DynamicCodingKey(stringValue: "eClass")!)
 
         // Get EClass from userInfo
         guard let eClass = decoder.userInfo[.eClassKey] as? EClass else {
@@ -200,12 +235,13 @@ extension DynamicEObject: Codable {
             )
         }
 
-        // Validate eClass name matches
-        guard eClass.name == eClassName else {
+        // Extract class name from EMF URI if needed and validate
+        let extractedClassName = EMFURIUtils.extractClassName(from: eClassIdentifier)
+        guard eClass.name == extractedClassName else {
             throw DecodingError.dataCorrupted(
                 DecodingError.Context(
                     codingPath: decoder.codingPath,
-                    debugDescription: "EClass name mismatch: expected \(eClass.name), got \(eClassName)"
+                    debugDescription: "EClass name mismatch: expected \(eClass.name), got \(extractedClassName) (from \(eClassIdentifier))"
                 )
             )
         }
@@ -218,8 +254,12 @@ extension DynamicEObject: Codable {
         // Decode all attributes
         for attribute in eClass.allAttributes {
             let key = DynamicCodingKey(stringValue: attribute.name)!
-            if let value = try? decodeValue(for: attribute, from: container, key: key) {
-                storage.set(feature: attribute.id, value: value)
+            // Only skip if the key is not present, but throw errors for type mismatches
+            if container.contains(key) {
+                let value = try decodeValue(for: attribute, from: container, key: key, decoder: decoder)
+                if let value = value {
+                    storage.set(feature: attribute.id, value: value)
+                }
             }
         }
 
@@ -236,26 +276,145 @@ extension DynamicEObject: Codable {
     private func decodeValue(
         for attribute: EAttribute,
         from container: KeyedDecodingContainer<DynamicCodingKey>,
-        key: DynamicCodingKey
+        key: DynamicCodingKey,
+        decoder: Decoder
     ) throws -> (any EcoreValue)? {
         // Determine the expected type from the attribute's eType
         let typeName = attribute.eType.name
 
         switch typeName {
         case "EString":
-            return try container.decode(EString.self, forKey: key)
+            // Try to decode as string, but allow reasonable coercion
+            if let stringValue = try? container.decode(EString.self, forKey: key) {
+                return stringValue
+            } else if let intValue = try? container.decode(EInt.self, forKey: key) {
+                return String(intValue)
+            } else if let doubleValue = try? container.decode(EDouble.self, forKey: key) {
+                return String(doubleValue)
+            } else if let boolValue = try? container.decode(EBoolean.self, forKey: key) {
+                return String(boolValue)
+            } else {
+                throw DecodingError.typeMismatch(EString.self, DecodingError.Context(
+                    codingPath: decoder.codingPath + [key],
+                    debugDescription: "Cannot convert value to EString"
+                ))
+            }
         case "EInt", "EIntegerObject":
-            return try container.decode(EInt.self, forKey: key)
+            // Try to decode as int, reject invalid strings
+            if let intValue = try? container.decode(EInt.self, forKey: key) {
+                return intValue
+            } else if let stringValue = try? container.decode(EString.self, forKey: key),
+                      let convertedInt = EInt(stringValue) {
+                return convertedInt
+            } else {
+                throw DecodingError.typeMismatch(EInt.self, DecodingError.Context(
+                    codingPath: decoder.codingPath + [key],
+                    debugDescription: "Cannot convert value to EInt"
+                ))
+            }
         case "EBoolean", "EBooleanObject":
-            return try container.decode(EBoolean.self, forKey: key)
+            // Try to decode as boolean, reject invalid strings
+            if let boolValue = try? container.decode(EBoolean.self, forKey: key) {
+                return boolValue
+            } else if let stringValue = try? container.decode(EString.self, forKey: key) {
+                let lowercased = stringValue.lowercased()
+                if lowercased == "true" {
+                    return true
+                } else if lowercased == "false" {
+                    return false
+                } else {
+                    throw DecodingError.typeMismatch(EBoolean.self, DecodingError.Context(
+                        codingPath: decoder.codingPath + [key],
+                        debugDescription: "Cannot convert '\(stringValue)' to EBoolean"
+                    ))
+                }
+            } else {
+                throw DecodingError.typeMismatch(EBoolean.self, DecodingError.Context(
+                    codingPath: decoder.codingPath + [key],
+                    debugDescription: "Cannot convert value to EBoolean"
+                ))
+            }
         case "EDouble", "EDoubleObject":
-            return try container.decode(EDouble.self, forKey: key)
+            if let doubleValue = try? container.decode(EDouble.self, forKey: key) {
+                return doubleValue
+            } else if let stringValue = try? container.decode(EString.self, forKey: key),
+                      let convertedDouble = EDouble(stringValue) {
+                return convertedDouble
+            } else {
+                throw DecodingError.typeMismatch(EDouble.self, DecodingError.Context(
+                    codingPath: decoder.codingPath + [key],
+                    debugDescription: "Cannot convert value to EDouble"
+                ))
+            }
         case "EFloat", "EFloatObject":
-            return try container.decode(EFloat.self, forKey: key)
+            if let floatValue = try? container.decode(EFloat.self, forKey: key) {
+                return floatValue
+            } else if let stringValue = try? container.decode(EString.self, forKey: key),
+                      let convertedFloat = EFloat(stringValue) {
+                return convertedFloat
+            } else {
+                throw DecodingError.typeMismatch(EFloat.self, DecodingError.Context(
+                    codingPath: decoder.codingPath + [key],
+                    debugDescription: "Cannot convert value to EFloat"
+                ))
+            }
+        case "EDate":
+            // Be forgiving with date formats - try multiple approaches
+            if let dateValue = try? container.decode(EDate.self, forKey: key) {
+                return dateValue
+            } else if let stringValue = try? container.decode(EString.self, forKey: key) {
+                return try parseDate(from: stringValue)
+            } else {
+                throw DecodingError.typeMismatch(EDate.self, DecodingError.Context(
+                    codingPath: decoder.codingPath + [key],
+                    debugDescription: "Cannot convert value to EDate"
+                ))
+            }
         default:
-            // For custom types, try string
-            return try container.decode(EString.self, forKey: key)
+            // For unsupported types, throw an error for type safety
+            throw DecodingError.dataCorrupted(
+                DecodingError.Context(
+                    codingPath: decoder.codingPath + [key],
+                    debugDescription: "Unsupported attribute type: \(typeName)"
+                )
+            )
         }
+    }
+    
+    /// Helper to parse date from string using multiple formats (EMF-compatible)
+    private func parseDate(from dateString: String) throws -> EDate {
+        // Try ISO8601 first
+        let iso8601Formatter = ISO8601DateFormatter()
+        if let date = iso8601Formatter.date(from: dateString) {
+            return date
+        }
+        
+        // Try pyecore format: %Y-%m-%dT%H:%M:%S.%f%z
+        let pyecoreFormatter = DateFormatter()
+        pyecoreFormatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSSSSSXXXXX"
+        pyecoreFormatter.timeZone = TimeZone(secondsFromGMT: 0)
+        if let date = pyecoreFormatter.date(from: dateString) {
+            return date
+        }
+        
+        // Try without microseconds: %Y-%m-%dT%H:%M:%S%z
+        pyecoreFormatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ssXXXXX"
+        if let date = pyecoreFormatter.date(from: dateString) {
+            return date
+        }
+        
+        // Try basic ISO format without timezone
+        pyecoreFormatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
+        if let date = pyecoreFormatter.date(from: dateString) {
+            return date
+        }
+        
+        throw DecodingError.dataCorrupted(
+            DecodingError.Context(
+                codingPath: [],
+                debugDescription: "Invalid date format: \(dateString)"
+            )
+        )
     }
 
     /// Helper to decode a reference value.
@@ -302,6 +461,13 @@ extension DynamicEObject: Codable {
             try container.encode(double, forKey: key)
         case let float as Float:
             try container.encode(float, forKey: key)
+        case let date as Date:
+            // Format date to match pyecore: %Y-%m-%dT%H:%M:%S.%f%z
+            let formatter = DateFormatter()
+            formatter.dateFormat = "yyyy-MM-dd'T'HH:mm:ss.SSSSSSXXXXX"
+            formatter.timeZone = TimeZone(secondsFromGMT: 0)
+            let dateString = formatter.string(from: date)
+            try container.encode(dateString, forKey: key)
         default:
             // For other types, use string representation
             try container.encode(String(describing: value), forKey: key)
@@ -365,4 +531,15 @@ extension CodingUserInfoKey {
     /// let employee = try decoder.decode(DynamicEObject.self, from: jsonData)
     /// ```
     public static let eClassKey = CodingUserInfoKey(rawValue: "eClass")!
+    
+    /// Key for providing EPackage context during JSON encoding.
+    ///
+    /// Use this key to pass the EPackage to the encoder's userInfo for EMF-compliant URIs:
+    ///
+    /// ```swift
+    /// let encoder = JSONEncoder()
+    /// encoder.userInfo[.ePackageKey] = myPackage
+    /// let jsonData = try encoder.encode(dynamicObject)
+    /// ```
+    public static let ePackageKey = CodingUserInfoKey(rawValue: "ePackage")!
 }

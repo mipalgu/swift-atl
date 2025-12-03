@@ -1,0 +1,19 @@
+{
+  "eClass": "http://mytest/1.0#//Person",
+  "name": "Alice",
+  "age": 35,
+  "children": [
+    {
+      "eClass": "http://mytest/1.0#//Person",
+      "name": "Bob",
+      "age": 12,
+      "children": []
+    },
+    {
+      "eClass": "http://mytest/1.0#//Person", 
+      "name": "Charlie",
+      "age": 8,
+      "children": []
+    }
+  ]
+}

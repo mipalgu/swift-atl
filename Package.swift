@@ -43,6 +43,9 @@ let package = Package(
         .testTarget(
             name: "ECoreTests",
             dependencies: ["ECore"],
+            resources: [
+                .copy("Resources")
+            ],
             swiftSettings: [
                 .enableUpcomingFeature("StrictConcurrency")
             ]

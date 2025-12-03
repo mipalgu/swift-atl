@@ -1,0 +1,6 @@
+{
+  "eClass": "http://mytest/1.0#//Person",
+  "name": 12345,
+  "age": "not a number",
+  "active": "not a boolean"
+}

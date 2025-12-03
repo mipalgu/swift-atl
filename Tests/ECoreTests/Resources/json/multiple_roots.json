@@ -1,0 +1,18 @@
+[
+  {
+    "eClass": "http://mytest/1.0#//Person",
+    "name": "Alice",
+    "age": 30
+  },
+  {
+    "eClass": "http://mytest/1.0#//Person", 
+    "name": "Bob",
+    "age": 25
+  },
+  {
+    "eClass": "http://mytest/1.0#//Record",
+    "stringValue": "Test Record",
+    "intValue": 42,
+    "booleanValue": true
+  }
+]
