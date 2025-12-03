@@ -244,3 +244,21 @@ struct MockEObject: EObject {
 
     #expect(storage1.hashValue == storage2.hashValue)
 }
+
+@Test func testEObjectIsEcoreValue() {
+    // EObject types are automatically EcoreValues, allowing them to be stored
+    let classifier = MockClassifier(name: "TestClass")
+    let obj = MockEObject(classifier: classifier)
+
+    // Can be stored as an EcoreValue
+    let value: any EcoreValue = obj
+    #expect(value is MockEObject)
+
+    // Can be stored in another object's storage
+    var storage = EObjectStorage()
+    let featureID = UUID()
+    storage.set(feature: featureID, value: obj)
+
+    let retrieved = storage.get(feature: featureID)
+    #expect(retrieved is MockEObject)
+}

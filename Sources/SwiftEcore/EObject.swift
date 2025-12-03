@@ -78,7 +78,10 @@ extension EObject {
 
 // MARK: - Helper Types
 
-/// Storage for feature values in an EObject
+/// Internal storage for feature values in an EObject.
+///
+/// This is a helper type and does NOT conform to EObject itself.
+/// It provides the storage mechanism for types that DO conform to EObject.
 public struct EObjectStorage: Sendable {
     private var values: [EUUID: any EcoreValue]
     private var isset: Set<EUUID>
