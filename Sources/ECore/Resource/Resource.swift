@@ -53,7 +53,8 @@ public actor Resource {
     ///
     /// Root objects serve as entry points for model traversal and are typically
     /// the top-level objects that contain the entire model hierarchy.
-    private var rootObjects: Set<EUUID>
+    /// Maintains insertion order.
+    private var rootObjects: [EUUID]
     
     /// The resource set that owns this resource, if any.
     ///
@@ -67,9 +68,16 @@ public actor Resource {
     public init(uri: String = "resource://\(UUID().uuidString)") {
         self.uri = uri
         self.objects = [:]
-        self.rootObjects = Set()
+        self.rootObjects = []
     }
-    
+
+    /// Sets the resource set that owns this resource.
+    ///
+    /// - Parameter resourceSet: The resource set to associate with this resource.
+    public func setResourceSet(_ resourceSet: ResourceSet?) {
+        self.resourceSet = resourceSet
+    }
+
     // MARK: - Object Management
     
     /// Adds an object to this resource.
@@ -81,26 +89,30 @@ public actor Resource {
     /// - Returns: `true` if the object was added, `false` if it already exists.
     @discardableResult
     public func add(_ object: any EObject) -> Bool {
-        guard objects[object.id] == nil else { return false }
-        
+        let isNew = objects[object.id] == nil
+
+        // Update or add the object
         objects[object.id] = object
         
-        // Check if this is a root object (not contained by another)
-        let isContained = objects.values.contains { container in
-            // Check if any object contains this one through containment references
-            if let eClass = container.eClass as? EClass {
-                return eClass.allReferences.contains { reference in
-                    reference.containment && doesObjectContain(container, objectId: object.id, through: reference)
+        // Only update root objects if this was a new object
+        if isNew {
+            // Check if this is a root object (not contained by another)
+            let isContained = objects.values.contains { container in
+                // Check if any object contains this one through containment references
+                if let eClass = container.eClass as? EClass {
+                    return eClass.allReferences.contains { reference in
+                        reference.containment && doesObjectContain(container, objectId: object.id, through: reference)
+                    }
                 }
+                return false
             }
-            return false
+
+            if !isContained && !rootObjects.contains(object.id) {
+                rootObjects.append(object.id)
+            }
         }
-        
-        if !isContained {
-            rootObjects.insert(object.id)
-        }
-        
-        return true
+
+        return isNew
     }
     
     /// Removes an object from this resource.
@@ -119,7 +131,7 @@ public actor Resource {
     @discardableResult
     public func remove(id: EUUID) -> Bool {
         guard objects.removeValue(forKey: id) != nil else { return false }
-        rootObjects.remove(id)
+        rootObjects.removeAll { $0 == id }
         return true
     }
     
@@ -251,32 +263,260 @@ public actor Resource {
     /// - Parameter path: The URI path to resolve (e.g., "/@contents.0/@departments.1").
     /// - Returns: The resolved object, or `nil` if the path is invalid.
     public func resolveByPath(_ path: String) -> (any EObject)? {
-        // Simple path resolution - starts with root objects
-        guard path.hasPrefix("/") else { return nil }
-        
-        let components = path.dropFirst().split(separator: "/")
-        
-        // If path is just "/", return the first root object
-        if components.isEmpty {
+        // Handle empty path or "/" - return first root
+        if path.isEmpty || path == "/" {
             let roots = getRootObjects()
             return roots.first
         }
-        
-        // For now, implement basic @contents.index resolution
-        // More sophisticated path resolution would parse XPath expressions
-        if components[0].hasPrefix("@contents.") {
-            let indexStr = String(components[0].dropFirst("@contents.".count))
-            guard let index = Int(indexStr) else { return nil }
-            
-            let roots = getRootObjects()
-            guard index < roots.count else { return nil }
-            
-            return roots[index]
+
+        // Strip leading slashes for UUID check
+        let cleanPath = path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+
+        // Handle UUID-based lookup (fragment is just a UUID, possibly with leading slashes)
+        if let uuid = UUID(uuidString: cleanPath) {
+            return resolve(uuid as EUUID)
         }
-        
+
+        // Handle XPath-style paths
+        if path.hasPrefix("/") {
+            let components = path.dropFirst().split(separator: "/")
+
+            // If path is just "/", return the first root object
+            if components.isEmpty {
+                let roots = getRootObjects()
+                return roots.first
+            }
+
+            // Try to resolve as numeric index into roots
+            if let index = Int(components[0]) {
+                let roots = getRootObjects()
+                guard index < roots.count else { return nil }
+
+                var current: any EObject = roots[index]
+
+                // Navigate through remaining components (feature/index pairs)
+                var i = 1
+                while i < components.count {
+                    let component = String(components[i])
+
+                    // Check if next component exists and is an index
+                    if i + 1 < components.count, let featureIndex = Int(components[i + 1]) {
+                        // This component is a feature name, next is an index
+                        let featureName = component
+
+                        // Cast to DynamicEObject to use string-based eGet
+                        guard let dynObj = current as? DynamicEObject else { return nil }
+
+                        // Get the feature value
+                        if let featureValue = dynObj.eGet(featureName) as? [EUUID] {
+                            guard featureIndex < featureValue.count else { return nil }
+                            let nextId = featureValue[featureIndex]
+                            guard let nextObj = resolve(nextId) else { return nil }
+                            current = nextObj
+                        } else {
+                            return nil
+                        }
+
+                        // Skip both the feature name and index
+                        i += 2
+                    } else {
+                        // Can't navigate further
+                        return nil
+                    }
+                }
+
+                return current
+            }
+
+            // Handle @contents.index syntax
+            if components[0].hasPrefix("@contents.") {
+                let indexStr = String(components[0].dropFirst("@contents.".count))
+                guard let index = Int(indexStr) else { return nil }
+
+                let roots = getRootObjects()
+                guard index < roots.count else { return nil }
+
+                return roots[index]
+            }
+        }
+
         return nil
     }
-    
+
+    // MARK: - Object Modification
+
+    /// Modifies a feature value on an object managed by this resource.
+    ///
+    /// This method handles bidirectional reference updates automatically.
+    /// When setting a reference with an opposite, the opposite side is also updated.
+    /// Cross-resource opposite references are coordinated through the ResourceSet.
+    ///
+    /// - Parameters:
+    ///   - objectId: The ID of the object to modify.
+    ///   - featureName: The name of the feature to set.
+    ///   - value: The new value for the feature.
+    /// - Returns: `true` if the modification was successful, `false` otherwise.
+    @discardableResult
+    public func eSet(objectId: EUUID, feature featureName: String, value: (any EcoreValue)?) async -> Bool {
+        guard var object = objects[objectId] as? DynamicEObject else { return false }
+        guard let eClass = object.eClass as? EClass else { return false }
+        guard let feature = eClass.getStructuralFeature(name: featureName) else { return false }
+
+        // Handle bidirectional references
+        if let reference = feature as? EReference, let oppositeId = reference.opposite {
+            // Handle multi-valued references (arrays of UUIDs)
+            if reference.isMany {
+                // Get old values to unset opposites
+                if let oldValues = object.eGet(reference) as? [EUUID] {
+                    for oldValueId in oldValues {
+                        if var oldTarget = objects[oldValueId] as? DynamicEObject {
+                            // Target is in same resource - update directly
+                            if let targetClass = oldTarget.eClass as? EClass,
+                               let oppositeRef = targetClass.allReferences.first(where: { $0.id == oppositeId }) {
+                                if oppositeRef.isMany {
+                                    // Remove from array
+                                    if var oppositeArray = oldTarget.eGet(oppositeRef) as? [EUUID] {
+                                        oppositeArray.removeAll { $0 == objectId }
+                                        oldTarget.eSet(oppositeRef, oppositeArray)
+                                    }
+                                } else {
+                                    // Unset single-valued opposite
+                                    oldTarget.eSet(oppositeRef, nil)
+                                }
+                                objects[oldValueId] = oldTarget
+                            }
+                        } else if let resourceSet = resourceSet {
+                            // Target is in different resource - use ResourceSet coordination
+                            await resourceSet.updateOpposite(
+                                targetId: oldValueId,
+                                oppositeRefId: oppositeId,
+                                sourceId: objectId,
+                                add: false
+                            )
+                        }
+                    }
+                }
+
+                // Set the new value
+                object.eSet(feature, value)
+                objects[objectId] = object
+
+                // Set opposites for new values
+                if let newValues = value as? [EUUID] {
+                    for newValueId in newValues {
+                        if var newTarget = objects[newValueId] as? DynamicEObject {
+                            // Target is in same resource - update directly
+                            if let targetClass = newTarget.eClass as? EClass,
+                               let oppositeRef = targetClass.allReferences.first(where: { $0.id == oppositeId }) {
+                                if oppositeRef.isMany {
+                                    // Add to array
+                                    var oppositeArray = (newTarget.eGet(oppositeRef) as? [EUUID]) ?? []
+                                    if !oppositeArray.contains(objectId) {
+                                        oppositeArray.append(objectId)
+                                    }
+                                    newTarget.eSet(oppositeRef, oppositeArray)
+                                } else {
+                                    // Set single-valued opposite
+                                    newTarget.eSet(oppositeRef, objectId)
+                                }
+                                objects[newValueId] = newTarget
+                            }
+                        } else if let resourceSet = resourceSet {
+                            // Target is in different resource - use ResourceSet coordination
+                            await resourceSet.updateOpposite(
+                                targetId: newValueId,
+                                oppositeRefId: oppositeId,
+                                sourceId: objectId,
+                                add: true
+                            )
+                        }
+                    }
+                }
+            } else {
+                // Handle single-valued references
+                // Get old value to unset opposite if needed
+                if let oldValueId = object.eGet(reference) as? EUUID {
+                    if var oldTarget = objects[oldValueId] as? DynamicEObject {
+                        // Target is in same resource - update directly
+                        if let targetClass = oldTarget.eClass as? EClass,
+                           let oppositeRef = targetClass.allReferences.first(where: { $0.id == oppositeId }) {
+                            if oppositeRef.isMany {
+                                // Remove from array
+                                if var oppositeArray = oldTarget.eGet(oppositeRef) as? [EUUID] {
+                                    oppositeArray.removeAll { $0 == objectId }
+                                    oldTarget.eSet(oppositeRef, oppositeArray)
+                                }
+                            } else {
+                                // Unset single-valued opposite
+                                oldTarget.eSet(oppositeRef, nil)
+                            }
+                            objects[oldValueId] = oldTarget
+                        }
+                    } else if let resourceSet = resourceSet {
+                        // Target is in different resource - use ResourceSet coordination
+                        await resourceSet.updateOpposite(
+                            targetId: oldValueId,
+                            oppositeRefId: oppositeId,
+                            sourceId: objectId,
+                            add: false
+                        )
+                    }
+                }
+
+                // Set the new value
+                object.eSet(feature, value)
+                objects[objectId] = object
+
+                // Set the opposite if there's a new value
+                if let newValueId = value as? EUUID {
+                    if var newTarget = objects[newValueId] as? DynamicEObject {
+                        // Target is in same resource - update directly
+                        if let targetClass = newTarget.eClass as? EClass,
+                           let oppositeRef = targetClass.allReferences.first(where: { $0.id == oppositeId }) {
+                            if oppositeRef.isMany {
+                                // Add to array
+                                var oppositeArray = (newTarget.eGet(oppositeRef) as? [EUUID]) ?? []
+                                if !oppositeArray.contains(objectId) {
+                                    oppositeArray.append(objectId)
+                                }
+                                newTarget.eSet(oppositeRef, oppositeArray)
+                            } else {
+                                // Set single-valued opposite
+                                newTarget.eSet(oppositeRef, objectId)
+                            }
+                            objects[newValueId] = newTarget
+                        }
+                    } else if let resourceSet = resourceSet {
+                        // Target is in different resource - use ResourceSet coordination
+                        await resourceSet.updateOpposite(
+                            targetId: newValueId,
+                            oppositeRefId: oppositeId,
+                            sourceId: objectId,
+                            add: true
+                        )
+                    }
+                }
+            }
+        } else {
+            // Non-bidirectional feature, just set it
+            object.eSet(feature, value)
+            objects[objectId] = object
+        }
+
+        return true
+    }
+
+    /// Gets a feature value from an object managed by this resource.
+    ///
+    /// - Parameters:
+    ///   - objectId: The ID of the object to query.
+    ///   - featureName: The name of the feature to get.
+    /// - Returns: The feature value, or `nil` if not found.
+    public func eGet(objectId: EUUID, feature featureName: String) -> (any EcoreValue)? {
+        guard let object = objects[objectId] as? DynamicEObject else { return nil }
+        return object.eGet(featureName)
+    }
+
     // MARK: - Private Helpers
     
     /// Checks if a container object contains a target object through a specific reference.

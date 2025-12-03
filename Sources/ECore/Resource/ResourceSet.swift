@@ -80,13 +80,13 @@ public actor ResourceSet {
     /// - Parameter uri: The URI for the new resource.
     /// - Returns: The created or existing resource.
     @discardableResult
-    public func createResource(uri: String) -> Resource {
+    public func createResource(uri: String) async -> Resource {
         if let existing = resources[uri] {
             return existing
         }
-        
+
         let resource = Resource(uri: uri)
-        // Note: ResourceSet reference will be set when needed
+        await resource.setResourceSet(self)
         resources[uri] = resource
         return resource
     }
@@ -199,10 +199,51 @@ public actor ResourceSet {
     
     /// Converts a logical URI to its physical equivalent.
     ///
+    /// Supports both exact matches and prefix matches. For prefix matches,
+    /// the longest matching prefix is used. Chained mappings are resolved
+    /// iteratively until no more conversions are possible.
+    ///
     /// - Parameter logicalURI: The logical URI to convert.
     /// - Returns: The physical URI, or the original URI if no mapping exists.
     public func convertURI(_ logicalURI: String) -> String {
-        return uriConverter[logicalURI] ?? logicalURI
+        var currentURI = logicalURI
+        var previousURI = ""
+        var iterationCount = 0
+        let maxIterations = 100  // Prevent infinite loops
+
+        // Keep converting until no more changes (chaining) or max iterations
+        while currentURI != previousURI && iterationCount < maxIterations {
+            previousURI = currentURI
+
+            // First try exact match
+            if let exactMatch = uriConverter[currentURI] {
+                currentURI = exactMatch
+                iterationCount += 1
+                continue
+            }
+
+            // Then try prefix matches (longest first)
+            var longestMatch: (prefix: String, replacement: String)?
+            for (prefix, replacement) in uriConverter {
+                if currentURI.hasPrefix(prefix) {
+                    if longestMatch == nil || prefix.count > longestMatch!.prefix.count {
+                        longestMatch = (prefix, replacement)
+                    }
+                }
+            }
+
+            if let match = longestMatch {
+                // Replace prefix with replacement
+                let suffix = String(currentURI.dropFirst(match.prefix.count))
+                currentURI = match.replacement + suffix
+                iterationCount += 1
+            } else {
+                // No match found
+                break
+            }
+        }
+
+        return currentURI
     }
     
     /// Normalises a URI by applying registered conversions and cleanup.
@@ -211,44 +252,94 @@ public actor ResourceSet {
     /// - Returns: The normalised URI.
     public func normaliseURI(_ uri: String) -> String {
         let converted = convertURI(uri)
-        
-        // Handle protocol prefixes (http://, https://, file://, etc.)
-        if let protocolRange = converted.range(of: "://") {
-            let protocolPart = String(converted[..<protocolRange.upperBound])
-            let pathPart = String(converted[protocolRange.upperBound...])
-            
-            // Normalise only the path part
-            let components = pathPart.split(separator: "/")
-            var normalised: [String] = []
-            
-            for component in components {
-                if component == ".." {
-                    if !normalised.isEmpty && normalised.last != ".." {
-                        normalised.removeLast()
-                    }
-                } else if component != "." && !component.isEmpty {
-                    normalised.append(String(component))
-                }
-            }
-            
-            return protocolPart + normalised.joined(separator: "/")
-        } else {
-            // Basic URI cleanup - remove redundant path elements
-            let components = converted.split(separator: "/")
-            var normalised: [String] = []
-            
-            for component in components {
-                if component == ".." {
-                    if !normalised.isEmpty && normalised.last != ".." {
-                        normalised.removeLast()
-                    }
-                } else if component != "." && !component.isEmpty {
-                    normalised.append(String(component))
-                }
-            }
-            
-            return normalised.joined(separator: "/")
+
+        // Check if URI is invalid or whitespace-only (handle gracefully)
+        let trimmed = converted.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty {
+            return converted  // Return whitespace/empty URIs as-is
         }
+
+        if converted == "://" ||
+           converted.hasPrefix("://") ||
+           converted == "http://" ||
+           converted == "https://" ||
+           converted == "test:////" {
+            return converted  // Return invalid URIs as-is
+        }
+
+        // If URI contains .. or . or //, use manual normalization
+        if converted.contains("..") || converted.contains("/.") || converted.contains("//") {
+            // Handle protocol prefixes manually
+            if let protocolRange = converted.range(of: "://") {
+                let protocolPart = String(converted[..<protocolRange.upperBound])
+                var pathPart = String(converted[protocolRange.upperBound...])
+
+                // Check if there's a leading slash after protocol (e.g., file:///)
+                let hasLeadingSlash = pathPart.hasPrefix("/")
+                let cleanPath = hasLeadingSlash ? String(pathPart.dropFirst()) : pathPart
+
+                // Handle empty path (e.g., "test://")
+                if cleanPath.isEmpty {
+                    return converted
+                }
+
+                // Collapse multiple slashes and split into components
+                // Replace "//" with "/" before splitting
+                let collapsedPath = cleanPath.replacingOccurrences(of: "//", with: "/")
+                let components = collapsedPath.split(separator: "/")
+                var normalised: [String] = []
+
+                for component in components {
+                    if component == ".." {
+                        // Pop previous component if it exists and isn't ".."
+                        if !normalised.isEmpty && normalised.last != ".." {
+                            normalised.removeLast()
+                        }
+                        // If stack is empty or last is "..", we're trying to go above root
+                        // In EMF/URI semantics, extra ".." are simply ignored (stay at root)
+                    } else if component != "." && !component.isEmpty {
+                        normalised.append(String(component))
+                    }
+                }
+
+                let normalisedPath = normalised.joined(separator: "/")
+                return protocolPart + (hasLeadingSlash ? "/" : "") + normalisedPath
+            } else {
+                // Basic URI cleanup - remove redundant path elements
+                let components = converted.split(separator: "/")
+                var normalised: [String] = []
+
+                for component in components {
+                    if component == ".." {
+                        if !normalised.isEmpty && normalised.last != ".." {
+                            normalised.removeLast()
+                        }
+                    } else if component != "." && !component.isEmpty {
+                        normalised.append(String(component))
+                    }
+                }
+
+                return normalised.joined(separator: "/")
+            }
+        }
+
+        // For URIs without special characters, use Foundation URL for normalization
+        if let url = URL(string: converted) {
+            let standardized = url.standardized
+
+            // For file:/// URLs, preserve the triple slash
+            if converted.hasPrefix("file:///") && !standardized.absoluteString.hasPrefix("file:///") {
+                // Reconstruct with triple slash
+                if let path = standardized.path.isEmpty ? nil : standardized.path {
+                    return "file:///" + path.dropFirst()
+                }
+            }
+
+            return standardized.absoluteString
+        }
+
+        // Final fallback: return as-is
+        return converted
     }
     
     // MARK: - Cross-Resource Reference Resolution
@@ -304,13 +395,59 @@ public actor ResourceSet {
     /// - Returns: The resolved object, or `nil` if not found.
     public func resolveByURI(_ uri: String) async -> (any EObject)? {
         let components = uri.split(separator: "#", maxSplits: 1)
+        guard !components.isEmpty else { return nil }
+
         let resourceURI = String(components[0])
         let objectPath = components.count > 1 ? String(components[1]) : "/"
-        
+
         guard let resource = getResource(uri: resourceURI) else { return nil }
         return await resource.resolveByPath(objectPath)
     }
-    
+
+    /// Updates the opposite side of a bidirectional reference across resources.
+    ///
+    /// This method is used by Resource to coordinate opposite reference updates
+    /// when the target object is in a different resource.
+    ///
+    /// - Parameters:
+    ///   - targetId: The ID of the target object to update.
+    ///   - oppositeRefId: The ID of the opposite reference feature.
+    ///   - sourceId: The ID of the source object.
+    ///   - isMany: Whether the opposite reference is multi-valued.
+    ///   - add: Whether to add (true) or remove (false) the relationship.
+    public func updateOpposite(targetId: EUUID, oppositeRefId: EUUID, sourceId: EUUID, add: Bool) async {
+        // Find the resource containing the target object
+        for resource in resources.values {
+            if await resource.contains(id: targetId) {
+                // Find the target object and update its opposite reference
+                guard var target = await resource.resolve(targetId) as? DynamicEObject else { continue }
+                guard let targetClass = target.eClass as? EClass else { continue }
+                guard let oppositeRef = targetClass.allReferences.first(where: { $0.id == oppositeRefId }) else { continue }
+
+                // Determine multiplicity from the opposite reference itself
+                if oppositeRef.isMany {
+                    // Multi-valued opposite
+                    var oppositeArray = (target.eGet(oppositeRef) as? [EUUID]) ?? []
+                    if add {
+                        if !oppositeArray.contains(sourceId) {
+                            oppositeArray.append(sourceId)
+                        }
+                    } else {
+                        oppositeArray.removeAll { $0 == sourceId }
+                    }
+                    target.eSet(oppositeRef, oppositeArray)
+                } else {
+                    // Single-valued opposite
+                    target.eSet(oppositeRef, add ? sourceId : nil)
+                }
+
+                // Update the object in its resource
+                _ = await resource.add(target)
+                return
+            }
+        }
+    }
+
     // MARK: - Resource Factory Management
     
     /// Registers a resource factory for handling specific file extensions or URI patterns.

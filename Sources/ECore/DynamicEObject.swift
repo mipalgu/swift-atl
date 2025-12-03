@@ -132,6 +132,52 @@ public struct DynamicEObject: EObject {
     public mutating func eUnset(_ feature: some EStructuralFeature) {
         storage.unset(feature: feature.id)
     }
+    
+    // MARK: - String-based Convenience Methods
+    
+    /// Reflectively retrieves the value of a feature by name.
+    ///
+    /// - Parameter featureName: The name of the structural feature to retrieve.
+    /// - Returns: The feature's current value, or `nil` if not set or not found.
+    public func eGet(_ featureName: String) -> (any EcoreValue)? {
+        guard let feature = eClass.getStructuralFeature(name: featureName) else {
+            return nil
+        }
+        return eGet(feature)
+    }
+    
+    /// Reflectively sets the value of a feature by name.
+    ///
+    /// - Parameters:
+    ///   - featureName: The name of the structural feature to modify.
+    ///   - value: The new value, or `nil` to unset.
+    public mutating func eSet(_ featureName: String, value: (any EcoreValue)?) {
+        guard let feature = eClass.getStructuralFeature(name: featureName) else {
+            return
+        }
+        eSet(feature, value)
+    }
+    
+    /// Checks whether a feature has been explicitly set by name.
+    ///
+    /// - Parameter featureName: The name of the structural feature to check.
+    /// - Returns: `true` if the feature has been set, `false` otherwise.
+    public func eIsSet(_ featureName: String) -> Bool {
+        guard let feature = eClass.getStructuralFeature(name: featureName) else {
+            return false
+        }
+        return eIsSet(feature)
+    }
+    
+    /// Unsets a feature by name, returning it to its default value.
+    ///
+    /// - Parameter featureName: The name of the structural feature to unset.
+    public mutating func eUnset(_ featureName: String) {
+        guard let feature = eClass.getStructuralFeature(name: featureName) else {
+            return
+        }
+        eUnset(feature)
+    }
 
     // MARK: - Equatable & Hashable
 
