@@ -601,7 +601,14 @@ extension DynamicEObject: Codable {
         decoder: Decoder
     ) throws -> (any EcoreValue)? {
         if reference.isMany {
-            // Multi-valued reference - let decodeGenericValue handle arrays
+            // Multi-valued reference - handle containment arrays specially
+            if reference.containment {
+                // For containment arrays, try to decode as array of DynamicEObject
+                if let objects = try? container.decode([DynamicEObject].self, forKey: key) {
+                    return objects
+                }
+            }
+            // Fall back to generic value decoding for non-containment arrays
             return try? decodeGenericValue(from: container, forKey: key)
         } else {
             // Single-valued reference
@@ -638,23 +645,37 @@ extension DynamicEObject: Codable {
         for (key, value) in jsonDict {
             if key == "eClass" { continue }
 
-            // Infer type from value
-            if value as? Bool != nil {
+            // Infer type from value using ECore types
+            if value as? EBoolean != nil {
                 let attribute = EAttribute(name: key, eType: EDataType(name: "EBoolean"))
                 features.append(attribute)
-            } else if value is String {
+            } else if value is EString {
                 let attribute = EAttribute(name: key, eType: EDataType(name: "EString"))
                 features.append(attribute)
-            } else if value is Int {
+            } else if value is EInt {
                 let attribute = EAttribute(name: key, eType: EDataType(name: "EInt"))
                 features.append(attribute)
-            } else if value is Double || value is Float {
+            } else if value is EDouble || value is EFloat {
                 let attribute = EAttribute(name: key, eType: EDataType(name: "EDouble"))
                 features.append(attribute)
-            } else if value is [Any] {
-                // Array - containment reference
-                let targetType = EClass(name: "EObject") // Default target type
-                let reference = EReference(name: key, eType: targetType, upperBound: -1, containment: true)
+            } else if let arrayValue = value as? [Any] {
+                // Array - inspect first element to determine if it's containment
+                var isContainment = false
+                var targetClassName = "EObject"
+
+                if let firstElement = arrayValue.first as? [String: Any],
+                   let firstEClass = firstElement["eClass"] as? String {
+                    // Contains objects with eClass - this is containment
+                    isContainment = true
+                    // Extract class name from the eClass URI
+                    if let hashIndex = firstEClass.lastIndex(of: "#") {
+                        let fragment = String(firstEClass[firstEClass.index(after: hashIndex)...])
+                        targetClassName = fragment.replacingOccurrences(of: "//", with: "")
+                    }
+                }
+
+                let targetType = EClass(name: targetClassName)
+                let reference = EReference(name: key, eType: targetType, upperBound: -1, containment: isContainment)
                 features.append(reference)
             } else if value is [String: Any] {
                 // Nested object - containment reference
@@ -788,18 +809,22 @@ extension DynamicEObject: Codable {
         to container: inout KeyedEncodingContainer<DynamicCodingKey>,
         key: DynamicCodingKey
     ) throws {
-        if let object = value as? DynamicEObject {
-            // Encode nested object
-            if reference.isMany {
-                // Multi-valued reference - would be an array
-                // For now, simplified
-                try container.encode(object, forKey: key)
-            } else {
-                try container.encode(object, forKey: key)
+        if reference.isMany {
+            // Multi-valued reference - handle arrays
+            if let objectArray = value as? [DynamicEObject] {
+                try container.encode(objectArray, forKey: key)
+            } else if let idArray = value as? [EUUID] {
+                let idStrings = idArray.map { $0.uuidString }
+                try container.encode(idStrings, forKey: key)
             }
-        } else if let id = value as? EUUID {
-            // ID reference - encode as string
-            try container.encode(id.uuidString, forKey: key)
+        } else {
+            // Single-valued reference
+            if let object = value as? DynamicEObject {
+                try container.encode(object, forKey: key)
+            } else if let id = value as? EUUID {
+                // ID reference - encode as string
+                try container.encode(id.uuidString, forKey: key)
+            }
         }
     }
 
@@ -880,6 +905,8 @@ extension CodingUserInfoKey {
     /// let employee = try decoder.decode(DynamicEObject.self, from: jsonData)
     /// ```
     public static let eClassKey = CodingUserInfoKey(rawValue: "eClass")!
+
+
 
     /// Key for providing EPackage context during JSON encoding.
     ///
