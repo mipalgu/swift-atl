@@ -1,0 +1,20 @@
+{
+  "eClass": "http://mytest/1.0#//Product",
+  "name": "Laptop",
+  "category": "ELECTRONICS",
+  "status": "ACTIVE",
+  "priority": "HIGH",
+  "features": [
+    {
+      "eClass": "http://mytest/1.0#//Feature",
+      "name": "Wireless",
+      "type": "CONNECTIVITY"
+    },
+    {
+      "eClass": "http://mytest/1.0#//Feature",
+      "name": "Touchscreen", 
+      "type": "DISPLAY"
+    }
+  ],
+  "tags": ["PREMIUM", "PORTABLE", "PROFESSIONAL"]
+}

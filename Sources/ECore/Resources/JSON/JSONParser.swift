@@ -105,7 +105,7 @@ public actor JSONParser {
 
         // Create a dynamic EClass from the eClass URI
         // For now, we create a minimal EClass; in the future, this should look up the metamodel
-        let eClass = createDynamicEClass(from: eClassString, jsonDict: jsonDict)
+        let eClass = DynamicEObject.createDynamicEClass(from: eClassString, jsonDict: jsonDict)
 
         // Set up decoder with EClass context
         decoder.userInfo[.eClassKey] = eClass
@@ -114,51 +114,6 @@ public actor JSONParser {
         let dynamicObject = try decoder.decode(DynamicEObject.self, from: data)
 
         return dynamicObject
-    }
-
-    /// Create a dynamic EClass from an eClass URI string
-    private func createDynamicEClass(from eClassURI: String, jsonDict: [String: Any]) -> EClass {
-        // Extract class name from URI (e.g., "http://package#//ClassName" -> "ClassName")
-        let className: String
-        if let hashIndex = eClassURI.lastIndex(of: "#") {
-            let fragment = String(eClassURI[eClassURI.index(after: hashIndex)...])
-            className = fragment.replacingOccurrences(of: "//", with: "")
-        } else if let slashIndex = eClassURI.lastIndex(of: "/") {
-            className = String(eClassURI[eClassURI.index(after: slashIndex)...])
-        } else {
-            className = eClassURI
-        }
-
-        // Infer attributes from JSON keys (excluding eClass)
-        var features: [any EStructuralFeature] = []
-        for (key, value) in jsonDict {
-            if key == "eClass" { continue }
-
-            // Infer type from value
-            let eType: EDataType
-            if value is String {
-                eType = EDataType(name: "EString")
-            } else if value is Int {
-                eType = EDataType(name: "EInt")
-            } else if value is Double || value is Float {
-                eType = EDataType(name: "EDouble")
-            } else if value is Bool {
-                eType = EDataType(name: "EBoolean")
-            } else if value is [Any] {
-                // Array - could be containment or reference
-                eType = EDataType(name: "EString") // placeholder
-            } else if value is [String: Any] {
-                // Nested object - containment reference
-                eType = EDataType(name: "EString") // placeholder
-            } else {
-                eType = EDataType(name: "EString")
-            }
-
-            let attribute = EAttribute(name: key, eType: eType)
-            features.append(attribute)
-        }
-
-        return EClass(name: className, eStructuralFeatures: features)
     }
 }
 

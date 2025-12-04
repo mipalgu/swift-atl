@@ -601,13 +601,15 @@ extension DynamicEObject: Codable {
         decoder: Decoder
     ) throws -> (any EcoreValue)? {
         if reference.isMany {
-            // Multi-valued reference - would be an array
-            // For now, simplified - will implement with Resource/ResourceSet
-            return nil
+            // Multi-valued reference - let decodeGenericValue handle arrays
+            return try? decodeGenericValue(from: container, forKey: key)
         } else {
-            // Try to decode as nested object
-            if let nestedObject = try? container.decode(DynamicEObject.self, forKey: key) {
-                return nestedObject
+            // Single-valued reference
+            if reference.containment {
+                // Try to decode as nested object
+                if let nestedObject = try? container.decode(DynamicEObject.self, forKey: key) {
+                    return nestedObject
+                }
             }
             // Try to decode as ID reference
             if let idString = try? container.decode(String.self, forKey: key),
@@ -616,6 +618,56 @@ extension DynamicEObject: Codable {
             }
             return nil
         }
+    }
+
+    /// Create a dynamic EClass from an eClass URI string and JSON dictionary
+    static func createDynamicEClass(from eClassURI: String, jsonDict: [String: Any]) -> EClass {
+        // Extract class name from URI (e.g., "http://package#//ClassName" -> "ClassName")
+        let className: String
+        if let hashIndex = eClassURI.lastIndex(of: "#") {
+            let fragment = String(eClassURI[eClassURI.index(after: hashIndex)...])
+            className = fragment.replacingOccurrences(of: "//", with: "")
+        } else if let slashIndex = eClassURI.lastIndex(of: "/") {
+            className = String(eClassURI[eClassURI.index(after: slashIndex)...])
+        } else {
+            className = eClassURI
+        }
+
+        // Infer attributes from JSON keys (excluding eClass)
+        var features: [any EStructuralFeature] = []
+        for (key, value) in jsonDict {
+            if key == "eClass" { continue }
+
+            // Infer type from value
+            if value as? Bool != nil {
+                let attribute = EAttribute(name: key, eType: EDataType(name: "EBoolean"))
+                features.append(attribute)
+            } else if value is String {
+                let attribute = EAttribute(name: key, eType: EDataType(name: "EString"))
+                features.append(attribute)
+            } else if value is Int {
+                let attribute = EAttribute(name: key, eType: EDataType(name: "EInt"))
+                features.append(attribute)
+            } else if value is Double || value is Float {
+                let attribute = EAttribute(name: key, eType: EDataType(name: "EDouble"))
+                features.append(attribute)
+            } else if value is [Any] {
+                // Array - containment reference
+                let targetType = EClass(name: "EObject") // Default target type
+                let reference = EReference(name: key, eType: targetType, upperBound: -1, containment: true)
+                features.append(reference)
+            } else if value is [String: Any] {
+                // Nested object - containment reference
+                let targetType = EClass(name: "EObject") // Default target type
+                let reference = EReference(name: key, eType: targetType, containment: true)
+                features.append(reference)
+            } else {
+                let attribute = EAttribute(name: key, eType: EDataType(name: "EString"))
+                features.append(attribute)
+            }
+        }
+
+        return EClass(name: className, eStructuralFeatures: features)
     }
 
     /// Helper to encode a dynamically stored value to JSON (without metamodel information).

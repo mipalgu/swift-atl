@@ -89,16 +89,28 @@ ssh plucky.local "cd src/swift/rh/Metamodels/swift-modelling && git pull && swif
 - [x] XPath reference resolution (Step 4.4) - Same-resource references with XPath-style navigation
 - [x] XMI serializer (Step 4.5) - Full serialization with attributes, containment, and cross-references
 - [x] Round-trip tests - XMI → memory → XMI with in-memory verification at each step
-- [ ] Cross-resource references (Step 4.6) - Will be implemented in Phase 5
+- [x] Cross-resource references (Step 4.6)
 
-### Phase 5: CLI Tool 🚧
+### Phase 5: Generic JSON Serialization ✅
+
+- [x] JSON parser for model instances (Step 5.1)
+- [x] JSON serializer with sorted keys (Step 5.2)
+- [x] Dynamic EClass creation from JSON - Type inference for attributes and references
+- [x] Boolean type handling fix - Boolean detection from Foundation's JSONSerialization
+- [x] Multiple root objects support - Arrays of JSON root objects
+- [x] Cross-format conversion - XMI ↔ JSON bidirectional conversion
+- [x] Round-trip tests for all data types
+- [x] PyEcore compatibility validation - minimal.json and intfloat.json patterns
+- [x] Comprehensive error handling
+
+### Phase 6: CLI Tool 🚧
 
 - [ ] Validate command
 - [ ] Convert command
 - [ ] Generate command
 - [ ] Query command
 
-### Phase 6: ATL 🚧
+### Phase 7: ATL 🚧
 
 - [ ] ATL lexer and parser
 - [ ] ATL interpreter

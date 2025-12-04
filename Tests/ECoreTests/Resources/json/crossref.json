@@ -1,0 +1,27 @@
+{
+  "eClass": "http://mytest/1.0#//Library",
+  "name": "Main Library",
+  "books": [
+    {
+      "eClass": "http://mytest/1.0#//Book",
+      "title": "The Swift Programming Language",
+      "author": {
+        "eClass": "http://mytest/1.0#//Author",
+        "name": "Apple Inc.",
+        "id": "author1"
+      }
+    },
+    {
+      "eClass": "http://mytest/1.0#//Book", 
+      "title": "iOS Development with Swift",
+      "author": {
+        "$ref": "#/books/0/author"
+      }
+    }
+  ],
+  "popularAuthors": [
+    {
+      "$ref": "#/books/0/author"
+    }
+  ]
+}
