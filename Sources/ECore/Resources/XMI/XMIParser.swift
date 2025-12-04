@@ -24,7 +24,9 @@ public enum XMIError: Error, Sendable {
 /// The XMI parser converts XMI files into EMF-compatible object graphs stored in Resources.
 /// It handles:
 /// - Metamodel (.ecore) files with full Ecore support
-/// - Model instance (.xmi) files
+/// - Model instance (.xmi) files with arbitrary user-defined attributes
+/// - Dynamic attribute parsing without hardcoded attribute names
+/// - Automatic type inference for Int, Double, Bool, and String values
 /// - Cross-resource references via href attributes
 /// - XPath-style fragment identifiers
 /// - Bidirectional reference resolution
@@ -33,6 +35,8 @@ public enum XMIError: Error, Sendable {
 ///
 /// - **XMI Version**: 2.0 and later
 /// - **Ecore Metamodel**: Full support for EPackage, EClass, EEnum, EDataType, EAttribute, EReference
+/// - **Dynamic Attributes**: Arbitrary XML attributes parsed without hardcoding (EMF spec compliant)
+/// - **Type Inference**: Automatic conversion of string values to Int, Double, Bool, or String
 /// - **References**: Same-resource (#//ClassName) and external (ecore:Type http://...)
 /// - **Multiplicity**: lowerBound and upperBound attributes
 /// - **Containment**: Containment references and opposite references
@@ -213,6 +217,27 @@ public actor XMIParser {
     /// as opposed to Ecore metamodel elements. It extracts the element type from
     /// the namespace prefix and local name, creates a DynamicEObject, and parses
     /// attributes and nested elements.
+    ///
+    /// ## Dynamic Attribute Parsing
+    ///
+    /// All XML attributes are parsed dynamically using SwiftXML's `attributeNames` property.
+    /// This ensures arbitrary user-defined metamodels can be loaded without hardcoding
+    /// attribute names, maintaining full EMF specification compliance for reflective access.
+    ///
+    /// XML namespace and XMI control attributes (xmlns:, xmi:, xsi:) are automatically
+    /// filtered out and not stored as model features.
+    ///
+    /// ## Type Inference
+    ///
+    /// Attribute values (strings in XML) are converted to appropriate Swift types using
+    /// heuristic type inference:
+    /// - Integers: "42" → Int(42)
+    /// - Floating-point: "3.14" → Double(3.14)
+    /// - Booleans: "true"/"false" → Bool(true/false) (case-insensitive)
+    /// - Strings: All other values remain as String
+    ///
+    /// **Note**: Enum literals are stored as strings until metamodel-guided type conversion
+    /// is implemented in a future phase.
     ///
     /// - Parameters:
     ///   - element: The XML element representing the instance
