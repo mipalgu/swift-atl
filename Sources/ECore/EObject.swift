@@ -6,6 +6,7 @@
 //  Copyright © 2025 Rene Hexel. All rights reserved.
 //
 import Foundation
+import OrderedCollections
 
 // MARK: - Forward Declarations
 
@@ -143,25 +144,30 @@ public protocol EObject: EcoreValue {
 /// - Supports value semantics through `Sendable`, `Equatable`, and `Hashable`
 public struct EObjectStorage: Sendable {
     /// Dictionary mapping feature identifiers to their values.
-    private var values: [EUUID: any EcoreValue]
+    /// Uses OrderedDictionary to preserve feature insertion order for EMF compliance.
+    private var values: OrderedDictionary<EUUID, any EcoreValue>
 
-    /// Set of feature identifiers that have been explicitly set.
-    private var isset: Set<EUUID>
+    /// Ordered set of feature identifiers that have been explicitly set.
+    /// Preserves the order features were set, maintaining EMF semantic ordering.
+    private var isset: OrderedSet<EUUID>
 
     /// Dictionary mapping feature names to values (for dynamic features without IDs).
-    private var nameValues: [String: any EcoreValue]
+    /// Uses OrderedDictionary to preserve feature insertion order for EMF compliance.
+    private var nameValues: OrderedDictionary<String, any EcoreValue>
 
-    /// Set of feature names that have been explicitly set (for dynamic features).
-    private var nameIsset: Set<String>
+    /// Ordered set of feature names that have been explicitly set (for dynamic features).
+    /// Preserves the order dynamic features were set for deterministic serialisation.
+    private var nameIsset: OrderedSet<String>
 
     /// Creates a new empty storage.
     ///
-    /// The storage is initialised with no features set.
+    /// The storage is initialised with no features set, using ordered collections
+    /// to preserve EMF-compliant feature ordering.
     public init() {
-        self.values = [:]
-        self.isset = []
-        self.nameValues = [:]
-        self.nameIsset = []
+        self.values = OrderedDictionary<EUUID, any EcoreValue>()
+        self.isset = OrderedSet<EUUID>()
+        self.nameValues = OrderedDictionary<String, any EcoreValue>()
+        self.nameIsset = OrderedSet<String>()
     }
 
     /// Retrieves the value for a feature.
@@ -182,7 +188,9 @@ public struct EObjectStorage: Sendable {
     public mutating func set(feature: EUUID, value: (any EcoreValue)?) {
         if let value = value {
             values[feature] = value
-            isset.insert(feature)
+            if !isset.contains(feature) {
+                isset.append(feature)
+            }
         } else {
             values.removeValue(forKey: feature)
             isset.remove(feature)
@@ -230,7 +238,9 @@ public struct EObjectStorage: Sendable {
     public mutating func set(name: String, value: (any EcoreValue)?) {
         if let value = value {
             nameValues[name] = value
-            nameIsset.insert(name)
+            if !nameIsset.contains(name) {
+                nameIsset.append(name)
+            }
         } else {
             nameValues.removeValue(forKey: name)
             nameIsset.remove(name)
@@ -253,11 +263,24 @@ public struct EObjectStorage: Sendable {
         nameIsset.remove(name)
     }
 
-    /// Get all feature names that have been set.
+    /// Get all feature names that have been set in insertion order.
     ///
-    /// - Returns: Array of feature names
+    /// Returns dynamic feature names in the order they were set,
+    /// preserving EMF semantic ordering for deterministic serialisation.
+    ///
+    /// - Returns: Array of feature names in insertion order.
     public func getFeatureNames() -> [String] {
         return Array(nameIsset)
+    }
+    
+    /// Get all feature IDs that have been set in insertion order.
+    ///
+    /// Returns metamodel feature IDs in the order they were set,
+    /// preserving EMF semantic ordering for deterministic serialisation.
+    ///
+    /// - Returns: Array of feature IDs in insertion order.
+    public func getSetFeatureIds() -> [EUUID] {
+        return Array(isset)
     }
 }
 
@@ -313,18 +336,18 @@ extension EObjectStorage: Hashable {
     ///
     /// - Parameter hasher: The hasher to use for combining components.
     public func hash(into hasher: inout Hasher) {
-        // Hash ID-based features
+        // Hash ID-based features in deterministic order
         hasher.combine(isset)
-        for key in isset.sorted() {
+        for key in isset {
             if let value = values[key] {
                 hasher.combine(key)
                 hasher.combine(String(describing: value))
             }
         }
 
-        // Hash name-based features
+        // Hash name-based features in deterministic order
         hasher.combine(nameIsset)
-        for name in nameIsset.sorted() {
+        for name in nameIsset {
             if let value = nameValues[name] {
                 hasher.combine(name)
                 hasher.combine(String(describing: value))

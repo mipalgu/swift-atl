@@ -6,6 +6,7 @@
 //  Copyright © 2025 Rene Hexel. All rights reserved.
 //
 import Foundation
+import OrderedCollections
 
 /// A resource manages model objects and provides EMF-compliant reference resolution.
 ///
@@ -47,7 +48,8 @@ public actor Resource {
     ///
     /// All objects within a resource must have unique identifiers. The resource
     /// maintains ownership and provides resolution services.
-    private var objects: [EUUID: any EObject]
+    /// Uses OrderedDictionary to preserve insertion order for EMF compliance.
+    private var objects: OrderedDictionary<EUUID, any EObject>
 
     /// Root objects that are not contained by other objects in this resource.
     ///
@@ -67,7 +69,7 @@ public actor Resource {
     /// - Parameter uri: The URI identifying this resource. Defaults to a generated URI.
     public init(uri: String = "resource://\(UUID().uuidString)") {
         self.uri = uri
-        self.objects = [:]
+        self.objects = OrderedDictionary<EUUID, any EObject>()
         self.rootObjects = []
     }
 
@@ -177,10 +179,14 @@ public actor Resource {
     }
 
     /// Gets all objects contained in this resource.
+    /// Gets all objects in this resource in insertion order.
     ///
-    /// - Returns: An array of all objects in this resource.
+    /// Objects are returned in the order they were added to the resource,
+    /// preserving EMF semantic ordering instead of arbitrary UUID-based sorting.
+    ///
+    /// - Returns: An array of all objects in insertion order.
     public func getAllObjects() -> [any EObject] {
-        return Array(objects.values).sorted { $0.id.uuidString < $1.id.uuidString }
+        return Array(objects.values)
     }
 
     /// Gets all root objects in this resource.

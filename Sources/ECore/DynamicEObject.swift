@@ -217,22 +217,21 @@ public struct DynamicEObject: EObject {
     public func getFeatureNames() -> [String] {
         var featureNames: [String] = []
 
-        // Add names from metamodel-defined features that have been set (ID-based storage)
-        // Process in metamodel order: attributes first, then references
-        for attribute in eClass.allAttributes {
-            if storage.isSet(feature: attribute.id) {
-                featureNames.append(attribute.name)
+        // Get all metamodel features (attributes and references) in a single collection
+        let allMetamodelFeatures = eClass.allStructuralFeatures
+        
+        // Create a mapping from feature ID to feature name for quick lookup
+        let featureIdToName = Dictionary(uniqueKeysWithValues: allMetamodelFeatures.map { ($0.id, $0.name) })
+        
+        // Add metamodel feature names in the order they were set (from storage)
+        for featureId in storage.getSetFeatureIds() {
+            if let featureName = featureIdToName[featureId] {
+                featureNames.append(featureName)
             }
         }
 
-        for reference in eClass.allReferences {
-            if storage.isSet(feature: reference.id) {
-                featureNames.append(reference.name)
-            }
-        }
-
-        // Add names from dynamic features (name-based storage) in sorted order for determinism
-        let dynamicFeatures = storage.getFeatureNames().sorted()
+        // Add dynamic feature names in insertion order (from name-based storage)
+        let dynamicFeatures = storage.getFeatureNames()
         for featureName in dynamicFeatures {
             if !featureNames.contains(featureName) {
                 featureNames.append(featureName)

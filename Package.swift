@@ -18,6 +18,7 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-argument-parser", from: "1.6.2"),
+        .package(url: "https://github.com/apple/swift-collections", from: "1.0.0"),
         .package(url: "https://github.com/attaswift/BigInt.git", from: "5.7.0"),
         .package(url: "https://github.com/swiftxml/SwiftXML.git", from: "1.0.0"),
     ],
@@ -25,6 +26,7 @@ let package = Package(
         .target(
             name: "ECore",
             dependencies: [
+                .product(name: "OrderedCollections", package: "swift-collections"),
                 .product(name: "BigInt", package: "BigInt"),
                 .product(name: "SwiftXML", package: "SwiftXML"),
             ],

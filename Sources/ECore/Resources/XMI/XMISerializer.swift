@@ -71,26 +71,26 @@ public struct XMISerializer: Sendable {
         } else {
             // Multiple root objects - wrap in xmi:XMI element like pyecore
             xml += "<xmi:XMI xmi:version=\"2.0\" xmlns:xmi=\"http://www.omg.org/XMI\""
-            
+
             // Collect all namespaces from all root objects
             var namespaces: Set<String> = []
             for rootObject in roots {
                 let objectNamespaces = await collectNamespaces(rootObject, in: resource)
                 namespaces.formUnion(objectNamespaces)
             }
-            
+
             // Add namespace declarations
             for namespace in namespaces.sorted() {
                 xml += " \(namespace)"
             }
             xml += ">\n"
-            
+
             // Serialize each root object as a child of xmi:XMI
             for rootObject in roots {
                 xml += try await serializeObject(rootObject, in: resource, indentLevel: 1)
                 xml += "\n"
             }
-            
+
             xml += "</xmi:XMI>"
         }
         xml += "\n"
@@ -307,14 +307,25 @@ public struct XMISerializer: Sendable {
         let allFeatures = await resource.getFeatureNames(objectId: dynamicObject.id)
 
         for featureName in allFeatures {
-            // Skip cross-reference features - only consider containment relationships for XPath
-            if featureName == "leader" ||
-               featureName == "manager" ||
-               featureName == "mainDepartment" ||
-               featureName.hasSuffix("Ref") {
+            // Only consider containment relationships for XPath generation
+            // Use metamodel information to determine if this is a containment feature
+            if let feature = dynamicObject.eClass.getStructuralFeature(name: featureName),
+               let reference = feature as? EReference {
+                // Skip non-containment references - only traverse containment relationships
+                guard reference.containment else { continue }
+
+                // Skip features that are opposites of containment relationships
+                if let oppositeId = reference.opposite,
+                   let oppositeRef = dynamicObject.eClass.allReferences.first(where: { $0.id == oppositeId }),
+                   oppositeRef.containment {
+                    continue
+                }
+            } else {
+                // For dynamic features without metamodel info, assume non-containment
+                // In proper EMF, all structural features should have metamodel definitions
                 continue
             }
-            
+
             guard let value = await resource.eGet(objectId: dynamicObject.id, feature: featureName) else {
                 continue
             }
@@ -461,14 +472,27 @@ public struct XMISerializer: Sendable {
         let featureNames = await resource.getFeatureNames(objectId: dynamicObject.id)
 
         for featureName in featureNames {
-            // Skip features that should be handled as cross-references
-            if featureName == "leader" ||
-               featureName == "manager" ||
-               featureName == "mainDepartment" ||
-               featureName.hasSuffix("Ref") {
+            // Use metamodel to determine if this is a containment feature
+            if let feature = dynamicObject.eClass.getStructuralFeature(name: featureName),
+               let reference = feature as? EReference {
+                // Only include containment references
+                guard reference.containment else { continue }
+
+                // Skip features that are opposites of containment relationships
+                if let oppositeId = reference.opposite,
+                   let oppositeRef = dynamicObject.eClass.allReferences.first(where: { $0.id == oppositeId }),
+                   oppositeRef.containment {
+                    continue
+                }
+            } else if let feature = dynamicObject.eClass.getStructuralFeature(name: featureName),
+                      feature is EAttribute {
+                // Skip attributes - they're not containment
+                continue
+            } else {
+                // Dynamic features without metamodel - assume non-containment
                 continue
             }
-            
+
             guard let value = await resource.eGet(objectId: dynamicObject.id, feature: featureName) else {
                 continue
             }
@@ -512,12 +536,19 @@ public struct XMISerializer: Sendable {
         let featureNames = await resource.getFeatureNames(objectId: dynamicObject.id)
 
         for featureName in featureNames {
-            // Heuristic: features named "leader", "manager", "mainDepartment", or ending in "Ref" are cross-references
-            // This is a simplification - full EMF would check EReference.containment flag
-            if featureName == "leader" ||
-               featureName == "manager" ||
-               featureName == "mainDepartment" ||
-               featureName.hasSuffix("Ref") {
+            // Use metamodel to determine if this is a cross-reference (non-containment reference)
+            if let feature = dynamicObject.eClass.getStructuralFeature(name: featureName),
+               let reference = feature as? EReference {
+                // Only include non-containment references
+                guard !reference.containment else { continue }
+
+                // Skip features that are opposites of containment relationships
+                if let oppositeId = reference.opposite,
+                   let oppositeRef = dynamicObject.eClass.allReferences.first(where: { $0.id == oppositeId }),
+                   oppositeRef.containment {
+                    continue
+                }
+
                 if let value = await resource.eGet(objectId: dynamicObject.id, feature: featureName) {
                     // Can be EUUID (same-resource) or ResourceProxy (cross-resource)
                     if value is EUUID || value is ResourceProxy {
@@ -525,6 +556,7 @@ public struct XMISerializer: Sendable {
                     }
                 }
             }
+            // Skip attributes and dynamic features - they're not references
         }
 
         return references
@@ -558,7 +590,7 @@ public struct XMISerializer: Sendable {
 
         // For now, just collect namespaces from this object
         // TODO: Add recursive collection from contained objects if needed
-        
+
         return namespaces
     }
 
