@@ -284,7 +284,7 @@ public actor XMIParser {
         let _ = getOrCreateEClass(className, in: resource)
 
         // Then enhance it with discovered features
-        enhanceEClass(className: className, with: structureInfo)
+        recordStructureInfo(for: className, with: structureInfo)
 
         // Get the enhanced EClass from cache
         let enhancedEClass = eClassCache[className]!
@@ -962,7 +962,7 @@ public actor XMIParser {
     }
 
     /// Enhance an EClass with features discovered during parsing
-    private func enhanceEClass(className: String, with info: ElementStructureInfo) {
+    private func recordStructureInfo(for className: String, with info: ElementStructureInfo) {
         guard var eClass = eClassCache[className] else {
             return  // Class not found in cache
         }
