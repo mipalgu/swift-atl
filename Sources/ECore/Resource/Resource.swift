@@ -22,11 +22,11 @@ import Foundation
 ///
 /// ```swift
 /// let resource = Resource(uri: "http://example.com/mymodel")
-/// 
+///
 /// // Add objects to resource
 /// let person = DynamicEObject(eClass: personClass)
 /// resource.add(person)
-/// 
+///
 /// // Resolve references by ID
 /// if let resolved = resource.resolve(person.id) {
 ///     print("Found object: \(resolved)")
@@ -36,32 +36,32 @@ import Foundation
 public actor Resource {
     /// Global resource actor for thread-safe operations.
     public static let shared = Resource()
-    
+
     /// The URI identifying this resource.
     ///
     /// Resources are identified by URIs following EMF conventions. The URI
     /// typically indicates the location or logical name of the resource.
     nonisolated public let uri: String
-    
+
     /// Objects contained in this resource, indexed by their unique identifier.
     ///
     /// All objects within a resource must have unique identifiers. The resource
     /// maintains ownership and provides resolution services.
     private var objects: [EUUID: any EObject]
-    
+
     /// Root objects that are not contained by other objects in this resource.
     ///
     /// Root objects serve as entry points for model traversal and are typically
     /// the top-level objects that contain the entire model hierarchy.
     /// Maintains insertion order.
     private var rootObjects: [EUUID]
-    
+
     /// The resource set that owns this resource, if any.
     ///
     /// Resources can be managed independently or as part of a resource set
     /// for cross-resource reference resolution.
     public weak var resourceSet: ResourceSet?
-    
+
     /// Initialises a new resource with the specified URI.
     ///
     /// - Parameter uri: The URI identifying this resource. Defaults to a generated URI.
@@ -79,7 +79,7 @@ public actor Resource {
     }
 
     // MARK: - Object Management
-    
+
     /// Registers an object with this resource without adding it as a root object.
     ///
     /// This method adds the object to the resource's object map for ID resolution,
@@ -129,7 +129,7 @@ public actor Resource {
 
         return isNew
     }
-    
+
     /// Removes an object from this resource.
     ///
     /// - Parameter object: The object to remove from this resource.
@@ -138,7 +138,7 @@ public actor Resource {
     public func remove(_ object: any EObject) -> Bool {
         return remove(id: object.id)
     }
-    
+
     /// Removes an object from this resource by its identifier.
     ///
     /// - Parameter id: The identifier of the object to remove.
@@ -149,15 +149,15 @@ public actor Resource {
         rootObjects.removeAll { $0 == id }
         return true
     }
-    
+
     /// Removes all objects from this resource.
     public func clear() {
         objects.removeAll()
         rootObjects.removeAll()
     }
-    
+
     // MARK: - Object Resolution
-    
+
     /// Resolves an object by its identifier.
     ///
     /// - Parameter id: The unique identifier of the object to resolve.
@@ -165,7 +165,7 @@ public actor Resource {
     public func resolve(_ id: EUUID) -> (any EObject)? {
         return objects[id]
     }
-    
+
     /// Resolves an object by its identifier with a specific type.
     ///
     /// - Parameters:
@@ -175,14 +175,14 @@ public actor Resource {
     public func resolve<T: EObject>(_ id: EUUID, as type: T.Type) -> T? {
         return objects[id] as? T
     }
-    
+
     /// Gets all objects contained in this resource.
     ///
     /// - Returns: An array of all objects in this resource.
     public func getAllObjects() -> [any EObject] {
-        return Array(objects.values)
+        return Array(objects.values).sorted { $0.id.uuidString < $1.id.uuidString }
     }
-    
+
     /// Gets all root objects in this resource.
     ///
     /// Root objects are those that are not contained by other objects
@@ -192,14 +192,14 @@ public actor Resource {
     public func getRootObjects() -> [any EObject] {
         return rootObjects.compactMap { objects[$0] }
     }
-    
+
     /// Gets the number of objects in this resource.
     ///
     /// - Returns: The count of objects contained in this resource.
     public func count() -> Int {
         return objects.count
     }
-    
+
     /// Checks if this resource contains an object with the specified identifier.
     ///
     /// - Parameter id: The identifier to check for.
@@ -207,9 +207,9 @@ public actor Resource {
     public func contains(id: EUUID) -> Bool {
         return objects[id] != nil
     }
-    
+
     // MARK: - Reference Resolution
-    
+
     /// Resolves the opposite reference for a bidirectional reference.
     ///
     /// In EMF, bidirectional references maintain opposites automatically.
@@ -219,7 +219,7 @@ public actor Resource {
     /// - Returns: The opposite reference, or `nil` if not found.
     public func resolveOpposite(_ reference: EReference) -> EReference? {
         guard let oppositeId = reference.opposite else { return nil }
-        
+
         // Search through all objects to find the reference with the matching ID
         for object in objects.values {
             if let eClass = object.eClass as? EClass {
@@ -230,13 +230,13 @@ public actor Resource {
                 }
             }
         }
-        
+
         // Check in resource set if this resource is part of one
         // Note: Cross-resource resolution requires async context in ResourceSet
         // Cross-resource resolution would need async context
         return nil
     }
-    
+
     /// Resolves a reference to its target objects.
     ///
     /// For single-valued references, returns an array with one element.
@@ -248,7 +248,7 @@ public actor Resource {
     /// - Returns: An array of resolved target objects.
     public func resolveReference(_ reference: EReference, from object: any EObject) -> [any EObject] {
         guard let value = object.eGet(reference) else { return [] }
-        
+
         if reference.isMany {
             // Multi-valued reference - extract IDs from array
             // Try casting to array of EUUIDs directly, or convert from Any array
@@ -264,12 +264,12 @@ public actor Resource {
                 return resolve(id).map { [$0] } ?? []
             }
         }
-        
+
         return []
     }
-    
+
     // MARK: - URI Resolution
-    
+
     /// Resolves an object by its URI path within this resource.
     ///
     /// EMF uses URI paths to identify objects within resources, typically
@@ -569,7 +569,7 @@ public actor Resource {
     }
 
     // MARK: - Private Helpers
-    
+
     /// Checks if a container object contains a target object through a specific reference.
     ///
     /// - Parameters:
@@ -579,7 +579,7 @@ public actor Resource {
     /// - Returns: `true` if the container contains the target object.
     private func doesObjectContain(_ container: any EObject, objectId: EUUID, through reference: EReference) -> Bool {
         guard reference.containment else { return false }
-        
+
         if let value = container.eGet(reference) {
             if reference.isMany {
                 if let ids = value as? [EUUID] {
@@ -594,7 +594,7 @@ public actor Resource {
                 }
             }
         }
-        
+
         return false
     }
 }

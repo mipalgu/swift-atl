@@ -307,11 +307,19 @@ public struct XMISerializer: Sendable {
         let allFeatures = await resource.getFeatureNames(objectId: dynamicObject.id)
 
         for featureName in allFeatures {
+            // Skip cross-reference features - only consider containment relationships for XPath
+            if featureName == "leader" ||
+               featureName == "manager" ||
+               featureName == "mainDepartment" ||
+               featureName.hasSuffix("Ref") {
+                continue
+            }
+            
             guard let value = await resource.eGet(objectId: dynamicObject.id, feature: featureName) else {
                 continue
             }
 
-            // Check if this is a reference/containment feature
+            // Check if this is a containment feature
             if let childId = value as? EUUID {
                 // Single-valued feature
                 if childId == target.id {
@@ -453,15 +461,21 @@ public struct XMISerializer: Sendable {
         let featureNames = await resource.getFeatureNames(objectId: dynamicObject.id)
 
         for featureName in featureNames {
+            // Skip features that should be handled as cross-references
+            if featureName == "leader" ||
+               featureName == "manager" ||
+               featureName == "mainDepartment" ||
+               featureName.hasSuffix("Ref") {
+                continue
+            }
+            
             guard let value = await resource.eGet(objectId: dynamicObject.id, feature: featureName) else {
                 continue
             }
 
             if let childId = value as? EUUID {
                 if let childObject = await resource.resolve(childId), childObject is DynamicEObject {
-                    // Check if this is a containment (not a cross-reference)
-                    // For now, treat all object references as containment unless they're handled as cross-references
-                    // This is a simplification - full EMF would check EReference.containment
+                    // This is containment - serialize as child elements
                     children[featureName] = [childObject]
                 }
             } else if let childIds = value as? [EUUID] {
@@ -527,7 +541,6 @@ public struct XMISerializer: Sendable {
 
         // Get object's class name
         let className = getClassName(object)
-        let (_, _) = getElementName(object, className: className)
 
         // Add this object's namespace using same logic as addNamespaceDeclarations
         if className.hasPrefix("E") {

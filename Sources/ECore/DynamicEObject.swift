@@ -215,25 +215,31 @@ public struct DynamicEObject: EObject {
     ///
     /// - Returns: Array of feature names
     public func getFeatureNames() -> [String] {
-        var featureNames = Set<String>()
+        var featureNames: [String] = []
 
         // Add names from metamodel-defined features that have been set (ID-based storage)
+        // Process in metamodel order: attributes first, then references
         for attribute in eClass.allAttributes {
             if storage.isSet(feature: attribute.id) {
-                featureNames.insert(attribute.name)
+                featureNames.append(attribute.name)
             }
         }
 
         for reference in eClass.allReferences {
             if storage.isSet(feature: reference.id) {
-                featureNames.insert(reference.name)
+                featureNames.append(reference.name)
             }
         }
 
-        // Add names from dynamic features (name-based storage)
-        featureNames.formUnion(storage.getFeatureNames())
+        // Add names from dynamic features (name-based storage) in sorted order for determinism
+        let dynamicFeatures = storage.getFeatureNames().sorted()
+        for featureName in dynamicFeatures {
+            if !featureNames.contains(featureName) {
+                featureNames.append(featureName)
+            }
+        }
 
-        return Array(featureNames)
+        return featureNames
     }
 
     // MARK: - Equatable & Hashable
