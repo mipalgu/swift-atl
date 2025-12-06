@@ -366,3 +366,107 @@ public struct ATLParameter: Sendable, Equatable, Hashable {
         self.type = type
     }
 }
+
+// MARK: - Type-Erased Helper Wrapper
+
+/// Type-erased wrapper for ATL helpers to enable parser instantiation.
+///
+/// This wrapper allows the parser to create helpers without specifying concrete
+/// expression types, while maintaining ATL compliance and type safety at runtime.
+public struct ATLHelperWrapper: ATLHelperType, Sendable, Equatable, Hashable {
+
+    // MARK: - Properties
+
+    /// The name of the helper function.
+    public let name: String
+
+    /// The optional context type for contextual helpers.
+    public let contextType: String?
+
+    /// The return type of the helper function.
+    public let returnType: String
+
+    /// The parameters accepted by the helper function.
+    public let parameters: [ATLParameter]
+
+    /// The body expression (stored as any ATLExpression).
+    private let bodyExpression: any ATLExpression
+
+    // MARK: - Initialisation
+
+    /// Creates a type-erased helper wrapper.
+    ///
+    /// - Parameters:
+    ///   - name: The helper function name
+    ///   - contextType: Optional context type for contextual helpers
+    ///   - returnType: The return type specification
+    ///   - parameters: The parameter list
+    ///   - body: The body expression
+    public init(
+        name: String,
+        contextType: String? = nil,
+        returnType: String,
+        parameters: [ATLParameter] = [],
+        body: any ATLExpression
+    ) {
+        self.name = name
+        self.contextType = contextType
+        self.returnType = returnType
+        self.parameters = parameters
+        self.bodyExpression = body
+    }
+
+    // MARK: - ATLHelperType Conformance
+
+    public func evaluate(with arguments: [(any EcoreValue)?], in context: ATLExecutionContext)
+        async throws -> (any EcoreValue)?
+    {
+        // Set up parameter bindings in execution context
+        await context.pushScope()
+
+        defer {
+            Task {
+                await context.popScope()
+            }
+        }
+
+        // Bind parameters to arguments
+        for (parameter, argument) in zip(parameters, arguments) {
+            await context.setVariable(parameter.name, value: argument)
+        }
+
+        // Evaluate the body expression
+        return try await bodyExpression.evaluate(in: context)
+    }
+
+    public func isEqual(to other: any ATLHelperType) -> Bool {
+        guard let otherWrapper = other as? ATLHelperWrapper else {
+            return false
+        }
+        return self == otherWrapper
+    }
+
+    public func hashValue() -> Int {
+        var hasher = Hasher()
+        self.hash(into: &hasher)
+        return hasher.finalize()
+    }
+
+    // MARK: - Equatable
+
+    public static func == (lhs: ATLHelperWrapper, rhs: ATLHelperWrapper) -> Bool {
+        return lhs.name == rhs.name
+            && lhs.contextType == rhs.contextType
+            && lhs.returnType == rhs.returnType
+            && lhs.parameters == rhs.parameters
+    }
+
+    // MARK: - Hashable
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(name)
+        hasher.combine(contextType)
+        hasher.combine(returnType)
+        hasher.combine(parameters)
+    }
+}

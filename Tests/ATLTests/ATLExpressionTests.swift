@@ -46,7 +46,7 @@ struct ATLExpressionTests {
         // Then
         #expect(expression.property == propertyName)
         // Since we passed a concrete ATLVariableExpression, verify it directly
-        #expect(expression.source.name == "source")
+        #expect((expression.source as? ATLVariableExpression)?.name == "source")
     }
 
     @Test("Helper call expression construction")
@@ -95,8 +95,8 @@ struct ATLExpressionTests {
 
         // Then
         #expect(expression.operator == operation)
-        #expect(expression.left.value as? Int == 10)
-        #expect(expression.right.value as? Int == 5)
+        #expect((expression.left as? ATLLiteralExpression)?.value as? Int == 10)
+        #expect((expression.right as? ATLLiteralExpression)?.value as? Int == 5)
     }
 
     // MARK: - Equality Tests

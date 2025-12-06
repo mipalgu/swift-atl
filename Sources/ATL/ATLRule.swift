@@ -253,15 +253,16 @@ public struct ATLCalledRule: Sendable, Equatable, Hashable {
 /// Represents the source pattern of an ATL matched rule.
 ///
 /// Source patterns define the input specification for matched rules, including the
-/// type of source elements to match and the variable name for binding within the
-/// rule's scope. They form the trigger mechanism for declarative transformations.
+/// type of source elements to match, the variable name for binding within the
+/// rule's scope, and optional guard expressions for conditional matching.
 ///
 /// ## Example Usage
 ///
 /// ```swift
 /// let memberPattern = ATLSourcePattern(
 ///     variableName: "sourceMember",
-///     type: "Families!Member"
+///     type: "Families!Member",
+///     guard: ageCheckExpression
 /// )
 /// ```
 public struct ATLSourcePattern: Sendable, Equatable, Hashable {
@@ -280,6 +281,13 @@ public struct ATLSourcePattern: Sendable, Equatable, Hashable {
     /// and metamodel element types with namespace prefixes.
     public let type: String
 
+    /// The optional guard condition for conditional pattern matching.
+    ///
+    /// Guard expressions are boolean conditions evaluated for each potential
+    /// source element. Only elements satisfying the guard condition will
+    /// match this pattern. `nil` indicates unconditional matching.
+    public let `guard`: (any ATLExpression)?
+
     // MARK: - Initialisation
 
     /// Creates a new ATL source pattern.
@@ -287,15 +295,45 @@ public struct ATLSourcePattern: Sendable, Equatable, Hashable {
     /// - Parameters:
     ///   - variableName: The variable name for element binding
     ///   - type: The type specification for pattern matching
+    ///   - guard: Optional boolean expression for conditional matching
     ///
     /// - Precondition: The variable name must be a non-empty string
     /// - Precondition: The type specification must be a non-empty string
-    public init(variableName: String, type: String) {
+    public init(variableName: String, type: String, `guard`: (any ATLExpression)? = nil) {
         precondition(!variableName.isEmpty, "Variable name must not be empty")
         precondition(!type.isEmpty, "Type specification must not be empty")
 
         self.variableName = variableName
         self.type = type
+        self.`guard` = `guard`
+    }
+
+    // MARK: - Equatable
+
+    public static func == (lhs: ATLSourcePattern, rhs: ATLSourcePattern) -> Bool {
+        guard lhs.variableName == rhs.variableName && lhs.type == rhs.type else {
+            return false
+        }
+
+        // Compare guard expressions
+        switch (lhs.`guard`, rhs.`guard`) {
+        case (nil, nil):
+            return true
+        case (let lhsGuard?, let rhsGuard?):
+            return AnyHashable(lhsGuard) == AnyHashable(rhsGuard)
+        default:
+            return false
+        }
+    }
+
+    // MARK: - Hashable
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(variableName)
+        hasher.combine(type)
+        if let guardExpression = `guard` {
+            hasher.combine(AnyHashable(guardExpression))
+        }
     }
 }
 
@@ -346,9 +384,10 @@ public struct ATLTargetPattern: Sendable, Equatable, Hashable {
 
     /// Property bindings that define values for the created element.
     ///
-    /// Bindings map property names to expressions that compute the property values.
-    /// They support both attribute assignment and reference establishment.
-    public let bindings: [String: any ATLExpression]
+    /// Bindings specify how properties of the created element are initialized
+    /// with values computed from expressions. They support both attribute
+    /// assignment and reference establishment.
+    public let bindings: [ATLPropertyBinding]
 
     // MARK: - Initialisation
 
@@ -364,7 +403,7 @@ public struct ATLTargetPattern: Sendable, Equatable, Hashable {
     public init(
         variableName: String,
         type: String,
-        bindings: [String: any ATLExpression] = [:]
+        bindings: [ATLPropertyBinding] = []
     ) {
         precondition(!variableName.isEmpty, "Variable name must not be empty")
         precondition(!type.isEmpty, "Type specification must not be empty")
@@ -378,14 +417,105 @@ public struct ATLTargetPattern: Sendable, Equatable, Hashable {
 
     public static func == (lhs: ATLTargetPattern, rhs: ATLTargetPattern) -> Bool {
         return lhs.variableName == rhs.variableName && lhs.type == rhs.type
-            && lhs.bindings.keys == rhs.bindings.keys
+            && lhs.bindings == rhs.bindings
     }
 
     public func hash(into hasher: inout Hasher) {
         hasher.combine(variableName)
         hasher.combine(type)
-        hasher.combine(bindings.keys.sorted())
+        hasher.combine(bindings)
     }
+}
+
+// MARK: - ATL Parameter
+
+/// Represents a parameter in ATL helper functions and called rules.
+///
+/// Parameters define typed inputs for ATL constructs that accept arguments.
+/// They provide both the parameter name for binding and the type specification
+/// for validation and code generation purposes.
+///
+/// ## Example Usage
+///
+/// ```swift
+/// let memberParameter = ATLParameter(
+///     name: "member",
+///     type: "Families!Member"
+/// )
+/// ```
+
+// MARK: - ATL Property Binding
+
+/// Represents a property binding in ATL target patterns.
+///
+/// Property bindings define how properties of created target elements
+/// are initialized with values computed from expressions. They form the
+/// core mechanism for transferring data between source and target models.
+///
+/// ## Example Usage
+///
+/// ```swift
+/// let nameBinding = ATLPropertyBinding(
+///     property: "fullName",
+///     expression: ATLVariableExpression(name: "s.firstName")
+/// )
+/// ```
+public struct ATLPropertyBinding: Sendable, Equatable, Hashable {
+
+    // MARK: - Properties
+
+    /// The property name to bind.
+    ///
+    /// This must correspond to a valid property in the target element's
+    /// metamodel class definition.
+    public let property: String
+
+    /// The expression that computes the property value.
+    ///
+    /// The expression is evaluated during rule execution to determine
+    /// the value assigned to the property.
+    public let expression: any ATLExpression
+
+    // MARK: - Initialisation
+
+    /// Creates a new ATL property binding.
+    ///
+    /// - Parameters:
+    ///   - property: The property name to bind
+    ///   - expression: The value expression
+    ///
+    /// - Precondition: The property name must be a non-empty string
+    public init(property: String, expression: any ATLExpression) {
+        precondition(!property.isEmpty, "Property name must not be empty")
+
+        self.property = property
+        self.expression = expression
+    }
+
+    // MARK: - Equatable
+
+    public static func == (lhs: ATLPropertyBinding, rhs: ATLPropertyBinding) -> Bool {
+        return lhs.property == rhs.property
+            && AnyHashable(lhs.expression) == AnyHashable(rhs.expression)
+    }
+
+    // MARK: - Hashable
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(property)
+        hasher.combine(AnyHashable(expression))
+    }
+}
+
+// MARK: - ATL Rule Type Protocol
+
+/// Protocol for ATL rule types (matched and called rules).
+///
+/// This protocol provides a common interface for different types of ATL rules,
+/// enabling polymorphic handling in the parser and execution engine.
+public protocol ATLRuleType: Sendable {
+    /// The name of the rule.
+    var name: String { get }
 }
 
 // MARK: - ATL Statement Protocol
@@ -413,6 +543,11 @@ public protocol ATLStatement: Sendable {
     /// Executes the statement within the specified execution context.
     ///
     /// - Parameter context: The execution context providing variable bindings and model access
-    /// - Throws: ATL execution errors if statement execution fails
+    /// - Throws: ATL execution errors if statement execution failures
     func execute(in context: ATLExecutionContext) async throws
 }
+
+// MARK: - Rule Type Conformance
+
+extension ATLMatchedRule: ATLRuleType {}
+extension ATLCalledRule: ATLRuleType {}

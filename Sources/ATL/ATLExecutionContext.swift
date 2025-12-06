@@ -2,10 +2,6 @@
 //  ATLExecutionContext.swift
 //  ATL
 //
-//
-//  ATLModule.swift
-//  ATL
-//
 //  Created by Rene Hexel on 6/12/2025.
 //  Copyright © 2025 Rene Hexel. All rights reserved.
 //
@@ -93,6 +89,18 @@ public actor ATLExecutionContext {
     /// Lazy bindings support deferred evaluation of complex transformations
     /// that require multiple passes or circular reference resolution.
     public private(set) var lazyBindings: [ATLLazyBinding] = []
+
+    /// Registered helper functions indexed by signature
+    private var helpers: [String: any ATLHelperType] = [:]
+
+    /// Element type cache for performance optimisation
+    private var typeCache: [String: [any EObject]] = [:]
+
+    /// Cross-reference resolution cache
+    private var resolutionCache: [EUUID: any EObject] = [:]
+
+    /// Error context for debugging
+    private var errorContext: ATLErrorContext = ATLErrorContext()
 
     // MARK: - Initialisation
 
@@ -392,6 +400,239 @@ public actor ATLExecutionContext {
         await targetResource.add(element)
 
         return element
+    }
+    
+    // MARK: - Model Navigation
+    
+    /// Finds all elements of the specified type in source models.
+    ///
+    /// This method searches through all source models to find elements
+    /// that match the given type specification.
+    ///
+    /// - Parameter typeName: Type name (potentially qualified with model alias)
+    /// - Returns: Array of matching elements
+    /// - Throws: `ATLExecutionError.typeNotFound` if type is not found
+    public func findElementsOfType(_ typeName: String) async throws -> [any EObject] {
+        // Check cache first
+        if let cached = typeCache[typeName] {
+            return cached
+        }
+        
+        let (modelAlias, className) = parseQualifiedTypeName(typeName)
+        var results: [any EObject] = []
+        
+        // Search in specific model if alias provided
+        if let alias = modelAlias {
+            if let resource = sources[alias] {
+                results = await findElementsInResource(resource, ofType: className)
+            } else {
+                throw ATLExecutionError.runtimeError("Source model '\(alias)' not found")
+            }
+        } else {
+            // Search in all source models
+            for (_, resource) in sources {
+                results.append(contentsOf: await findElementsInResource(resource, ofType: className))
+            }
+        }
+        
+        // Cache results
+        typeCache[typeName] = results
+        return results
+    }
+    
+    /// Finds elements in a specific resource that match the given type.
+    private func findElementsInResource(_ resource: Resource, ofType className: String) async -> [any EObject] {
+        var results: [any EObject] = []
+        
+        let allObjects = await resource.getAllObjects()
+        for object in allObjects {
+            if let eClass = object.eClass as? EClass,
+               eClass.name == className || isSubtypeOf(eClass, className) {
+                results.append(object)
+            }
+        }
+        
+        return results
+    }
+    
+    /// Checks if the given EClass is a subtype of the specified class name.
+    private func isSubtypeOf(_ eClass: EClass, _ className: String) -> Bool {
+        // Check direct inheritance
+        for superType in eClass.eSuperTypes {
+            if superType.name == className || isSubtypeOf(superType, className) {
+                return true
+            }
+        }
+        return false
+    }
+    
+    /// Resolves an element by its identifier.
+    ///
+    /// - Parameter id: Element identifier
+    /// - Returns: Resolved element or nil if not found
+    public func resolveElement(_ id: EUUID) async -> (any EObject)? {
+        // Check resolution cache
+        if let cached = resolutionCache[id] {
+            return cached
+        }
+        
+        // Search in all resources
+        for (_, resource) in sources {
+            if let element = await resource.resolve(id) {
+                resolutionCache[id] = element
+                return element
+            }
+        }
+        
+        for (_, resource) in targets {
+            if let element = await resource.resolve(id) {
+                resolutionCache[id] = element
+                return element
+            }
+        }
+        
+        return nil
+    }
+    
+    /// Parses a qualified type name into model alias and class name components.
+    ///
+    /// - Parameter qualifiedType: Type name (e.g., "Source!Person" or "Person")
+    /// - Returns: Tuple of optional model alias and class name
+    private func parseQualifiedTypeName(_ qualifiedType: String) -> (String?, String) {
+        if let exclamationIndex = qualifiedType.firstIndex(of: "!") {
+            let modelAlias = String(qualifiedType[..<exclamationIndex])
+            let className = String(qualifiedType[qualifiedType.index(after: exclamationIndex)...])
+            return (modelAlias, className)
+        } else {
+            return (nil, qualifiedType)
+        }
+    }
+    
+    // MARK: - Helper Management
+    
+    /// Registers a helper function for later invocation.
+    ///
+    /// - Parameter helper: Helper function to register
+    public func registerHelper(_ helper: any ATLHelperType) {
+        let signature = createHelperSignature(helper)
+        helpers[signature] = helper
+    }
+    
+    /// Creates a unique signature for a helper function.
+    private func createHelperSignature(_ helper: any ATLHelperType) -> String {
+        let parameterTypes = helper.parameters.map { $0.type }.joined(separator: ",")
+        let contextPart = helper.contextType.map { "\($0)." } ?? ""
+        return "\(contextPart)\(helper.name)(\(parameterTypes))"
+    }
+    
+    // MARK: - Utility Methods
+    
+    /// Invalidates the element type cache.
+    private func invalidateTypeCache() {
+        typeCache.removeAll()
+    }
+    
+    /// Clears resolution cache.
+    private func clearResolutionCache() {
+        resolutionCache.removeAll()
+    }
+    
+    /// Returns the current error context for debugging.
+    ///
+    /// - Returns: Error context with accumulated errors and warnings
+    public func getErrorContext() -> ATLErrorContext {
+        errorContext
+    }
+    
+    /// Clears the error context.
+    public func clearErrorContext() {
+        errorContext = ATLErrorContext()
+    }
+    
+    /// Performs cleanup operations after transformation completion.
+    public func cleanup() {
+        // Clear caches
+        invalidateTypeCache()
+        clearResolutionCache()
+        
+        // Clear error context
+        clearErrorContext()
+        
+        // Reset bindings
+        lazyBindings.removeAll()
+    }
+}
+
+/// Error context for tracking execution errors and warnings.
+public struct ATLErrorContext: Sendable {
+    
+    /// Accumulated errors
+    public private(set) var errors: [String] = []
+    
+    /// Accumulated warnings  
+    public private(set) var warnings: [String] = []
+    
+    /// Execution timeline for debugging
+    public private(set) var timeline: [(Date, String)] = []
+    
+    /// Adds an error to the context.
+    ///
+    /// - Parameter message: Error message
+    public mutating func addError(_ message: String) {
+        errors.append(message)
+        timeline.append((Date(), "ERROR: \(message)"))
+    }
+    
+    /// Adds a warning to the context.
+    ///
+    /// - Parameter message: Warning message
+    public mutating func addWarning(_ message: String) {
+        warnings.append(message)
+        timeline.append((Date(), "WARNING: \(message)"))
+    }
+    
+    /// Adds a timeline entry.
+    ///
+    /// - Parameter message: Timeline message
+    public mutating func addEvent(_ message: String) {
+        timeline.append((Date(), message))
+    }
+    
+    /// Returns whether any errors have occurred.
+    ///
+    /// - Returns: True if errors are present
+    public var hasErrors: Bool {
+        !errors.isEmpty
+    }
+    
+    /// Returns whether any warnings have occurred.
+    ///
+    /// - Returns: True if warnings are present  
+    public var hasWarnings: Bool {
+        !warnings.isEmpty
+    }
+    
+    /// Returns a formatted summary of errors and warnings.
+    ///
+    /// - Returns: Formatted error summary
+    public func summary() -> String {
+        var result: [String] = []
+        
+        if !errors.isEmpty {
+            result.append("Errors (\(errors.count)):")
+            result.append(contentsOf: errors.map { "  - \($0)" })
+        }
+        
+        if !warnings.isEmpty {
+            result.append("Warnings (\(warnings.count)):")
+            result.append(contentsOf: warnings.map { "  - \($0)" })
+        }
+        
+        if result.isEmpty {
+            return "No errors or warnings"
+        }
+        
+        return result.joined(separator: "\n")
     }
 }
 
