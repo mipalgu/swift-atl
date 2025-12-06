@@ -1,9 +1,0 @@
-<?xml version="1.0" encoding="UTF-8"?>
-<organisation:Department
-    xmi:version="2.0"
-    xmlns:xmi="http://www.omg.org/XMI"
-    xmlns:organisation="http://swift-modelling.org/test/organisation"
-    name="Engineering">
-    <employees name="Alice" age="30"/>
-    <employees name="Bob" age="25"/>
-</organisation:Department>
