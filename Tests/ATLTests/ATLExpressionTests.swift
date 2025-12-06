@@ -95,12 +95,8 @@ struct ATLExpressionTests {
 
         // Then
         #expect(expression.operator == operation)
-        if let leftLiteral = expression.left as? ATLLiteralExpression {
-            #expect(leftLiteral.value as? Int == 10)
-        }
-        if let rightLiteral = expression.right as? ATLLiteralExpression {
-            #expect(rightLiteral.value as? Int == 5)
-        }
+        #expect(expression.left.value as? Int == 10)
+        #expect(expression.right.value as? Int == 5)
     }
 
     // MARK: - Equality Tests

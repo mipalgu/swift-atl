@@ -43,50 +43,6 @@ import Foundation
 ///
 /// let result = try await navigationExpr.evaluate(in: executionContext)
 /// ```
-/// A phantom type representing an ATL expression that can never be instantiated.
-///
-/// This type is used for generic contexts where an optional expression type
-/// is needed but no actual expression will be present (e.g., matched rules
-/// without guard expressions).
-public enum ATLExpressionNever: ATLExpression {
-    // This enum has no cases and can never be instantiated
-
-    public func evaluate(in context: ATLExecutionContext) async throws -> (any EcoreValue)? {
-        // This can never be called since no instances can exist
-        fatalError("ATLExpressionNever cannot be evaluated")
-    }
-}
-
-/// Binary operators supported in ATL expressions.
-public enum ATLBinaryOperator: String, Sendable, CaseIterable, Equatable {
-    // Arithmetic operators
-    case plus = "+"
-    case minus = "-"
-    case multiply = "*"
-    case divide = "/"
-    case modulo = "mod"
-
-    // Comparison operators
-    case equals = "="
-    case notEquals = "<>"
-    case lessThan = "<"
-    case lessThanOrEqual = "<="
-    case greaterThan = ">"
-    case greaterThanOrEqual = ">="
-
-    // Logical operators
-    case and = "and"
-    case or = "or"
-    case implies = "implies"
-
-    // Collection operators
-    case union = "union"
-    case intersection = "intersection"
-    case difference = "--"
-    case includes = "includes"
-    case excludes = "excludes"
-}
-
 public protocol ATLExpression: Sendable, Equatable, Hashable {
 
     /// Evaluates the expression within the specified execution context.
@@ -655,6 +611,52 @@ public struct ATLBinaryOperationExpression<
         hasher.combine(left)
         hasher.combine(right)
     }
+}
+
+// MARK; - Helper Types
+
+/// A phantom type representing an ATL expression that can never be instantiated.
+///
+/// This type is used for generic contexts where an optional expression type
+/// is needed but no actual expression will be present (e.g., matched rules
+/// without guard expressions).
+public enum ATLExpressionNever: ATLExpression {
+    // This enum has no cases and can never be instantiated
+    
+    public func evaluate(in context: ATLExecutionContext) async throws -> (any EcoreValue)? {
+        // This can never be called since no instances can exist
+        fatalError("ATLExpressionNever cannot be evaluated")
+    }
+}
+
+/// Binary operators supported in ATL expressions.
+public enum ATLBinaryOperator: String, Sendable, CaseIterable, Equatable {
+    // Arithmetic operators
+    case plus = "+"
+    case minus = "-"
+    case multiply = "*"
+    case divide = "/"
+    case modulo = "mod"
+    
+    // Comparison operators
+    case equals = "="
+    case notEquals = "<>"
+    case lessThan = "<"
+    case lessThanOrEqual = "<="
+    case greaterThan = ">"
+    case greaterThanOrEqual = ">="
+    
+    // Logical operators
+    case and = "and"
+    case or = "or"
+    case implies = "implies"
+    
+    // Collection operators
+    case union = "union"
+    case intersection = "intersection"
+    case difference = "--"
+    case includes = "includes"
+    case excludes = "excludes"
 }
 
 // MARK: - ATL Execution Error
