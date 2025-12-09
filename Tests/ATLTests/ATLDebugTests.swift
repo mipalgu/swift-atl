@@ -454,8 +454,12 @@ private class TestATLLexer {
             }
 
             // Check for multi-character operators
-            let twoChar = String(
-                content[position..<min(content.index(position, offsetBy: 2), content.endIndex)])
+            let endPos =
+                content.index(position, offsetBy: 1, limitedBy: content.endIndex)
+                ?? content.endIndex
+            let twoCharEndPos =
+                content.index(endPos, offsetBy: 1, limitedBy: content.endIndex) ?? content.endIndex
+            let twoChar = String(content[position..<twoCharEndPos])
             if Self.operators.contains(twoChar) {
                 tokens.append(
                     ATLToken(
@@ -565,7 +569,8 @@ private class TestATLLexer {
     private func peek() -> Character? {
         guard position < content.endIndex else { return nil }
         let nextPosition = content.index(after: position)
-        return nextPosition < content.endIndex ? content[nextPosition] : nil
+        guard nextPosition < content.endIndex else { return nil }
+        return content[nextPosition]
     }
 }
 
