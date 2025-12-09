@@ -1,0 +1,209 @@
+-- ATL Iterator Operations comprehensive test
+-- Tests all OCL-style collection operations with complex patterns
+module IteratorOperationsTest;
+create OUT : TestModel from IN : SourceModel;
+
+-- Global helper to create test data sequences
+helper def : numberSequence : Sequence(Integer) =
+    Sequence{1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
+
+helper def : stringSequence : Sequence(String) =
+    Sequence{'apple', 'banana', 'cherry', 'date', 'elderberry'};
+
+helper def : mixedNumbers : Sequence(Integer) =
+    Sequence{-3, -1, 0, 2, 4, 6, 8, 10, 12, 15};
+
+helper def : duplicateSequence : Sequence(String) =
+    Sequence{'red', 'blue', 'red', 'green', 'blue', 'yellow', 'red'};
+
+-- Tuple sequence for complex operations
+helper def : personData : Sequence(TupleType(name : String, age : Integer, city : String)) =
+    Sequence{
+        Tuple{name : String = 'Alice', age : Integer = 25, city : String = 'Sydney'},
+        Tuple{name : String = 'Bob', age : Integer = 30, city : String = 'Melbourne'},
+        Tuple{name : String = 'Carol', age : Integer = 22, city : String = 'Sydney'},
+        Tuple{name : String = 'David', age : Integer = 35, city : String = 'Brisbane'},
+        Tuple{name : String = 'Eve', age : Integer = 28, city : String = 'Sydney'}
+    };
+
+-- Context helpers for testing method calls on collections
+helper context Sequence(Integer) def : sumAll() : Integer =
+    self->iterate(n; total : Integer = 0 | total + n);
+
+helper context Sequence(Integer) def : productAll() : Integer =
+    self->iterate(n; product : Integer = 1 | product * n);
+
+helper context Sequence(Integer) def : findMaximum() : Integer =
+    self->iterate(n; max : Integer = self->first() |
+        if n > max then n else max endif
+    );
+
+helper context Sequence(Integer) def : findMinimum() : Integer =
+    self->iterate(n; min : Integer = self->first() |
+        if n < min then n else min endif
+    );
+
+helper context Sequence(Integer) def : countPositive() : Integer =
+    self->iterate(n; count : Integer = 0 |
+        if n > 0 then count + 1 else count endif
+    );
+
+helper context Sequence(String) def : concatenateWithSeparator(sep : String) : String =
+    self->iterate(s; result : String = '' |
+        if result = '' then s else result + sep + s endif
+    );
+
+-- Main transformation rule testing all iterator operations
+rule TestIteratorOperations {
+    from
+        source : SourceModel!TestSource
+    to
+        -- Test iterate operations
+        iterateTest : TestModel!IterateTest (
+            sumResult <- thisModule.numberSequence.sumAll(),
+            productResult <- thisModule.numberSequence->subSequence(1, 5).productAll(),
+            maxResult <- thisModule.mixedNumbers.findMaximum(),
+            minResult <- thisModule.mixedNumbers.findMinimum(),
+            positiveCount <- thisModule.mixedNumbers.countPositive(),
+            stringConcat <- thisModule.stringSequence.concatenateWithSeparator(', ')
+        ),
+
+        -- Test select/reject operations
+        selectionTest : TestModel!SelectionTest (
+            evenNumbers <- thisModule.numberSequence->select(n | n.mod(2) = 0),
+            oddNumbers <- thisModule.numberSequence->reject(n | n.mod(2) = 0),
+            positiveNumbers <- thisModule.mixedNumbers->select(n | n > 0),
+            longStrings <- thisModule.stringSequence->select(s | s.size() > 5),
+            shortStrings <- thisModule.stringSequence->reject(s | s.size() > 5),
+            adultPeople <- thisModule.personData->select(p | p.age >= 25),
+            sydneyPeople <- thisModule.personData->select(p | p.city = 'Sydney')
+        ),
+
+        -- Test collect operations
+        collectTest : TestModel!CollectTest (
+            squaredNumbers <- thisModule.numberSequence->collect(n | n * n),
+            stringLengths <- thisModule.stringSequence->collect(s | s.size()),
+            upperCaseStrings <- thisModule.stringSequence->collect(s | s.toUpperCase()),
+            personNames <- thisModule.personData->collect(p | p.name),
+            personAges <- thisModule.personData->collect(p | p.age),
+            agePlusOne <- thisModule.personData->collect(p | p.age + 1),
+            nameAndAge <- thisModule.personData->collect(p | p.name + ' (' + p.age.toString() + ')')
+        ),
+
+        -- Test exists/forAll operations
+        quantifierTest : TestModel!QuantifierTest (
+            hasEvenNumber <- thisModule.numberSequence->exists(n | n.mod(2) = 0),
+            hasNegativeNumber <- thisModule.mixedNumbers->exists(n | n < 0),
+            allPositive <- thisModule.numberSequence->forAll(n | n > 0),
+            allNonEmpty <- thisModule.stringSequence->forAll(s | s.size() > 0),
+            hasAdult <- thisModule.personData->exists(p | p.age >= 18),
+            allAdults <- thisModule.personData->forAll(p | p.age >= 18),
+            hasSydneyResident <- thisModule.personData->exists(p | p.city = 'Sydney')
+        ),
+
+        -- Test one/any operations
+        oneAnyTest : TestModel!OneAnyTest (
+            exactlyOneTen <- thisModule.numberSequence->one(n | n = 10),
+            exactlyOneRed <- thisModule.duplicateSequence->one(s | s = 'red'),
+            anyEvenNumber <- thisModule.numberSequence->any(n | n.mod(2) = 0),
+            anyLongString <- thisModule.stringSequence->any(s | s.size() > 6),
+            anySydneyPerson <- thisModule.personData->any(p | p.city = 'Sydney')
+        ),
+
+        -- Test collection type operations
+        collectionTypeTest : TestModel!CollectionTypeTest (
+            uniqueStrings <- thisModule.duplicateSequence->asSet(),
+            sequenceFromSet <- thisModule.duplicateSequence->asSet()->asSequence(),
+            bagFromSequence <- thisModule.stringSequence->asBag(),
+            flattenedNumbers <- Sequence{
+                thisModule.numberSequence->subSequence(1, 3),
+                thisModule.numberSequence->subSequence(4, 6),
+                thisModule.numberSequence->subSequence(7, 10)
+            }->flatten()
+        ),
+
+        -- Test set operations
+        setOperationsTest : TestModel!SetOperationsTest (
+            unionResult <- thisModule.numberSequence->subSequence(1, 5)->asSet()->union(
+                thisModule.numberSequence->subSequence(4, 8)->asSet()
+            ),
+            intersectionResult <- thisModule.numberSequence->subSequence(1, 6)->asSet()->intersection(
+                thisModule.numberSequence->subSequence(3, 8)->asSet()
+            ),
+            differenceResult <- thisModule.numberSequence->asSet()->difference(
+                thisModule.numberSequence->select(n | n.mod(2) = 0)->asSet()
+            )
+        ),
+
+        -- Test sorting operations
+        sortTest : TestModel!SortTest (
+            sortedNumbers <- thisModule.mixedNumbers->sortedBy(n | n),
+            sortedStrings <- thisModule.stringSequence->sortedBy(s | s),
+            sortedByLength <- thisModule.stringSequence->sortedBy(s | s.size()),
+            sortedPersonsByAge <- thisModule.personData->sortedBy(p | p.age),
+            sortedPersonsByName <- thisModule.personData->sortedBy(p | p.name)
+        ),
+
+        -- Test includes/excludes operations
+        membershipTest : TestModel!MembershipTest (
+            includesFive <- thisModule.numberSequence->includes(5),
+            includesApple <- thisModule.stringSequence->includes('apple'),
+            excludesZero <- thisModule.numberSequence->excludes(0),
+            excludesOrange <- thisModule.stringSequence->excludes('orange'),
+            includesNegative <- thisModule.mixedNumbers->includes(-1)
+        )
+}
+
+-- Query testing complex iterator chains
+query ComplexIteratorChain =
+    thisModule.personData
+        ->select(p | p.city = 'Sydney')
+        ->collect(p | p.age)
+        ->select(age | age > 23)
+        ->iterate(age; sum : Integer = 0 | sum + age);
+
+-- Query testing nested collection operations
+query NestedCollectionOps =
+    thisModule.personData
+        ->collect(p |
+            Tuple{
+                name : String = p.name,
+                isAdult : Boolean = p.age >= 18,
+                cityLength : Integer = p.city.size()
+            }
+        )
+        ->select(info | info.isAdult)
+        ->sortedBy(info | info.cityLength);
+
+-- Query testing iterate with complex conditions
+query ConditionalIterate =
+    thisModule.numberSequence->iterate(n; result : String = 'Numbers: ' |
+        result +
+        if n.mod(2) = 0 then
+            n.toString() + '(even) '
+        else
+            n.toString() + '(odd) '
+        endif
+    );
+
+-- Query testing multiple iterator combinations
+query MultiIteratorAnalysis =
+    let evenNumbers : Sequence(Integer) = thisModule.numberSequence->select(n | n.mod(2) = 0) in
+    let oddNumbers : Sequence(Integer) = thisModule.numberSequence->select(n | n.mod(2) = 1) in
+    let evenSum : Integer = evenNumbers->iterate(n; sum : Integer = 0 | sum + n) in
+    let oddSum : Integer = oddNumbers->iterate(n; sum : Integer = 0 | sum + n) in
+    'Even sum: ' + evenSum.toString() + ', Odd sum: ' + oddSum.toString() +
+    ', Difference: ' + (evenSum - oddSum).toString();
+
+-- Query testing deeply nested operations
+query DeepNestingTest =
+    thisModule.personData
+        ->select(p | p.age > 20)
+        ->collect(p |
+            thisModule.stringSequence
+                ->select(s | s.size() > p.name.size())
+                ->collect(s | s + '_' + p.name)
+        )
+        ->flatten()
+        ->select(combined | combined.size() > 10)
+        ->sortedBy(s | s.size());

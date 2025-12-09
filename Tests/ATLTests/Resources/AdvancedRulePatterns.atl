@@ -1,0 +1,260 @@
+-- ATL Advanced Rule Patterns test
+-- Tests lazy rules, called rules, complex bindings, and advanced transformation patterns
+module AdvancedRulePatterns;
+create OUT : TargetModel from IN : SourceModel;
+
+-- Global helpers for advanced rule patterns
+helper def : defaultCounter : Integer = 1;
+
+helper def : createUniqueId() : String =
+    'ID_' + thisModule.defaultCounter.toString();
+
+-- Helper to determine element priority
+helper context SourceModel!Element def : getPriority() : Integer =
+    if self.importance = 'HIGH' then 1
+    else if self.importance = 'MEDIUM' then 2
+    else 3
+    endif;
+
+-- Helper for complex conditional logic
+helper context SourceModel!Container def : shouldProcess() : Boolean =
+    self.elements->size() > 0 and
+    self.elements->exists(e | e.getPriority() <= 2) and
+    not self.name.oclIsUndefined();
+
+-- Helper for aggregating child elements
+helper context SourceModel!Container def : getProcessableElements() : Sequence(SourceModel!Element) =
+    self.elements->select(e | e.getPriority() <= 2)->sortedBy(e | e.getPriority());
+
+-- Helper for calculating container metrics
+helper context SourceModel!Container def : getMetrics() : String =
+    let totalElements : Integer = self.elements->size() in
+    let highPriority : Integer = self.elements->select(e | e.getPriority() = 1)->size() in
+    let mediumPriority : Integer = self.elements->select(e | e.getPriority() = 2)->size() in
+    'Total: ' + totalElements.toString() + ', High: ' + highPriority.toString() +
+    ', Medium: ' + mediumPriority.toString();
+
+-- Matched rule with complex guard conditions and multiple target elements
+rule Container2ProcessingUnit {
+    from
+        container : SourceModel!Container (
+            container.shouldProcess() and
+            container.elements->forAll(e | not e.name.oclIsUndefined())
+        )
+    to
+        -- Primary target with complex bindings
+        processingUnit : TargetModel!ProcessingUnit (
+            name <- container.name,
+            id <- thisModule.createUniqueId(),
+            priority <- container.getProcessableElements()->first().getPriority(),
+            elementCount <- container.elements->size(),
+            metrics <- container.getMetrics(),
+            isHighPriority <- container.getProcessableElements()->exists(e | e.getPriority() = 1),
+            processedElements <- container.getProcessableElements()
+        ),
+
+        -- Secondary target for metadata
+        metadata : TargetModel!Metadata (
+            parentUnit <- processingUnit,
+            creationTime <- 'NOW',
+            source <- container.name,
+            elementTypes <- container.elements->collect(e | e.oclType().name)->asSet()
+        ),
+
+        -- Conditional target based on priority
+        priorityMarker : TargetModel!PriorityMarker (
+            unit <- processingUnit,
+            level <- if container.getProcessableElements()->first().getPriority() = 1 then
+                'CRITICAL'
+            else if container.getProcessableElements()->first().getPriority() = 2 then
+                'IMPORTANT'
+            else
+                'NORMAL'
+            endif
+        )
+}
+
+-- Matched rule for individual elements with complex transformations
+rule Element2ProcessedItem {
+    from
+        element : SourceModel!Element (
+            element.getPriority() <= 2 and
+            not element.container.oclIsUndefined()
+        )
+    to
+        item : TargetModel!ProcessedItem (
+            name <- element.name,
+            originalPriority <- element.importance,
+            computedPriority <- element.getPriority(),
+            containerId <- element.container.name,
+            processingOrder <- element.container.getProcessableElements()->indexOf(element),
+            isFirst <- element.container.getProcessableElements()->first() = element,
+            isLast <- element.container.getProcessableElements()->last() = element,
+            siblingCount <- element.container.elements->size() - 1
+        )
+}
+
+-- Lazy rule for creating summaries (called explicitly)
+lazy rule CreateSummary {
+    from
+        container : SourceModel!Container
+    to
+        summary : TargetModel!Summary (
+            title <- 'Summary for ' + container.name,
+            totalElements <- container.elements->size(),
+            highPriorityCount <- container.elements->select(e | e.getPriority() = 1)->size(),
+            mediumPriorityCount <- container.elements->select(e | e.getPriority() = 2)->size(),
+            lowPriorityCount <- container.elements->select(e | e.getPriority() = 3)->size(),
+            averagePriority <- container.elements->collect(e | e.getPriority())->
+                iterate(p; sum : Real = 0.0 | sum + p) / container.elements->size(),
+            elementNames <- container.elements->collect(e | e.name)->
+                iterate(name; result : String = '' |
+                    if result = '' then name else result + ', ' + name endif
+                )
+        )
+}
+
+-- Lazy rule for creating detailed reports
+lazy rule CreateDetailedReport {
+    from
+        element : SourceModel!Element
+    to
+        report : TargetModel!DetailedReport (
+            elementName <- element.name,
+            elementType <- element.oclType().name,
+            priority <- element.importance,
+            numericPriority <- element.getPriority(),
+            containerInfo <- if not element.container.oclIsUndefined() then
+                'Container: ' + element.container.name + ' (' +
+                element.container.elements->size().toString() + ' elements)'
+            else
+                'No container'
+            endif,
+            position <- if not element.container.oclIsUndefined() then
+                element.container.elements->indexOf(element)
+            else
+                0
+            endif,
+            relatedElements <- if not element.container.oclIsUndefined() then
+                element.container.elements->select(e | e <> element)->size()
+            else
+                0
+            endif
+        )
+}
+
+-- Called rule for creating audit entries
+rule CreateAuditEntry {
+    from
+        source : SourceModel!Element
+    to
+        audit : TargetModel!AuditEntry (
+            timestamp <- 'TRANSFORMATION_TIME',
+            operation <- 'TRANSFORM',
+            sourceElement <- source.name,
+            sourceType <- source.oclType().name,
+            targetElement <- 'ProcessedItem',
+            priority <- source.getPriority().toString(),
+            containerName <- if not source.container.oclIsUndefined() then
+                source.container.name
+            else
+                'NONE'
+            endif
+        )
+}
+
+-- Matched rule that calls lazy rules explicitly
+rule HighPriorityContainer2SpecialUnit {
+    from
+        container : SourceModel!Container (
+            container.shouldProcess() and
+            container.elements->exists(e | e.getPriority() = 1)
+        )
+    to
+        specialUnit : TargetModel!SpecialUnit (
+            name <- container.name + '_SPECIAL',
+            id <- thisModule.createUniqueId(),
+            summary <- thisModule.CreateSummary(container),
+            criticalElements <- container.elements->select(e | e.getPriority() = 1),
+            reportCount <- container.elements->size(),
+            reports <- container.elements->collect(e | thisModule.CreateDetailedReport(e))
+        )
+}
+
+-- Rule with complex filtering and conditional targets
+rule FilteredContainer2OptimizedUnit {
+    from
+        container : SourceModel!Container (
+            container.elements->size() >= 5 and
+            container.elements->select(e | e.getPriority() <= 2)->size() >= 3
+        )
+    to
+        optimizedUnit : TargetModel!OptimizedUnit (
+            name <- container.name + '_OPTIMIZED',
+            filteredElements <- container.elements->select(e | e.getPriority() <= 2),
+            optimizationLevel <- if container.elements->size() > 10 then 'HIGH'
+                else if container.elements->size() > 7 then 'MEDIUM'
+                else 'LOW'
+                endif,
+            batchSize <- container.elements->select(e | e.getPriority() <= 2)->size(),
+            processingTime <- container.elements->select(e | e.getPriority() <= 2)->
+                iterate(e; time : Integer = 0 |
+                    time + if e.getPriority() = 1 then 3 else 2 endif
+                )
+        )
+}
+
+-- Query to find containers requiring special processing
+query ContainersNeedingSpecialProcessing =
+    SourceModel!Container.allInstances()
+        ->select(c | c.shouldProcess())
+        ->select(c | c.elements->exists(e | e.getPriority() = 1))
+        ->collect(c |
+            Tuple{
+                name : String = c.name,
+                criticalCount : Integer = c.elements->select(e | e.getPriority() = 1)->size(),
+                totalCount : Integer = c.elements->size(),
+                metrics : String = c.getMetrics()
+            }
+        )
+        ->sortedBy(info | info.criticalCount);
+
+-- Query to analyze processing complexity
+query ProcessingComplexityAnalysis =
+    let allContainers : Sequence(SourceModel!Container) = SourceModel!Container.allInstances() in
+    let processableContainers : Sequence(SourceModel!Container) =
+        allContainers->select(c | c.shouldProcess()) in
+    let totalElements : Integer = processableContainers->
+        iterate(c; sum : Integer = 0 | sum + c.elements->size()) in
+    let highPriorityElements : Integer = processableContainers->
+        iterate(c; sum : Integer = 0 |
+            sum + c.elements->select(e | e.getPriority() = 1)->size()) in
+    'Total processable containers: ' + processableContainers->size().toString() +
+    ', Total elements: ' + totalElements.toString() +
+    ', High priority elements: ' + highPriorityElements.toString() +
+    ', Complexity ratio: ' + (highPriorityElements * 100 / totalElements).toString() + '%';
+
+-- Query testing lazy rule invocation patterns
+query LazyRuleTestResults =
+    SourceModel!Container.allInstances()
+        ->select(c | c.shouldProcess())
+        ->collect(c | thisModule.CreateSummary(c))
+        ->collect(s |
+            Tuple{
+                title : String = s.title,
+                total : Integer = s.totalElements,
+                avgPriority : Real = s.averagePriority
+            }
+        )
+        ->sortedBy(info | info.avgPriority);
+
+-- Query for transformation statistics
+query TransformationStatistics =
+    let containers : Sequence(SourceModel!Container) = SourceModel!Container.allInstances() in
+    let elements : Sequence(SourceModel!Element) = SourceModel!Element.allInstances() in
+    let processedContainers : Integer = containers->select(c | c.shouldProcess())->size() in
+    let processedElements : Integer = elements->select(e | e.getPriority() <= 2)->size() in
+    'Input: ' + containers->size().toString() + ' containers, ' +
+    elements->size().toString() + ' elements. ' +
+    'Processed: ' + processedContainers.toString() + ' containers, ' +
+    processedElements.toString() + ' elements.';

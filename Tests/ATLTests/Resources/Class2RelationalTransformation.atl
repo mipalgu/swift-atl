@@ -1,0 +1,189 @@
+-- ATL Class to Relational transformation test
+-- Tests object-oriented metamodel transformation patterns with complex rules
+module Class2RelationalTransformation;
+create OUT : Relational from IN : Class;
+
+-- Global helper to get the standard object ID type
+helper def : objectIdType : Relational!Type =
+    Class!DataType.allInstances()->select(dt | dt.name = 'Integer')->first();
+
+-- Global helper to get string type
+helper def : stringType : Relational!Type =
+    Class!DataType.allInstances()->select(dt | dt.name = 'String')->first();
+
+-- Helper to determine if an attribute should create a foreign key
+helper context Class!Attribute def : createsForeignKey() : Boolean =
+    self.type.oclIsKindOf(Class!Class) and not self.multiValued;
+
+-- Helper to determine if an attribute needs a separate table
+helper context Class!Attribute def : needsSeparateTable() : Boolean =
+    self.multiValued;
+
+-- Helper to generate table name for multi-valued attributes
+helper context Class!Attribute def : getTableName() : String =
+    self.owner.name + '_' + self.name;
+
+-- Helper to generate foreign key column name
+helper context Class!Attribute def : getForeignKeyName() : String =
+    if self.type.oclIsKindOf(Class!Class) then
+        self.name + 'Id'
+    else
+        self.name
+    endif;
+
+-- Helper to get all non-multi-valued attributes for a class
+helper context Class!Class def : getNonMultiValuedAttributes() : Sequence(Class!Attribute) =
+    self.attr->select(a | not a.multiValued);
+
+-- Helper to get all multi-valued attributes for a class
+helper context Class!Class def : getMultiValuedAttributes() : Sequence(Class!Attribute) =
+    self.attr->select(a | a.multiValued);
+
+-- Helper to count total attributes
+helper context Class!Class def : getTotalAttributeCount() : Integer =
+    self.attr->size();
+
+-- Main rule: Transform Class to Table with primary key
+rule Class2Table {
+    from
+        c : Class!Class
+    to
+        table : Relational!Table (
+            name <- c.name,
+            col <- Sequence{primaryKey}->union(
+                c.getNonMultiValuedAttributes()->select(a |
+                    a.type.oclIsKindOf(Class!DataType)
+                )
+            )->union(
+                c.getNonMultiValuedAttributes()->select(a |
+                    a.createsForeignKey()
+                )->collect(a |
+                    thisModule.resolveTemp(a, 'foreignKey')
+                )
+            ),
+            key <- Set{primaryKey}
+        ),
+        primaryKey : Relational!Column (
+            name <- 'objectId',
+            type <- thisModule.objectIdType
+        )
+}
+
+-- Rule: Transform DataType to Type
+rule DataType2Type {
+    from
+        dt : Class!DataType
+    to
+        type : Relational!Type (
+            name <- dt.name
+        )
+}
+
+-- Rule: Transform simple DataType attributes to columns
+rule DataTypeAttribute2Column {
+    from
+        attr : Class!Attribute (
+            attr.type.oclIsKindOf(Class!DataType) and
+            not attr.multiValued
+        )
+    to
+        column : Relational!Column (
+            name <- attr.name,
+            type <- attr.type
+        )
+}
+
+-- Rule: Transform multi-valued DataType attributes to separate tables
+rule MultiValuedDataTypeAttribute2Table {
+    from
+        attr : Class!Attribute (
+            attr.type.oclIsKindOf(Class!DataType) and
+            attr.multiValued
+        )
+    to
+        table : Relational!Table (
+            name <- attr.getTableName(),
+            col <- Sequence{ownerIdColumn, valueColumn}
+        ),
+        ownerIdColumn : Relational!Column (
+            name <- attr.owner.name + 'Id',
+            type <- thisModule.objectIdType
+        ),
+        valueColumn : Relational!Column (
+            name <- attr.name,
+            type <- attr.type
+        )
+}
+
+-- Rule: Transform Class reference attributes to foreign key columns
+rule ClassAttribute2ForeignKey {
+    from
+        attr : Class!Attribute (
+            attr.type.oclIsKindOf(Class!Class) and
+            not attr.multiValued
+        )
+    to
+        foreignKey : Relational!Column (
+            name <- attr.getForeignKeyName(),
+            type <- thisModule.objectIdType
+        )
+}
+
+-- Rule: Transform multi-valued Class attributes to junction tables
+rule MultiValuedClassAttribute2JunctionTable {
+    from
+        attr : Class!Attribute (
+            attr.type.oclIsKindOf(Class!Class) and
+            attr.multiValued
+        )
+    to
+        junctionTable : Relational!Table (
+            name <- attr.getTableName(),
+            col <- Sequence{ownerIdColumn, targetIdColumn}
+        ),
+        ownerIdColumn : Relational!Column (
+            name <- attr.owner.name + 'Id',
+            type <- thisModule.objectIdType
+        ),
+        targetIdColumn : Relational!Column (
+            name <- attr.type.name + 'Id',
+            type <- thisModule.objectIdType
+        )
+}
+
+-- Query to analyze the class model complexity
+query ModelComplexity =
+    let classes : Sequence(Class!Class) = Class!Class.allInstances() in
+    let totalClasses : Integer = classes->size() in
+    let totalAttributes : Integer = classes->iterate(c; sum : Integer = 0 |
+        sum + c.getTotalAttributeCount()
+    ) in
+    let multiValuedAttrs : Integer = classes->iterate(c; count : Integer = 0 |
+        count + c.getMultiValuedAttributes()->size()
+    ) in
+    'Model has ' + totalClasses.toString() + ' classes, ' +
+    totalAttributes.toString() + ' total attributes, ' +
+    multiValuedAttrs.toString() + ' multi-valued attributes';
+
+-- Query to find classes that will generate the most tables
+query ComplexClasses = Class!Class.allInstances()->select(c |
+    c.getMultiValuedAttributes()->size() > 2
+)->collect(c |
+    Tuple{
+        className : String = c.name,
+        attributeCount : Integer = c.getTotalAttributeCount(),
+        extraTables : Integer = c.getMultiValuedAttributes()->size()
+    }
+)->sortedBy(t | t.extraTables);
+
+-- Query to validate foreign key relationships
+query ForeignKeyAnalysis = Class!Class.allInstances()->collect(c |
+    c.attr->select(a | a.createsForeignKey())->collect(a |
+        Tuple{
+            sourceClass : String = c.name,
+            attributeName : String = a.name,
+            targetClass : String = a.type.name,
+            foreignKeyName : String = a.getForeignKeyName()
+        }
+    )
+)->flatten();

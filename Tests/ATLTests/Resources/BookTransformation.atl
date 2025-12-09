@@ -1,0 +1,106 @@
+-- ATL Book to Publication transformation test
+-- Tests complex helper functions with iterate operations and conditional logic
+module BookTransformation;
+create OUT : Publication from IN : Book;
+
+-- Helper to collect all unique authors using iterate and conditional concatenation
+helper context Book!Book def : getAuthors() : String =
+    self.chapters->collect(e | e.author)->asOrderedSet()->
+        iterate(authorName; acc : String = '' |
+            acc +
+            if acc = ''
+                then authorName
+                else ' and ' + authorName
+            endif
+        );
+
+-- Helper to calculate total pages using iterate
+helper context Book!Book def : getTotalPages() : Integer =
+    self.chapters->collect(f | f.nbPages)->
+        iterate(pages; acc : Integer = 0 |
+            acc + pages
+        );
+
+-- Helper to get the longest chapter using iterate with conditional logic
+helper context Book!Book def : getLongestChapter() : String =
+    self.chapters->iterate(ch; longest : Book!Chapter = self.chapters->first() |
+        if ch.nbPages > longest.nbPages then ch else longest endif
+    ).title;
+
+-- Helper to count chapters above average length
+helper context Book!Book def : countLongChapters() : Integer =
+    let avgPages : Real = self.getTotalPages() / self.chapters->size() in
+    self.chapters->iterate(ch; count : Integer = 0 |
+        if ch.nbPages > avgPages then count + 1 else count endif
+    );
+
+-- Helper to create a summary of chapter statistics
+helper context Book!Book def : getChapterSummary() : String =
+    self.chapters->iterate(ch; summary : String = 'Chapters: ' |
+        summary + ch.title + ' (' + ch.nbPages.toString() + ' pages), '
+    );
+
+-- Helper using nested iterates for complex aggregation
+helper context Book!Book def : getDetailedAuthors() : String =
+    self.chapters->collect(ch |
+        Tuple{author : String = ch.author, pages : Integer = ch.nbPages}
+    )->asOrderedSet()->iterate(authorInfo; result : String = '' |
+        result + authorInfo.author + ' (' + authorInfo.pages.toString() + ' pages) '
+    );
+
+-- Main transformation rule with guard condition
+rule Book2Publication {
+    from
+        b : Book!Book (
+            b.getTotalPages() > 50 and
+            b.chapters->size() >= 3 and
+            b.chapters->forAll(ch | ch.nbPages > 0)
+        )
+    to
+        pub : Publication!Publication (
+            title <- b.title,
+            authors <- b.getAuthors(),
+            totalPages <- b.getTotalPages(),
+            chapterCount <- b.chapters->size(),
+            longestChapter <- b.getLongestChapter(),
+            longChapterCount <- b.countLongChapters(),
+            summary <- b.getChapterSummary(),
+            authorDetails <- b.getDetailedAuthors(),
+            publicationYear <- 2023,
+            isLongBook <- b.getTotalPages() > 300
+        )
+}
+
+-- Rule for short books (different output)
+rule ShortBook2Booklet {
+    from
+        b : Book!Book (
+            b.getTotalPages() <= 50 and
+            b.chapters->size() > 0
+        )
+    to
+        booklet : Publication!Booklet (
+            title <- b.title + ' (Booklet)',
+            author <- b.chapters->first().author,
+            pages <- b.getTotalPages(),
+            type <- 'Short Publication'
+        )
+}
+
+-- Query to find all books with more than 5 chapters
+query BooksWithManyChapters = Book!Book.allInstances()->select(b |
+    b.chapters->size() > 5
+)->collect(b | b.title);
+
+-- Query using complex iterate for statistical analysis
+query BookStatistics = Book!Book.allInstances()->iterate(book; stats : String = 'Book Statistics: ' |
+    stats + book.title + ' has ' + book.chapters->size().toString() + ' chapters totaling ' +
+    book.getTotalPages().toString() + ' pages. '
+);
+
+-- Query to test nested collection operations
+query ChapterAnalysis = Book!Book.allInstances()->collect(b |
+    b.chapters->select(ch | ch.nbPages > 20)->collect(ch |
+        Tuple{book : String = b.title, chapter : String = ch.title, pages : Integer = ch.nbPages}
+    )
+)->flatten()->sortedBy(t | t.pages);
