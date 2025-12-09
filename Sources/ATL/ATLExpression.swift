@@ -7,6 +7,7 @@
 //
 import ECore
 import Foundation
+import OrderedCollections
 
 // MARK: - Async Utilities
 
@@ -749,6 +750,166 @@ public struct ATLUnaryOperationExpression: ATLExpression, Sendable, Equatable, H
     }
 }
 
+// MARK: - Let Expression
+
+/// Represents let expressions in ATL/OCL for local variable bindings.
+///
+/// Let expressions introduce local variable bindings that are visible within
+/// the `in` expression scope, following the OCL syntax:
+/// ```
+/// let varName : Type = initExpression in bodyExpression
+/// ```
+///
+/// ## Example Usage
+///
+/// ```swift
+/// let letExpr = ATLLetExpression(
+///     variableName: "avgPages",
+///     variableType: "Real",
+///     initExpression: ATLBinaryOperationExpression(...),
+///     inExpression: bodyExpression
+/// )
+/// ```
+public struct ATLLetExpression: ATLExpression, Sendable, Equatable, Hashable {
+    /// The variable name for the let binding.
+    public let variableName: String
+
+    /// The optional type annotation for the variable.
+    public let variableType: String?
+
+    /// The initialisation expression for the variable.
+    public let initExpression: any ATLExpression
+
+    /// The body expression evaluated with the variable binding in scope.
+    public let inExpression: any ATLExpression
+
+    /// Creates a let expression.
+    ///
+    /// - Parameters:
+    ///   - variableName: The name of the variable to bind
+    ///   - variableType: Optional type annotation
+    ///   - initExpression: Expression to initialise the variable
+    ///   - inExpression: Expression evaluated with the binding in scope
+    public init(
+        variableName: String,
+        variableType: String? = nil,
+        initExpression: any ATLExpression,
+        inExpression: any ATLExpression
+    ) {
+        precondition(!variableName.isEmpty, "Variable name must not be empty")
+        self.variableName = variableName
+        self.variableType = variableType
+        self.initExpression = initExpression
+        self.inExpression = inExpression
+    }
+
+    @MainActor
+    public func evaluate(in context: ATLExecutionContext) async throws -> (any EcoreValue)? {
+        // Evaluate the initialisation expression
+        let initValue = try await initExpression.evaluate(in: context)
+
+        // Create new scope for the let binding
+        context.pushScope()
+        defer {
+            context.popScope()
+        }
+
+        // Bind the variable in the new scope
+        context.setVariable(variableName, value: initValue)
+
+        // Evaluate the in expression with the binding
+        return try await inExpression.evaluate(in: context)
+    }
+
+    public static func == (lhs: ATLLetExpression, rhs: ATLLetExpression) -> Bool {
+        return lhs.variableName == rhs.variableName
+            && lhs.variableType == rhs.variableType
+            && AnyHashable(lhs.initExpression) == AnyHashable(rhs.initExpression)
+            && AnyHashable(lhs.inExpression) == AnyHashable(rhs.inExpression)
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(variableName)
+        hasher.combine(variableType)
+        hasher.combine(AnyHashable(initExpression))
+        hasher.combine(AnyHashable(inExpression))
+    }
+}
+
+// MARK: - Tuple Expression
+
+/// Represents an ATL/OCL tuple expression with typed fields.
+///
+/// Tuple expressions create structured composite values with named fields,
+/// following the OCL syntax:
+/// ```
+/// Tuple{field1 : Type1 = value1, field2 : Type2 = value2, ...}
+/// ```
+///
+/// ## Example Usage
+///
+/// ```swift
+/// let tupleExpr = ATLTupleExpression(
+///     fields: [
+///         ("author", "String", ATLNavigationExpression(...)),
+///         ("pages", "Integer", ATLNavigationExpression(...))
+///     ]
+/// )
+/// ```
+public struct ATLTupleExpression: ATLExpression, Sendable, Equatable, Hashable {
+    /// Tuple field definition.
+    public typealias TupleField = (name: String, type: String?, value: any ATLExpression)
+
+    /// The fields of the tuple.
+    public let fields: [TupleField]
+
+    /// Creates a new tuple expression.
+    ///
+    /// - Parameter fields: The tuple fields with names, optional types, and value expressions
+    public init(fields: [TupleField]) {
+        self.fields = fields
+    }
+
+    @MainActor
+    public func evaluate(in context: ATLExecutionContext) async throws -> (any EcoreValue)? {
+        var result: OrderedDictionary<String, any EcoreValue> = [:]
+
+        for field in fields {
+            let value = try await field.value.evaluate(in: context)
+            if let value = value {
+                result[field.name] = value
+            }
+        }
+
+        // Return as a dictionary-like structure
+        return result as? (any EcoreValue)
+    }
+
+    public static func == (lhs: ATLTupleExpression, rhs: ATLTupleExpression) -> Bool {
+        guard lhs.fields.count == rhs.fields.count else { return false }
+
+        for (lField, rField) in zip(lhs.fields, rhs.fields) {
+            guard lField.name == rField.name && lField.type == rField.type else {
+                return false
+            }
+            guard AnyHashable(lField.value) == AnyHashable(rField.value) else {
+                return false
+            }
+        }
+
+        return true
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(fields.count)
+        for field in fields {
+            hasher.combine(field.name)
+            hasher.combine(field.type)
+            hasher.combine(AnyHashable(field.value))
+        }
+    }
+}
+
 /// Method call expression for OCL-style method invocations.
 public struct ATLMethodCallExpression: ATLExpression, Sendable, Equatable, Hashable {
     /// The receiver expression.
@@ -897,6 +1058,8 @@ public struct ATLMethodCallExpression: ATLExpression, Sendable, Equatable, Hasha
             return try handleAsSet(receiver)
         case let sig where sig.starts(with: "asBag"):
             return try handleAsBag(receiver)
+        case let sig where sig.starts(with: "asOrderedSet"):
+            return try handleAsOrderedSet(receiver)
 
         // Collection manipulation
         case let sig where sig.starts(with: "union") && arguments.count == 1:
@@ -919,6 +1082,8 @@ public struct ATLMethodCallExpression: ATLExpression, Sendable, Equatable, Hasha
             return try handleSquare(receiver)
 
         // String operations
+        case let sig where sig.starts(with: "toString"):
+            return try handleToString(receiver)
         case let sig where sig.starts(with: "toUpperCase"):
             return try handleToUpperCase(receiver)
         case let sig where sig.starts(with: "reverse"):
@@ -1030,6 +1195,13 @@ public struct ATLMethodCallExpression: ATLExpression, Sendable, Equatable, Hasha
     }
 
     // MARK: - Additional OCL Method Implementations
+
+    private func handleToString(_ receiverValue: (any EcoreValue)?) throws -> (any EcoreValue)? {
+        guard let value = receiverValue else {
+            return "null"
+        }
+        return "\(value)"
+    }
 
     private func handleToUpperCase(_ receiverValue: (any EcoreValue)?) throws -> (any EcoreValue)? {
         guard let stringValue = receiverValue as? String else {
@@ -1464,6 +1636,27 @@ public struct ATLMethodCallExpression: ATLExpression, Sendable, Equatable, Hasha
             throw ATLExecutionError.typeError("asBag() requires Collection receiver")
         }
         return collection.compactMap { $0 as? String }  // Convert to string array
+    }
+
+    /// Handles collection type conversion to OrderedSet.
+    private func handleAsOrderedSet(_ receiverValue: (any EcoreValue)?) throws -> (any EcoreValue)? {
+        guard let collection = receiverValue as? [Any] else {
+            throw ATLExecutionError.typeError("asOrderedSet() requires Collection receiver")
+        }
+
+        // Remove duplicates while preserving order
+        var seen = Set<String>()
+        var uniqueItems: [Any] = []
+
+        for item in collection {
+            let key = String(describing: item)
+            if !seen.contains(key) {
+                seen.insert(key)
+                uniqueItems.append(item)
+            }
+        }
+
+        return uniqueItems.compactMap { $0 as? String }
     }
 
     /// Handles collection `union` operation.

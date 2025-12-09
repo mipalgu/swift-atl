@@ -651,6 +651,41 @@ private class ATLSyntaxParser {
                 punct == "("
             {
                 advance()  // consume '('
+
+                // Special handling for TupleType which has field declarations: TupleType(name : Type, ...)
+                if typeName == "TupleType" {
+                    var fields: [String] = []
+                    while !isAtEnd() && !(currentToken()?.type == .punctuation(")")) {
+                        // Parse field name
+                        guard let fieldToken = currentToken(),
+                              case .identifier(let fieldName) = fieldToken.type else {
+                            throw ATLParseError.invalidSyntax("Expected field name in TupleType")
+                        }
+                        advance()
+
+                        // Expect ':'
+                        guard consumeOperator(":") else {
+                            throw ATLParseError.invalidSyntax("Expected ':' after field name in TupleType")
+                        }
+
+                        // Parse field type
+                        let fieldType = try parseTypeExpression()
+                        fields.append("\(fieldName) : \(fieldType)")
+
+                        // Check for comma or end
+                        if !consumePunctuation(",") {
+                            break
+                        }
+                    }
+
+                    guard consumePunctuation(")") else {
+                        throw ATLParseError.invalidSyntax("Expected ')' after TupleType fields")
+                    }
+
+                    return "\(typeName)(\(fields.joined(separator: ", ")))"
+                }
+
+                // Regular generic type with single type parameter
                 let elementType = try parseTypeExpression()
                 guard let closingTok = currentToken(),
                     case .punctuation(let closingPunct) = closingTok.type,
@@ -889,7 +924,34 @@ private class ATLSyntaxParser {
                 throw ATLParseError.invalidSyntax(
                     "Expected 'else' in conditional expression, found '\(currentTok)'")
             }
-            let elseExpr = try parseExpression()
+
+            // Check if this is an 'else if' chain (no endif for nested if)
+            let elseExpr: any ATLExpression
+            if let token = currentToken(), case .keyword(let keyword) = token.type, keyword == "if" {
+                // This is 'else if' - parse as nested conditional WITHOUT consuming endif
+                // (the endif belongs to the outermost if)
+                advance()  // consume 'if'
+                let nestedCondition = try parseOrExpression()
+
+                guard consumeKeyword("then") else {
+                    throw ATLParseError.invalidSyntax("Expected 'then' after 'else if' condition")
+                }
+                let nestedThen = try parseExpression()
+
+                guard consumeKeyword("else") else {
+                    throw ATLParseError.invalidSyntax("Expected 'else' in 'else if' chain")
+                }
+                let nestedElse = try parseExpression()
+
+                elseExpr = ATLConditionalExpression(
+                    condition: nestedCondition,
+                    thenExpression: nestedThen,
+                    elseExpression: nestedElse
+                )
+            } else {
+                // Regular else clause
+                elseExpr = try parseExpression()
+            }
 
             guard consumeKeyword("endif") else {
                 let currentTok = currentToken()?.value ?? "EOF"
@@ -1028,11 +1090,22 @@ private class ATLSyntaxParser {
     }
 
     private func parseUnaryExpression() throws -> any ATLExpression {
+        // Handle 'not' operator
         if currentToken()?.type == .keyword("not") {
             advance()
             let expr = try parseUnaryExpression()
             return ATLUnaryOperationExpression(
                 operator: .not,
+                operand: expr
+            )
+        }
+
+        // Handle unary minus (e.g., -3, -x)
+        if let token = currentToken(), case .operator(let op) = token.type, op == "-" {
+            advance()
+            let expr = try parseUnaryExpression()
+            return ATLUnaryOperationExpression(
+                operator: .minus,
                 operand: expr
             )
         }
@@ -1129,6 +1202,10 @@ private class ATLSyntaxParser {
         }
 
         switch token.type {
+        case .keyword(let kw) where kw == "let":
+            // Parse let expression: let varName : Type = initExpr in bodyExpr
+            return try parseLetExpression()
+
         case .stringLiteral(let value):
             advance()
             return ATLLiteralExpression(value: value)
@@ -1140,6 +1217,10 @@ private class ATLSyntaxParser {
         case .booleanLiteral(let value):
             advance()
             return ATLLiteralExpression(value: value)
+
+        case .identifier(let name) where name == "Tuple":
+            // Parse tuple expression: Tuple{field1 : Type1 = expr1, field2 : Type2 = expr2, ...}
+            return try parseTupleExpression()
 
         case .identifier(let collectionType)
         where collectionType == "Sequence" || collectionType == "Set" || collectionType == "Bag":
@@ -1365,6 +1446,17 @@ private class ATLSyntaxParser {
         return try parseConditionalExpression()
     }
 
+    /// Parses an expression until encountering a specific keyword.
+    ///
+    /// - Parameter keyword: The keyword to stop at
+    /// - Returns: The parsed expression
+    /// - Throws: ATLParseError if parsing fails
+    private func parseExpressionUntilKeyword(_ keyword: String) throws -> any ATLExpression {
+        // Parse expression, but stop when we encounter the specified keyword
+        // Use parseOrExpression to avoid consuming keywords like 'in'
+        return try parseOrExpression()
+    }
+
     /// Parses an expression until encountering a ')' token.
     ///
     /// - Returns: The parsed expression
@@ -1377,6 +1469,99 @@ private class ATLSyntaxParser {
 
     private func isAtEnd() -> Bool {
         return position >= tokens.count || currentToken()?.type == .eof
+    }
+
+    /// Parses a let expression: let varName : Type = initExpr in bodyExpr
+    private func parseLetExpression() throws -> any ATLExpression {
+        // Consume 'let' keyword
+        guard consumeKeyword("let") else {
+            throw ATLParseError.invalidSyntax("Expected 'let' keyword")
+        }
+
+        // Parse variable name
+        guard let varToken = currentToken(), case .identifier(let varName) = varToken.type else {
+            throw ATLParseError.invalidSyntax("Expected variable name after 'let'")
+        }
+        advance()
+
+        // Parse optional type annotation: : Type
+        var varType: String? = nil
+        if consumeOperator(":") {
+            varType = try parseTypeExpression()
+        }
+
+        // Expect '=' for initialisation
+        guard consumeOperator("=") else {
+            throw ATLParseError.invalidSyntax("Expected '=' after variable declaration in let expression")
+        }
+
+        // Parse initialisation expression (stopping before 'in')
+        let initExpr = try parseExpressionUntilKeyword("in")
+
+        // Expect 'in' keyword
+        guard consumeKeyword("in") else {
+            throw ATLParseError.invalidSyntax("Expected 'in' keyword after let initialisation")
+        }
+
+        // Parse body expression
+        let bodyExpr = try parseExpression()
+
+        return ATLLetExpression(
+            variableName: varName,
+            variableType: varType,
+            initExpression: initExpr,
+            inExpression: bodyExpr
+        )
+    }
+
+    /// Parses a tuple expression: Tuple{field1 : Type1 = expr1, field2 : Type2 = expr2, ...}
+    private func parseTupleExpression() throws -> any ATLExpression {
+        // Consume 'Tuple' identifier
+        advance()
+
+        // Expect '{'
+        guard consumePunctuation("{") else {
+            throw ATLParseError.invalidSyntax("Expected '{' after 'Tuple'")
+        }
+
+        var fields: [(name: String, type: String?, value: any ATLExpression)] = []
+
+        // Parse fields
+        while !isAtEnd() && !(currentToken()?.type == .punctuation("}")) {
+            // Parse field name
+            guard let fieldToken = currentToken(), case .identifier(let fieldName) = fieldToken.type else {
+                throw ATLParseError.invalidSyntax("Expected field name in tuple")
+            }
+            advance()
+
+            // Parse optional type annotation: : Type
+            var fieldType: String? = nil
+            if consumeOperator(":") {
+                fieldType = try parseTypeExpression()
+            }
+
+            // Expect '=' for field value
+            guard consumeOperator("=") else {
+                throw ATLParseError.invalidSyntax("Expected '=' after field name in tuple")
+            }
+
+            // Parse field value expression
+            let fieldValue = try parseExpression()
+
+            fields.append((name: fieldName, type: fieldType, value: fieldValue))
+
+            // Check for comma or end of tuple
+            if !consumePunctuation(",") {
+                break
+            }
+        }
+
+        // Expect '}'
+        guard consumePunctuation("}") else {
+            throw ATLParseError.invalidSyntax("Expected '}' after tuple fields")
+        }
+
+        return ATLTupleExpression(fields: fields)
     }
 
     @discardableResult
