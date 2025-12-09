@@ -120,8 +120,8 @@ public struct ATLMatchedRule: Sendable, Equatable, Hashable {
         case (nil, nil):
             return true
         case (let lhsGuard?, let rhsGuard?):
-            // Both have guards - compare their string representations as a fallback
-            return String(describing: lhsGuard) == String(describing: rhsGuard)
+            // Both have guards - use safe ATL expression comparison
+            return areATLExpressionsEqual(lhsGuard, rhsGuard)
         default:
             return false  // One has guard, other doesn't
         }
@@ -134,7 +134,7 @@ public struct ATLMatchedRule: Sendable, Equatable, Hashable {
         hasher.combine(sourcePattern)
         hasher.combine(targetPatterns)
         if let guardExpression = `guard` {
-            hasher.combine(String(describing: guardExpression))
+            hashATLExpression(guardExpression, into: &hasher)
         }
     }
 

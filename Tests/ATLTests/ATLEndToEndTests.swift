@@ -413,6 +413,114 @@ struct ATLEndToEndTests {
     private func cleanupTempFile(_ url: URL) {
         try? FileManager.default.removeItem(at: url)
     }
+
+    @Test("Debug generic type parsing issue")
+    func testDebugGenericTypeParsing() async throws {
+        // Given - minimal ATL content that might trigger the issue
+        let minimalRuleContent = """
+            module TestModule;
+            create OUT : Target from IN : Source;
+
+            rule SimpleRule {
+                from
+                    s : Source!Element
+                to
+                    t : Target!Element (
+                        name <- s.name
+                    )
+            }
+            """
+        
+        let parser = ATLParser()
+
+        // When & Then - this should help isolate the parsing issue
+        let module = try await parser.parseContent(minimalRuleContent, filename: "debug.atl")
+        #expect(module.name == "TestModule")
+    }
+
+    @Test("Debug even simpler parsing issue")
+    func testEvenSimplerParsing() async throws {
+        // Given - just a target pattern without source
+        let simplestContent = """
+            module TestModule;
+            create OUT : Target from IN : Source;
+
+            rule SimpleRule {
+                from
+                    s : Source!Element
+                to
+                    t : Target!Element
+            }
+            """
+        
+        let parser = ATLParser()
+
+        // When & Then
+        let module = try await parser.parseContent(simplestContent, filename: "simplest.atl")
+        #expect(module.name == "TestModule")
+    }
+
+    @Test("Debug property binding parsing issue")
+    func testPropertyBindingParsing() async throws {
+        // Given - just add property bindings to see where it fails
+        let propertyBindingContent = """
+            module TestModule;
+            create OUT : Target from IN : Source;
+
+            rule SimpleRule {
+                from
+                    s : Source!Element
+                to
+                    t : Target!Element (
+                        name <- s.name
+                    )
+            }
+            """
+        
+        let parser = ATLParser()
+
+        // When & Then
+        let module = try await parser.parseContent(propertyBindingContent, filename: "binding.atl")
+        #expect(module.name == "TestModule")
+    }
+
+    @Test("Debug CollectionOperations parsing issue")
+    func testDebugCollectionOperations() async throws {
+        // Given - just the first helper from CollectionOperations.atl
+        let collectionHelperContent = """
+            module CollectionOperations;
+
+            helper def : createNumberSequence(start : Integer, count : Integer) : Sequence(Integer) =
+                if count <= 0 then
+                    Sequence{}
+                else
+                    Sequence{start}->union(createNumberSequence(start + 1, count - 1))
+                endif;
+            """
+        
+        let parser = ATLParser()
+
+        // When & Then
+        let module = try await parser.parseContent(collectionHelperContent, filename: "collection.atl")
+        #expect(module.name == "CollectionOperations")
+    }
+
+    @Test("Debug simple lambda parsing issue")
+    func testDebugSimpleLambda() async throws {
+        // Given - just a simple lambda expression
+        let simpleLambdaContent = """
+            module TestModule;
+
+            helper context Sequence(Integer) def : filterEven() : Sequence(Integer) =
+                self->select(n | n.mod(2) = 0);
+            """
+        
+        let parser = ATLParser()
+
+        // When & Then
+        let module = try await parser.parseContent(simpleLambdaContent, filename: "lambda.atl")
+        #expect(module.name == "TestModule")
+    }
 }
 
 // MARK: - Test Helper Extensions

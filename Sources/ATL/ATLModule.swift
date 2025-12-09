@@ -125,8 +125,8 @@ public struct ATLModule: Sendable, Equatable, Hashable {
 
     public static func == (lhs: ATLModule, rhs: ATLModule) -> Bool {
         return lhs.name == rhs.name
-            && lhs.sourceMetamodels == rhs.sourceMetamodels
-            && lhs.targetMetamodels == rhs.targetMetamodels
+            && areMetamodelsEqual(lhs.sourceMetamodels, rhs.sourceMetamodels)
+            && areMetamodelsEqual(lhs.targetMetamodels, rhs.targetMetamodels)
             && lhs.helpers.keys == rhs.helpers.keys
             && lhs.helpers.allSatisfy { key, lhsHelper in
                 if let rhsHelper = rhs.helpers[key] {
@@ -144,6 +144,15 @@ public struct ATLModule: Sendable, Equatable, Hashable {
         hasher.combine(name)
         hasher.combine(sourceMetamodels.keys.sorted())
         hasher.combine(targetMetamodels.keys.sorted())
+        // Hash metamodel content semantically
+        for (key, package) in sourceMetamodels.sorted(by: { $0.key < $1.key }) {
+            hasher.combine(key)
+            hashEPackageSemantics(package, into: &hasher)
+        }
+        for (key, package) in targetMetamodels.sorted(by: { $0.key < $1.key }) {
+            hasher.combine(key)
+            hashEPackageSemantics(package, into: &hasher)
+        }
         for (key, helper) in helpers.sorted(by: { $0.key < $1.key }) {
             hasher.combine(key)
             hasher.combine(helper.hashValue())
@@ -151,6 +160,42 @@ public struct ATLModule: Sendable, Equatable, Hashable {
         hasher.combine(matchedRules)
         hasher.combine(calledRules.keys.sorted())
     }
+}
+
+// MARK: - Semantic Equality Helpers
+
+/// Compare two metamodel dictionaries for semantic equality.
+private func areMetamodelsEqual(
+    _ lhs: OrderedDictionary<String, EPackage>,
+    _ rhs: OrderedDictionary<String, EPackage>
+) -> Bool {
+    guard lhs.count == rhs.count else { return false }
+
+    for (key, lhsPackage) in lhs {
+        guard let rhsPackage = rhs[key] else { return false }
+        if !areEPackagesEqual(lhsPackage, rhsPackage) {
+            return false
+        }
+    }
+    return true
+}
+
+/// Compare two EPackages for semantic equality (ignoring unique IDs).
+private func areEPackagesEqual(_ lhs: EPackage, _ rhs: EPackage) -> Bool {
+    return lhs.name == rhs.name
+        && lhs.nsURI == rhs.nsURI
+        && lhs.nsPrefix == rhs.nsPrefix
+        && lhs.eClassifiers.count == rhs.eClassifiers.count
+        && lhs.eSubpackages.count == rhs.eSubpackages.count
+}
+
+/// Hash an EPackage based on semantic content (ignoring unique IDs).
+private func hashEPackageSemantics(_ package: EPackage, into hasher: inout Hasher) {
+    hasher.combine(package.name)
+    hasher.combine(package.nsURI)
+    hasher.combine(package.nsPrefix)
+    hasher.combine(package.eClassifiers.count)
+    hasher.combine(package.eSubpackages.count)
 }
 
 // MARK: - ATL Helper Type Protocol
@@ -390,7 +435,7 @@ public struct ATLHelperWrapper: ATLHelperType, Sendable, Equatable, Hashable {
     public let parameters: [ATLParameter]
 
     /// The body expression (stored as any ATLExpression).
-    private let bodyExpression: any ATLExpression
+    public let bodyExpression: any ATLExpression
 
     // MARK: - Initialisation
 
@@ -418,21 +463,19 @@ public struct ATLHelperWrapper: ATLHelperType, Sendable, Equatable, Hashable {
 
     // MARK: - ATLHelperType Conformance
 
+    @MainActor
     public func evaluate(with arguments: [(any EcoreValue)?], in context: ATLExecutionContext)
         async throws -> (any EcoreValue)?
     {
         // Set up parameter bindings in execution context
-        await context.pushScope()
+        context.pushScope()
 
         defer {
-            Task {
-                await context.popScope()
-            }
+            context.popScope()
         }
 
-        // Bind parameters to arguments
         for (parameter, argument) in zip(parameters, arguments) {
-            await context.setVariable(parameter.name, value: argument)
+            context.setVariable(parameter.name, value: argument)
         }
 
         // Evaluate the body expression

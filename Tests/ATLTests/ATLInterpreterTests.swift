@@ -5,7 +5,6 @@
 //  Created by Rene Hexel on 7/12/2025.
 //  Copyright © 2025 Rene Hexel. All rights reserved.
 //
-
 import ECore
 import OrderedCollections
 import Testing
@@ -37,6 +36,7 @@ import Testing
 /// - Rule execution and element creation
 /// - Error handling and type checking
 @Suite("ATL Interpreter Tests")
+@MainActor
 struct ATLInterpreterTests {
 
     // MARK: - Basic Expression Tests
@@ -64,8 +64,8 @@ struct ATLInterpreterTests {
     func testVariableExpressionEvaluation() async throws {
         // Given
         let context = await createTestContext()
-        await context.setVariable("testVar", value: "Test Value")
-        await context.setVariable("numberVar", value: 123)
+        context.setVariable("testVar", value: "Test Value")
+        context.setVariable("numberVar", value: 123)
 
         let stringVar = ATLVariableExpression(name: "testVar")
         let numberVar = ATLVariableExpression(name: "numberVar")
@@ -164,7 +164,7 @@ struct ATLInterpreterTests {
         // Given
         let context = await createTestContext()
         let collection = ["apple", "banana", "cherry"]
-        await context.setVariable("fruits", value: collection)
+        context.setVariable("fruits", value: collection)
 
         let sizeCall = ATLMethodCallExpression(
             receiver: ATLVariableExpression(name: "fruits"),
@@ -185,8 +185,8 @@ struct ATLInterpreterTests {
         let emptyCollection: [String] = []
         let nonEmptyCollection = ["item"]
 
-        await context.setVariable("emptyList", value: emptyCollection)
-        await context.setVariable("nonEmptyList", value: nonEmptyCollection)
+        context.setVariable("emptyList", value: emptyCollection)
+        context.setVariable("nonEmptyList", value: nonEmptyCollection)
 
         let emptyCheck = ATLMethodCallExpression(
             receiver: ATLVariableExpression(name: "emptyList"),
@@ -212,7 +212,7 @@ struct ATLInterpreterTests {
         // Given
         let context = await createTestContext()
         let collection = ["apple", "banana", "cherry"]
-        await context.setVariable("fruits", value: collection)
+        context.setVariable("fruits", value: collection)
 
         let includesCall = ATLMethodCallExpression(
             receiver: ATLVariableExpression(name: "fruits"),
@@ -239,7 +239,7 @@ struct ATLInterpreterTests {
     func testStringOperations() async throws {
         // Given
         let context = await createTestContext()
-        await context.setVariable("testString", value: "hello world")
+        context.setVariable("testString", value: "hello world")
 
         let upperCaseCall = ATLMethodCallExpression(
             receiver: ATLVariableExpression(name: "testString"),
@@ -264,7 +264,7 @@ struct ATLInterpreterTests {
     func testIntegerOperations() async throws {
         // Given
         let context = await createTestContext()
-        await context.setVariable("testNumber", value: 15)
+        context.setVariable("testNumber", value: 15)
 
         let modCall = ATLMethodCallExpression(
             receiver: ATLVariableExpression(name: "testNumber"),
@@ -350,7 +350,7 @@ struct ATLInterpreterTests {
     func testTypeErrorHandling() async throws {
         // Given
         let context = await createTestContext()
-        await context.setVariable("stringVar", value: "not a number")
+        context.setVariable("stringVar", value: "not a number")
 
         let invalidOperation = ATLBinaryOperationExpression(
             left: ATLVariableExpression(name: "stringVar"),
@@ -399,7 +399,7 @@ struct ATLInterpreterTests {
     func testUnsupportedOperationError() async throws {
         // Given
         let context = await createTestContext()
-        await context.setVariable("testValue", value: "test")
+        context.setVariable("testValue", value: "test")
 
         let unsupportedCall = ATLMethodCallExpression(
             receiver: ATLVariableExpression(name: "testValue"),
@@ -423,25 +423,25 @@ struct ATLInterpreterTests {
     func testVariableScoping() async throws {
         // Given
         let context = await createTestContext()
-        await context.setVariable("globalVar", value: "global")
+        context.setVariable("globalVar", value: "global")
 
         // When - push scope and set local variable
-        await context.pushScope()
-        await context.setVariable("localVar", value: "local")
-        await context.setVariable("globalVar", value: "shadowed")
+        context.pushScope()
+        context.setVariable("localVar", value: "local")
+        context.setVariable("globalVar", value: "shadowed")
 
         // Access variables in nested scope
-        let globalInScope = try await context.getVariable("globalVar")
-        let localInScope = try await context.getVariable("localVar")
+        let globalInScope = try context.getVariable("globalVar")
+        let localInScope = try context.getVariable("localVar")
 
         // Pop scope
-        await context.popScope()
+        context.popScope()
 
         // Access variables after popping scope
-        let globalAfterPop = try await context.getVariable("globalVar")
+        let globalAfterPop = try context.getVariable("globalVar")
 
         do {
-            _ = try await context.getVariable("localVar")
+            _ = try context.getVariable("localVar")
             #expect(Bool(false), "Local variable should not exist after pop")
         } catch {
             // Expected - local variable should be gone
@@ -457,40 +457,40 @@ struct ATLInterpreterTests {
     func testNestedScoping() async throws {
         // Given
         let context = await createTestContext()
-        await context.setVariable("level0", value: 0)
+        context.setVariable("level0", value: 0)
 
         // When - create nested scopes
-        await context.pushScope()
-        await context.setVariable("level1", value: 1)
+        context.pushScope()
+        context.setVariable("level1", value: 1)
 
-        await context.pushScope()
-        await context.setVariable("level2", value: 2)
+        context.pushScope()
+        context.setVariable("level2", value: 2)
 
         // All variables should be accessible
-        #expect(try await context.getVariable("level0") as? Int == 0)
-        #expect(try await context.getVariable("level1") as? Int == 1)
-        #expect(try await context.getVariable("level2") as? Int == 2)
+        #expect(try context.getVariable("level0") as? Int == 0)
+        #expect(try context.getVariable("level1") as? Int == 1)
+        #expect(try context.getVariable("level2") as? Int == 2)
 
         // Pop one level
-        await context.popScope()
+        context.popScope()
 
-        #expect(try await context.getVariable("level0") as? Int == 0)
-        #expect(try await context.getVariable("level1") as? Int == 1)
+        #expect(try context.getVariable("level0") as? Int == 0)
+        #expect(try context.getVariable("level1") as? Int == 1)
 
         do {
-            _ = try await context.getVariable("level2")
+            _ = try context.getVariable("level2")
             #expect(Bool(false), "level2 should not be accessible")
         } catch {
             // Expected
         }
 
         // Pop to root level
-        await context.popScope()
+        context.popScope()
 
-        #expect(try await context.getVariable("level0") as? Int == 0)
+        #expect(try context.getVariable("level0") as? Int == 0)
 
         do {
-            _ = try await context.getVariable("level1")
+            _ = try context.getVariable("level1")
             #expect(Bool(false), "level1 should not be accessible")
         } catch {
             // Expected
@@ -515,17 +515,19 @@ struct ATLInterpreterTests {
             targetMetamodels: ["Target": dummyTargetMetamodel]
         )
 
+        let executionEngine = ECoreExecutionEngine(models: [:])
         return ATLExecutionContext(
             module: module,
             sources: [:],
-            targets: [:]
+            targets: [:],
+            executionEngine: executionEngine
         )
     }
 
     /// Creates a test execution context with sample data.
     ///
     /// - Returns: ATL execution context with sample source and target models
-    private func createContextWithSampleData() async -> ATLExecutionContext {
+    private func createTestContextWithSampleData() async -> ATLExecutionContext {
         // Create minimal dummy metamodels to satisfy ATLModule requirements
         let dummySourceMetamodel = EPackage(
             name: "TestSource", nsURI: "test://source", nsPrefix: "src")
@@ -545,17 +547,19 @@ struct ATLInterpreterTests {
         let sources: OrderedDictionary<String, Resource> = ["Source": sourceResource]
         let targets: OrderedDictionary<String, Resource> = ["Target": targetResource]
 
+        let executionEngine = ECoreExecutionEngine(models: [:])
         let context = ATLExecutionContext(
             module: module,
             sources: sources,
-            targets: targets
+            targets: targets,
+            executionEngine: executionEngine
         )
 
         // Add some sample data
-        await context.setVariable("sampleString", value: "Hello ATL")
-        await context.setVariable("sampleNumber", value: 42)
-        await context.setVariable("sampleBoolean", value: true)
-        await context.setVariable("sampleArray", value: ["a", "b", "c"])
+        context.setVariable("sampleString", value: "Hello ATL")
+        context.setVariable("sampleNumber", value: 42)
+        context.setVariable("sampleBoolean", value: true)
+        context.setVariable("sampleArray", value: ["a", "b", "c"])
 
         return context
     }

@@ -176,6 +176,7 @@ struct TransformCommand: AsyncParsableCommand {
     @Flag(name: .shortAndLong, help: "Enable verbose output")
     var verbose: Bool = false
 
+    @MainActor
     func run() async throws {
         if verbose {
             print("🚀 Starting ATL transformation: \(transformation)")
@@ -222,7 +223,7 @@ struct TransformCommand: AsyncParsableCommand {
             )
 
             // Display execution statistics
-            let stats = await virtualMachine.getStatistics()
+            let stats = virtualMachine.getStatistics()
             if verbose {
                 print("📈 Transformation Statistics:")
                 print(stats.summary())

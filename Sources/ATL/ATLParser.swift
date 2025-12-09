@@ -213,6 +213,11 @@ private class ATLLexer {
                 advance()  // =
                 return ATLToken(
                     type: .`operator`("<="), value: "<=", line: startLine, column: startColumn)
+            } else if peek() == "-" {
+                advance()  // <
+                advance()  // -
+                return ATLToken(
+                    type: .`operator`("<-"), value: "<-", line: startLine, column: startColumn)
             }
         } else if char == ">" && peek() == "=" {
             advance()  // >
@@ -224,11 +229,6 @@ private class ATLLexer {
             advance()  // >
             return ATLToken(
                 type: .`operator`("->"), value: "->", line: startLine, column: startColumn)
-        } else if char == "<" && peek() == "-" {
-            advance()  // <
-            advance()  // -
-            return ATLToken(
-                type: .`operator`("<-"), value: "<-", line: startLine, column: startColumn)
         }
 
         // Single-character operators
@@ -298,8 +298,7 @@ private class ATLLexer {
         var value = ""
 
         while position < content.endIndex
-            && (content[position].isLetter || content[position].isNumber || content[position] == "_"
-                || content[position] == "!")
+            && (content[position].isLetter || content[position].isNumber || content[position] == "_")
         {
             value.append(content[position])
             advance()
@@ -563,17 +562,15 @@ private class ATLSyntaxParser {
         }
 
         // Parse return type - consume colon
-        guard currentToken()?.type == .`operator`(":") else {
+        guard consumeOperator(":") else {
             throw ATLParseError.invalidSyntax("Expected ':' before return type")
         }
-        advance()
         let returnType = try parseTypeExpression()
 
         // Consume equals operator
-        guard currentToken()?.type == .`operator`("=") else {
+        guard consumeOperator("=") else {
             throw ATLParseError.invalidSyntax("Expected '=' before helper body")
         }
-        advance()
 
         let bodyExpression = try parseExpression()
 
@@ -599,7 +596,9 @@ private class ATLSyntaxParser {
             }
             advance()
 
-            consumeOperator(":")
+            guard consumeOperator(":") else {
+                throw ATLParseError.invalidSyntax("Expected ':' after parameter name")
+            }
             let paramType = try parseTypeExpression()
 
             parameters.append(ATLParameter(name: paramName, type: paramType))
@@ -616,31 +615,27 @@ private class ATLSyntaxParser {
 
     private func parseTypeExpression() throws -> String {
         guard let typeToken = currentToken() else {
-            throw ATLParseError.invalidSyntax("Expected type expression")
+            throw ATLParseError.invalidSyntax("Expected type expression but reached end of input")
         }
 
+
         switch typeToken.type {
-        case .identifier(let typeName):
+        case .identifier(let typeName), .keyword(let typeName):
             advance()
 
-            // Handle generic types like Sequence(Type), Set(Type), etc.
-            if currentToken()?.type == .punctuation("(") {
-                advance() // consume '('
-                let elementType = try parseTypeExpression()
-                guard currentToken()?.type == .punctuation(")") else {
-                    throw ATLParseError.invalidSyntax("Expected ')' after generic type parameter")
-                }
-                advance() // consume ')'
-                return "\(typeName)(\(elementType))"
-            }
-
-            // Check for metamodel qualified type: Source!Person
-            if currentToken()?.type == .`operator`("!") {
+            // Check for metamodel qualified type: Source!Person (do this first)
+            if let currentTok = currentToken(), case .`operator`(let op) = currentTok.type, op == "!" {
                 advance()
 
-                guard let classToken = currentToken(),
-                    case .identifier(let className) = classToken.type
-                else {
+                guard let classToken = currentToken() else {
+                    throw ATLParseError.invalidSyntax("Expected class name after '!'")
+                }
+                
+                let className: String
+                switch classToken.type {
+                case .identifier(let name), .keyword(let name):
+                    className = name
+                default:
                     throw ATLParseError.invalidSyntax("Expected class name after '!'")
                 }
                 advance()
@@ -648,10 +643,26 @@ private class ATLSyntaxParser {
                 return "\(typeName)!\(className)"
             }
 
+            // Handle generic types like Sequence(Type), Set(Type), etc.
+            // Only for non-metamodel qualified types
+            if let currentTok = currentToken(), case .punctuation(let punct) = currentTok.type, punct == "(" {
+                advance() // consume '('
+                let elementType = try parseTypeExpression()
+                guard let closingTok = currentToken(), 
+                      case .punctuation(let closingPunct) = closingTok.type, 
+                      closingPunct == ")" else {
+                    let currentValue = currentToken()?.value ?? "EOF"
+                    let position = "line \(currentToken()?.line ?? -1), column \(currentToken()?.column ?? -1)"
+                    throw ATLParseError.invalidSyntax("Expected ')' after generic type parameter '\(elementType)', but found '\(currentValue)' at \(position). Context: parsing type '\(typeName)'")
+                }
+                advance() // consume ')'
+                return "\(typeName)(\(elementType))"
+            }
+
             return typeName
 
         default:
-            throw ATLParseError.invalidSyntax("Expected type identifier")
+            throw ATLParseError.invalidSyntax("Expected type identifier, but found token: '\(typeToken.value)' of type \(typeToken.type)")
         }
     }
 
@@ -676,7 +687,9 @@ private class ATLSyntaxParser {
     }
 
     private func parseMatchedRule(name: String) throws -> ATLMatchedRule {
-        consumePunctuation("{")
+        guard consumePunctuation("{") else {
+            throw ATLParseError.invalidSyntax("Expected '{' to start matched rule body")
+        }
 
         // Parse 'from' clause
         guard consumeKeyword("from") else {
@@ -706,7 +719,9 @@ private class ATLSyntaxParser {
             try skipDoBlock()
         }
 
-        consumePunctuation("}")
+        guard consumePunctuation("}") else {
+            throw ATLParseError.invalidSyntax("Expected '}' to end matched rule")
+        }
 
         return ATLMatchedRule(
             name: name,
@@ -718,9 +733,13 @@ private class ATLSyntaxParser {
     private func parseCalledRule(name: String) throws -> ATLCalledRule {
         advance()  // consume '('
         let parameters = try parseParameterList()
-        consumePunctuation(")")
+        guard consumePunctuation(")") else {
+            throw ATLParseError.invalidSyntax("Expected ')' after called rule parameters")
+        }
 
-        consumePunctuation("{")
+        guard consumePunctuation("{") else {
+            throw ATLParseError.invalidSyntax("Expected '{' to start called rule body")
+        }
 
         // Parse 'to' clause
         guard consumeKeyword("to") else {
@@ -738,7 +757,9 @@ private class ATLSyntaxParser {
             }
         } while !isAtEnd() && currentToken()?.type != .punctuation("}")
 
-        consumePunctuation("}")
+        guard consumePunctuation("}") else {
+            throw ATLParseError.invalidSyntax("Expected '}' to end called rule")
+        }
 
         return ATLCalledRule(
             name: name,
@@ -756,7 +777,9 @@ private class ATLSyntaxParser {
         }
         advance()
 
-        consumeOperator(":")
+        guard consumeOperator(":") else {
+            throw ATLParseError.invalidSyntax("Expected ':' after source variable name")
+        }
         let type = try parseTypeExpression()
 
         // Parse optional guard condition in parentheses
@@ -782,7 +805,9 @@ private class ATLSyntaxParser {
         }
         advance()
 
-        consumeOperator(":")
+        guard consumeOperator(":") else {
+            throw ATLParseError.invalidSyntax("Expected ':' after target variable name")
+        }
         let type = try parseTypeExpression()
 
         var bindings: [ATLPropertyBinding] = []
@@ -799,7 +824,9 @@ private class ATLSyntaxParser {
                 }
                 advance()
 
-                consumeOperator("<-")
+                guard consumeOperator("<-") else {
+                    throw ATLParseError.invalidSyntax("Expected '<-' after property name '\(propName)'")
+                }
                 let valueExpression = try parseExpression()
 
                 bindings.append(
@@ -808,14 +835,16 @@ private class ATLSyntaxParser {
                         expression: valueExpression
                     ))
 
-                if currentToken()?.type == .punctuation(",") {
+                if let commaToken = currentToken(), case .punctuation(let punct) = commaToken.type, punct == "," {
                     advance()
                 } else {
                     break
                 }
             }
 
-            consumePunctuation(")")
+            guard consumePunctuation(")") else {
+                throw ATLParseError.invalidSyntax("Expected ')' after target pattern bindings")
+            }
         }
 
         return ATLTargetPattern(
@@ -831,22 +860,25 @@ private class ATLSyntaxParser {
 
     private func parseConditionalExpression() throws -> any ATLExpression {
         // Handle if-then-else expressions
-        if currentToken()?.type == .keyword("if") {
+        if let token = currentToken(), case .keyword(let keyword) = token.type, keyword == "if" {
             advance()
             let condition = try parseOrExpression()
 
             guard consumeKeyword("then") else {
-                throw ATLParseError.invalidSyntax("Expected 'then' in conditional expression")
+                let currentTok = currentToken()?.value ?? "EOF"
+                throw ATLParseError.invalidSyntax("Expected 'then' in conditional expression, found '\(currentTok)'")
             }
-            let thenExpr = try parseOrExpression()
+            let thenExpr = try parseExpression()
 
             guard consumeKeyword("else") else {
-                throw ATLParseError.invalidSyntax("Expected 'else' in conditional expression")
+                let currentTok = currentToken()?.value ?? "EOF"
+                throw ATLParseError.invalidSyntax("Expected 'else' in conditional expression, found '\(currentTok)'")
             }
-            let elseExpr = try parseOrExpression()
+            let elseExpr = try parseExpression()
 
             guard consumeKeyword("endif") else {
-                throw ATLParseError.invalidSyntax("Expected 'endif' in conditional expression")
+                let currentTok = currentToken()?.value ?? "EOF"
+                throw ATLParseError.invalidSyntax("Expected 'endif' in conditional expression, found '\(currentTok)'")
             }
 
             return ATLConditionalExpression(
@@ -996,43 +1028,59 @@ private class ATLSyntaxParser {
         var expr = try parsePrimaryExpression()
 
         while !isAtEnd() {
-            if currentToken()?.type == .`operator`(".") {
+            if let token = currentToken(), case .`operator`(let op) = token.type, (op == "." || op == "->") {
                 advance()
-
-                guard let propToken = currentToken(),
-                    case .identifier(let propName) = propToken.type
+                guard let nameToken = currentToken(),
+                    case .identifier(let propertyName) = nameToken.type
                 else {
-                    throw ATLParseError.invalidSyntax("Expected property name after '.'")
+                    throw ATLParseError.invalidSyntax("Expected property name after '\(op)'")
                 }
                 advance()
 
                 // Check for method call
-                if currentToken()?.type == .punctuation("(") {
+                if let currentTok = currentToken(), case .punctuation(let punct) = currentTok.type, punct == "(" {
                     advance()
                     var args: [any ATLExpression] = []
 
-                    while !isAtEnd() && currentToken()?.type != .punctuation(")") {
-                        args.append(try parseExpression())
+                    while !isAtEnd() && !(currentToken()?.type == .punctuation(")")) {
+                        // Check for lambda expression syntax: param | body
+                        if let firstToken = currentToken(), case .identifier(let paramName) = firstToken.type {
+                            // Look ahead for '|' to detect lambda
+                            let savedPosition = position
+                            advance() // consume potential parameter
+                            
+                            if let barToken = currentToken(), case .punctuation(let p) = barToken.type, p == "|" {
+                                // This is a lambda expression
+                                advance() // consume '|'
+                                let body = try parseExpression()
+                                args.append(ATLLambdaExpression(parameter: paramName, body: body))
+                            } else {
+                                // Not a lambda, restore position and parse as regular expression
+                                position = savedPosition
+                                args.append(try parseExpression())
+                            }
+                        } else {
+                            args.append(try parseExpression())
+                        }
 
-                        if currentToken()?.type == .punctuation(",") {
+                        if let commaToken = currentToken(), case .punctuation(let p) = commaToken.type, p == "," {
                             advance()
                         } else {
                             break
                         }
                     }
 
-                    consumePunctuation(")")
+                    guard consumePunctuation(")") else {
+                        throw ATLParseError.invalidSyntax("Expected ')' after method arguments")
+                    }
 
                     expr = ATLMethodCallExpression(
                         receiver: expr,
-                        methodName: propName,
+                        methodName: propertyName,
                         arguments: args
                     )
                 } else {
-                    expr = ATLNavigationExpression(
-                        source: expr,
-                        property: propName
-                    )
+                    expr = ATLNavigationExpression(source: expr, property: propertyName)
                 }
             } else {
                 break
@@ -1060,25 +1108,72 @@ private class ATLSyntaxParser {
             advance()
             return ATLLiteralExpression(value: value)
 
+        case .identifier(let collectionType) where collectionType == "Sequence" || collectionType == "Set" || collectionType == "Bag":
+            // Handle collection literals like Sequence{}, Set{1, 2, 3}, etc.
+            advance() // consume collection type
+            guard consumePunctuation("{") else {
+                let currentTok = currentToken()?.value ?? "EOF"
+                throw ATLParseError.invalidSyntax("Expected '{' after collection type '\(collectionType)', but found '\(currentTok)'")
+            }
+            
+            var elements: [any ATLExpression] = []
+            
+            // Parse elements if any
+            while !isAtEnd() && !(currentToken()?.type == .punctuation("}")) {
+                elements.append(try parseExpression())
+                
+                if let commaToken = currentToken(), case .punctuation(let p) = commaToken.type, p == "," {
+                    advance()
+                } else {
+                    break
+                }
+            }
+            
+            guard consumePunctuation("}") else {
+                throw ATLParseError.invalidSyntax("Expected '}' after collection elements")
+            }
+            
+            return ATLCollectionLiteralExpression(collectionType: collectionType, elements: elements)
+
         case .identifier(let name):
             advance()
 
             // Check for function call
-            if currentToken()?.type == .punctuation("(") {
+            if let currentTok = currentToken(), case .punctuation(let punct) = currentTok.type, punct == "(" {
                 advance()
                 var args: [any ATLExpression] = []
 
-                while !isAtEnd() && currentToken()?.type != .punctuation(")") {
-                    args.append(try parseExpression())
+                while !isAtEnd() && !(currentToken()?.type == .punctuation(")")) {
+                    // Check for lambda expression syntax: param | body
+                    if let firstToken = currentToken(), case .identifier(let paramName) = firstToken.type {
+                        // Look ahead for '|' to detect lambda
+                        let savedPosition = position
+                        advance() // consume potential parameter
+                        
+                        if let barToken = currentToken(), case .punctuation(let p) = barToken.type, p == "|" {
+                            // This is a lambda expression
+                            advance() // consume '|'
+                            let body = try parseExpression()
+                            args.append(ATLLambdaExpression(parameter: paramName, body: body))
+                        } else {
+                            // Not a lambda, restore position and parse as regular expression
+                            position = savedPosition
+                            args.append(try parseExpression())
+                        }
+                    } else {
+                        args.append(try parseExpression())
+                    }
 
-                    if currentToken()?.type == .punctuation(",") {
+                    if let commaToken = currentToken(), case .punctuation(let p) = commaToken.type, p == "," {
                         advance()
                     } else {
                         break
                     }
                 }
 
-                consumePunctuation(")")
+                guard consumePunctuation(")") else {
+                    throw ATLParseError.invalidSyntax("Expected ')' after function arguments")
+                }
 
                 return ATLHelperCallExpression(
                     helperName: name,
@@ -1091,12 +1186,18 @@ private class ATLSyntaxParser {
         case .punctuation("("):
             advance()
             let expr = try parseExpression()
-            consumePunctuation(")")
+            guard consumePunctuation(")") else {
+                throw ATLParseError.invalidSyntax("Expected ')' after parenthesized expression")
+            }
             return expr
 
         case .keyword("self"):
             advance()
             return ATLVariableExpression(name: "self")
+
+        case .keyword("if"):
+            // Handle if expressions that weren't caught by parseConditionalExpression
+            return try parseConditionalExpression()
 
         default:
             throw ATLParseError.invalidSyntax("Unexpected token: \(token.value)")
@@ -1104,8 +1205,12 @@ private class ATLSyntaxParser {
     }
 
     private func skipDoBlock() throws {
-        consumeKeyword("do")
-        consumePunctuation("{")
+        guard consumeKeyword("do") else {
+            throw ATLParseError.invalidSyntax("Expected 'do' keyword")
+        }
+        guard consumePunctuation("{") else {
+            throw ATLParseError.invalidSyntax("Expected '{' after 'do'")
+        }
 
         var braceCount = 1
         while !isAtEnd() && braceCount > 0 {
@@ -1115,6 +1220,10 @@ private class ATLSyntaxParser {
                 braceCount -= 1
             }
             advance()
+        }
+        
+        if braceCount > 0 {
+            throw ATLParseError.invalidSyntax("Unclosed 'do' block")
         }
     }
 
@@ -1156,6 +1265,15 @@ private class ATLSyntaxParser {
             return false
         }
         advance()
+        return true
+    }
+
+    @discardableResult
+    private func expectPunctuation(_ punct: String) throws -> Bool {
+        guard consumePunctuation(punct) else {
+            let currentTok = currentToken()?.value ?? "EOF"
+            throw ATLParseError.invalidSyntax("Expected '\(punct)' but found '\(currentTok)'")
+        }
         return true
     }
 

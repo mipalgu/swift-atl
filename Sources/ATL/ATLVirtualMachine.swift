@@ -48,7 +48,8 @@ import OrderedCollections
 ///     targets: ["OUT": targetResource]
 /// )
 /// ```
-public actor ATLVirtualMachine {
+@MainActor
+public final class ATLVirtualMachine {
 
     // MARK: - Properties
 
@@ -77,7 +78,14 @@ public actor ATLVirtualMachine {
     /// - Parameter module: The ATL module to execute
     public init(module: ATLModule) {
         self.module = module
-        self.executionContext = ATLExecutionContext(module: module)
+
+        // Create execution engine with empty models initially
+        let executionEngine = ECoreExecutionEngine(models: [:])
+
+        self.executionContext = ATLExecutionContext(
+            module: module,
+            executionEngine: executionEngine
+        )
         self.statistics = ATLExecutionStatistics()
     }
 
@@ -106,10 +114,10 @@ public actor ATLVirtualMachine {
 
         // Configure execution context with models
         for (alias, resource) in sources {
-            await executionContext.addSource(alias, resource: resource)
+            executionContext.addSource(alias, resource: resource)
         }
         for (alias, resource) in targets {
-            await executionContext.addTarget(alias, resource: resource)
+            executionContext.addTarget(alias, resource: resource)
         }
 
         do {
@@ -164,7 +172,7 @@ public actor ATLVirtualMachine {
         let sourceClassName = String(typeComponents[1])
 
         // Get source resource
-        guard let sourceResource = await executionContext.getSource(sourceAlias) else {
+        guard let sourceResource = executionContext.getSource(sourceAlias) else {
             throw ATLExecutionError.invalidOperation("Source model '\(sourceAlias)' not found")
         }
 
@@ -200,15 +208,15 @@ public actor ATLVirtualMachine {
         async throws
     {
         // Create new execution scope for rule
-        await executionContext.pushScope()
+        executionContext.pushScope()
         defer {
             Task {
-                await executionContext.popScope()
+                executionContext.popScope()
             }
         }
 
         // Bind source element to pattern variable
-        await executionContext.setVariable(rule.sourcePattern.variableName, value: sourceElement)
+        executionContext.setVariable(rule.sourcePattern.variableName, value: sourceElement)
 
         // Evaluate guard condition if present
         if let guardExpression = rule.`guard` {
@@ -226,14 +234,14 @@ public actor ATLVirtualMachine {
             createdElements.append(targetElement.id)
 
             // Bind target element to pattern variable
-            await executionContext.setVariable(targetPattern.variableName, value: targetElement)
+            executionContext.setVariable(targetPattern.variableName, value: targetElement)
 
             // Apply property bindings
             try await applyPropertyBindings(targetPattern, targetElement: targetElement)
         }
 
         // Record trace link
-        await executionContext.addTraceLink(
+        executionContext.addTraceLink(
             ruleName: rule.name,
             sourceElement: sourceElement.id,
             targetElements: createdElements
@@ -280,7 +288,7 @@ public actor ATLVirtualMachine {
                     property: binding.property,
                     expression: binding.expression
                 )
-                await executionContext.addLazyBinding(lazyBinding)
+                executionContext.addLazyBinding(lazyBinding)
             }
         }
     }
@@ -337,16 +345,16 @@ public actor ATLVirtualMachine {
         }
 
         // Create new execution scope
-        await executionContext.pushScope()
+        executionContext.pushScope()
         defer {
             Task {
-                await executionContext.popScope()
+                executionContext.popScope()
             }
         }
 
         // Bind parameters
         for (parameter, argument) in zip(rule.parameters, arguments) {
-            await executionContext.setVariable(parameter.name, value: argument)
+            executionContext.setVariable(parameter.name, value: argument)
         }
 
         // Create target elements
@@ -356,7 +364,7 @@ public actor ATLVirtualMachine {
             createdElements.append(targetElement)
 
             // Bind target element variable
-            await executionContext.setVariable(targetPattern.variableName, value: targetElement)
+            executionContext.setVariable(targetPattern.variableName, value: targetElement)
 
             // Apply property bindings
             try await applyPropertyBindings(targetPattern, targetElement: targetElement)
@@ -519,11 +527,11 @@ public struct ATLExecutionStatistics: Sendable {
         successful = success
         lastError = error
         currentPhase = nil
-        
+
         if let start = startTime, let end = endTime {
             executionTime = end.timeIntervalSince(start)
         }
-        
+
         performanceMetrics.finalize()
     }
 
@@ -547,7 +555,7 @@ public struct ATLExecutionStatistics: Sendable {
             phaseExecutionTimes[phase] = duration
             completedPhases.insert(phase)
         }
-        
+
         if currentPhase == phase {
             currentPhase = nil
         }
@@ -666,13 +674,13 @@ public struct ATLExecutionStatistics: Sendable {
     /// - Returns: Detailed performance analysis
     public func detailedSummary() -> String {
         var details = summary()
-        
+
         details += "\n\nPhase Execution Times:"
         for (phase, duration) in phaseExecutionTimes.sorted(by: { $0.key < $1.key }) {
             let durationMs = String(format: "%.3f", duration * 1000)
             details += "\n  \(phase): \(durationMs)ms"
         }
-        
+
         if !ruleExecutionTimes.isEmpty {
             details += "\n\nTop Rule Execution Times:"
             let topRules = ruleExecutionTimes.sorted { $0.value > $1.value }.prefix(10)
@@ -681,7 +689,7 @@ public struct ATLExecutionStatistics: Sendable {
                 details += "\n  \(rule): \(durationMs)ms"
             }
         }
-        
+
         if !helperExecutionTimes.isEmpty {
             details += "\n\nTop Helper Execution Times:"
             let topHelpers = helperExecutionTimes.sorted { $0.value > $1.value }.prefix(10)
@@ -690,10 +698,10 @@ public struct ATLExecutionStatistics: Sendable {
                 details += "\n  \(helper): \(durationMs)ms"
             }
         }
-        
+
         details += "\n\nPerformance Metrics:"
         details += performanceMetrics.summary()
-        
+
         return details
     }
 
@@ -702,11 +710,12 @@ public struct ATLExecutionStatistics: Sendable {
     /// - Returns: Efficiency analysis
     public func efficiency() -> String {
         guard executionTime > 0 else { return "No execution data available" }
-        
+
         let elementsPerSecond = Double(elementsProcessed) / executionTime
         let creationRate = Double(elementsCreated) / executionTime
-        let bindingResolutionRate = lazyBindingsResolved > 0 ? Double(lazyBindingsResolved) / executionTime : 0
-        
+        let bindingResolutionRate =
+            lazyBindingsResolved > 0 ? Double(lazyBindingsResolved) / executionTime : 0
+
         return """
             Execution Efficiency:
             Elements/sec: \(String(format: "%.2f", elementsPerSecond))
@@ -719,19 +728,19 @@ public struct ATLExecutionStatistics: Sendable {
 
 /// Performance metrics for detailed analysis.
 public struct ATLPerformanceMetrics: Sendable {
-    
+
     /// Rule performance data
     public var ruleMetrics: [String: RuleMetrics] = [:]
-    
+
     /// Helper performance data
     public var helperMetrics: [String: HelperMetrics] = [:]
-    
+
     /// Navigation performance
     public var navigationMetrics = NavigationMetrics()
-    
+
     /// Memory allocation tracking
     public var memoryMetrics = MemoryMetrics()
-    
+
     /// Resets all metrics
     public mutating func reset() {
         ruleMetrics.removeAll()
@@ -739,7 +748,7 @@ public struct ATLPerformanceMetrics: Sendable {
         navigationMetrics = NavigationMetrics()
         memoryMetrics = MemoryMetrics()
     }
-    
+
     /// Finalizes metrics calculations
     public mutating func finalize() {
         // Perform any final calculations
@@ -747,16 +756,16 @@ public struct ATLPerformanceMetrics: Sendable {
             metrics.finalize()
             ruleMetrics[name] = metrics
         }
-        
+
         for (name, var metrics) in helperMetrics {
             metrics.finalize()
             helperMetrics[name] = metrics
         }
-        
+
         navigationMetrics.finalize()
         memoryMetrics.finalize()
     }
-    
+
     /// Records rule execution
     public mutating func recordRuleExecution(_ ruleName: String, duration: TimeInterval) {
         if ruleMetrics[ruleName] == nil {
@@ -764,7 +773,7 @@ public struct ATLPerformanceMetrics: Sendable {
         }
         ruleMetrics[ruleName]!.recordExecution(duration: duration)
     }
-    
+
     /// Records helper invocation
     public mutating func recordHelperInvocation(_ helperName: String, duration: TimeInterval) {
         if helperMetrics[helperName] == nil {
@@ -772,38 +781,42 @@ public struct ATLPerformanceMetrics: Sendable {
         }
         helperMetrics[helperName]!.recordInvocation(duration: duration)
     }
-    
+
     /// Records navigation operation
     public mutating func recordNavigation() {
         navigationMetrics.recordOperation()
     }
-    
+
     /// Returns summary of performance metrics
     public func summary() -> String {
         var summary = ""
-        
+
         if !ruleMetrics.isEmpty {
             summary += "\n  Rule Performance:"
-            let topRules = ruleMetrics.sorted { $0.value.averageDuration > $1.value.averageDuration }.prefix(5)
+            let topRules = ruleMetrics.sorted {
+                $0.value.averageDuration > $1.value.averageDuration
+            }.prefix(5)
             for (name, metrics) in topRules {
                 summary += "\n    \(name): \(metrics.summary())"
             }
         }
-        
+
         if !helperMetrics.isEmpty {
             summary += "\n  Helper Performance:"
-            let topHelpers = helperMetrics.sorted { $0.value.averageDuration > $1.value.averageDuration }.prefix(5)
+            let topHelpers = helperMetrics.sorted {
+                $0.value.averageDuration > $1.value.averageDuration
+            }.prefix(5)
             for (name, metrics) in topHelpers {
                 summary += "\n    \(name): \(metrics.summary())"
             }
         }
-        
+
         summary += "\n  Navigation: \(navigationMetrics.summary())"
         summary += "\n  Memory: \(memoryMetrics.summary())"
-        
+
         return summary
     }
-    
+
     /// Rule-specific performance metrics
     public struct RuleMetrics: Sendable {
         public var executionCount: Int = 0
@@ -811,21 +824,21 @@ public struct ATLPerformanceMetrics: Sendable {
         public var minDuration: TimeInterval = .greatestFiniteMagnitude
         public var maxDuration: TimeInterval = 0
         public var averageDuration: TimeInterval = 0
-        
+
         public mutating func recordExecution(duration: TimeInterval) {
             executionCount += 1
             totalDuration += duration
             minDuration = min(minDuration, duration)
             maxDuration = max(maxDuration, duration)
         }
-        
+
         public mutating func finalize() {
             averageDuration = executionCount > 0 ? totalDuration / Double(executionCount) : 0
             if minDuration == .greatestFiniteMagnitude {
                 minDuration = 0
             }
         }
-        
+
         public func summary() -> String {
             let avgMs = String(format: "%.3f", averageDuration * 1000)
             let minMs = String(format: "%.3f", minDuration * 1000)
@@ -833,61 +846,61 @@ public struct ATLPerformanceMetrics: Sendable {
             return "\(executionCount) executions, avg: \(avgMs)ms, range: \(minMs)-\(maxMs)ms"
         }
     }
-    
+
     /// Helper-specific performance metrics
     public struct HelperMetrics: Sendable {
         public var invocationCount: Int = 0
         public var totalDuration: TimeInterval = 0
         public var averageDuration: TimeInterval = 0
-        
+
         public mutating func recordInvocation(duration: TimeInterval) {
             invocationCount += 1
             totalDuration += duration
         }
-        
+
         public mutating func finalize() {
             averageDuration = invocationCount > 0 ? totalDuration / Double(invocationCount) : 0
         }
-        
+
         public func summary() -> String {
             let avgMs = String(format: "%.3f", averageDuration * 1000)
             return "\(invocationCount) calls, avg: \(avgMs)ms"
         }
     }
-    
+
     /// Navigation performance metrics
     public struct NavigationMetrics: Sendable {
         public var operationCount: Int = 0
         public var averageOperationsPerSecond: Double = 0
         private var startTime = Date()
-        
+
         public mutating func recordOperation() {
             operationCount += 1
         }
-        
+
         public mutating func finalize() {
             let duration = Date().timeIntervalSince(startTime)
             if duration > 0 {
                 averageOperationsPerSecond = Double(operationCount) / duration
             }
         }
-        
+
         public func summary() -> String {
             let opsPerSec = String(format: "%.2f", averageOperationsPerSecond)
             return "\(operationCount) operations, \(opsPerSec) ops/sec"
         }
     }
-    
+
     /// Memory usage metrics
     public struct MemoryMetrics: Sendable {
         public var allocationCount: Int = 0
         public var totalAllocatedBytes: Int = 0
         public var peakUsage: Int = 0
-        
+
         public mutating func finalize() {
             // Memory metrics would be populated by the execution engine
         }
-        
+
         public func summary() -> String {
             let totalMB = String(format: "%.2f", Double(totalAllocatedBytes) / (1024 * 1024))
             let peakMB = String(format: "%.2f", Double(peakUsage) / (1024 * 1024))

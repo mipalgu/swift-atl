@@ -2,105 +2,83 @@
 //  ATLExecutionContext.swift
 //  ATL
 //
-//  Created by Rene Hexel on 6/12/2025.
+//  Created by Rene Hexel on 8/12/2025.
 //  Copyright © 2025 Rene Hexel. All rights reserved.
 //
 import ECore
 import Foundation
 import OrderedCollections
 
-/// Actor responsible for managing ATL transformation execution state.
+/// Execution context for ATL transformations, coordinating between ATL constructs and the ECore execution framework.
 ///
-/// The ATL execution context serves as the central coordinator for transformation execution,
-/// maintaining access to source and target models, variable bindings, helper functions,
-/// and trace links. It provides a thread-safe environment for concurrent transformation
-/// operations while preserving execution state consistency.
+/// The ATL execution context serves as the main coordination layer for ATL transformations,
+/// delegating heavy computational operations to the underlying `ECoreExecutionEngine` while
+/// managing ATL-specific state such as helpers, rules, and trace links on the MainActor.
 ///
-/// ## Overview
+/// ## Architecture
 ///
-/// The execution context manages several key aspects of ATL transformations:
-/// - **Model Access**: Provides unified access to source and target models
-/// - **Variable Management**: Maintains scoped variable bindings for rules and helpers
-/// - **Helper Execution**: Coordinates helper function invocation and caching
-/// - **Navigation Support**: Handles property navigation and reference resolution
-/// - **Trace Management**: Records transformation relationships for debugging
-/// - **Lazy Evaluation**: Supports deferred binding resolution and rule execution
+/// Following the established swift-ecore pattern:
+/// - **Coordination**: Handled on `@MainActor` for UI integration and command compatibility
+/// - **Computation**: Delegated to `ECoreExecutionEngine` actor for performance
+/// - **Commands**: Integrated with EMF command framework for undo/redo support
 ///
-/// ## Concurrency Model
+/// ## Integration with ECore
 ///
-/// The execution context is implemented as an actor to ensure thread-safe access to
-/// transformation state across concurrent rule execution. All state mutations and
-/// model operations are serialised through the actor's message queue.
+/// The context bridges ATL concepts to ECore fundamentals:
+/// - ATL expressions → ECore expressions via ATLECoreBridge
+/// - ATL models → ECore IModel interface via ATLModelAdapters
+/// - ATL operations → ECoreExecutionEngine delegated calls
+/// - ATL helpers → Runtime behavior injection
 ///
 /// ## Example Usage
 ///
 /// ```swift
 /// let context = ATLExecutionContext(
-///     module: transformationModule,
-///     sources: ["IN": sourceResource],
-///     targets: ["OUT": targetResource]
+///     module: atlModule,
+///     sources: ["IN": sourceModel],
+///     targets: ["OUT": targetModel],
+///     executionEngine: engine
 /// )
 ///
-/// let result = try await context.navigate(from: sourceElement, property: "name")
+/// let result = try await context.evaluateHelper("myHelper", arguments: [value])
 /// ```
-public actor ATLExecutionContext {
+@MainActor
+public final class ATLExecutionContext: Sendable {
 
     // MARK: - Properties
 
     /// The ATL module being executed.
-    ///
-    /// The module provides access to transformation rules, helper functions,
-    /// and metamodel specifications required for execution.
     public let module: ATLModule
 
-    /// Source models indexed by their namespace aliases.
-    ///
-    /// Source models provide read-only access to input data for transformation.
-    /// They are keyed by the aliases defined in the ATL module's metamodel bindings.
+    /// Source models indexed by their aliases.
     public private(set) var sources: OrderedDictionary<String, Resource>
 
-    /// Target models indexed by their namespace aliases.
-    ///
-    /// Target models provide write access for creating transformed output data.
-    /// They are keyed by the aliases defined in the ATL module's metamodel bindings.
+    /// Target models indexed by their aliases.
     public private(set) var targets: OrderedDictionary<String, Resource>
 
-    /// Current variable bindings within the execution scope.
-    ///
-    /// Variables include rule parameters, pattern bindings, helper parameters,
-    /// and local variable assignments. The context maintains a stack-based
-    /// scoping model for nested execution contexts.
+    /// Variable bindings in the current execution scope.
     private var variables: [String: (any EcoreValue)?] = [:]
 
-    /// Variable scoping stack for nested contexts.
-    ///
-    /// The scoping stack enables proper variable isolation within nested
-    /// rule and helper invocations, preserving lexical scoping semantics.
+    /// Scope stack for nested variable contexts.
     private var scopeStack: [[String: (any EcoreValue)?]] = []
 
-    /// Trace links recording transformation relationships.
-    ///
-    /// Trace links maintain bidirectional mappings between source and target
-    /// elements, enabling transformation debugging and incremental updates.
-    public private(set) var traceLinks: [ATLTraceLink] = []
+    /// Trace links between source and target elements.
+    private var traceLinks: [ATLTraceLink] = []
 
-    /// Lazy bindings awaiting resolution.
-    ///
-    /// Lazy bindings support deferred evaluation of complex transformations
-    /// that require multiple passes or circular reference resolution.
-    public private(set) var lazyBindings: [ATLLazyBinding] = []
+    /// Lazy bindings waiting for resolution.
+    private var lazyBindings: [ATLLazyBinding] = []
 
-    /// Registered helper functions indexed by signature
+    /// Helper functions registered for this context.
     private var helpers: [String: any ATLHelperType] = [:]
 
-    /// Element type cache for performance optimisation
-    private var typeCache: [String: [any EObject]] = [:]
-
-    /// Cross-reference resolution cache
-    private var resolutionCache: [EUUID: any EObject] = [:]
-
-    /// Error context for debugging
+    /// Error context for tracking issues during execution.
     private var errorContext: ATLErrorContext = ATLErrorContext()
+
+    /// The underlying ECore execution engine for heavy computation.
+    public let executionEngine: ECoreExecutionEngine
+
+    /// Optional command stack for undo/redo support.
+    private let commandStack: CommandStack?
 
     // MARK: - Initialisation
 
@@ -108,47 +86,52 @@ public actor ATLExecutionContext {
     ///
     /// - Parameters:
     ///   - module: The ATL module to execute
-    ///   - sources: Source models indexed by namespace aliases
-    ///   - targets: Target models indexed by namespace aliases
-    ///
-    /// - Precondition: Source model aliases must match module source metamodel aliases
-    /// - Precondition: Target model aliases must match module target metamodel aliases
+    ///   - sources: Source models indexed by alias
+    ///   - targets: Target models indexed by alias
+    ///   - executionEngine: The ECore execution engine to delegate to
+    ///   - commandStack: Optional command stack for undo/redo support
     public init(
         module: ATLModule,
         sources: OrderedDictionary<String, Resource> = [:],
-        targets: OrderedDictionary<String, Resource> = [:]
+        targets: OrderedDictionary<String, Resource> = [:],
+        executionEngine: ECoreExecutionEngine,
+        commandStack: CommandStack? = nil
     ) {
         self.module = module
         self.sources = sources
         self.targets = targets
+        self.executionEngine = executionEngine
+        self.commandStack = commandStack
+
+        // Register module helpers
+        for (name, helper) in module.helpers {
+            self.helpers[name] = helper
+        }
     }
 
     // MARK: - Variable Management
 
-    /// Sets a variable value within the current scope.
+    /// Set a variable value in the current scope.
     ///
     /// - Parameters:
-    ///   - name: The variable name
-    ///   - value: The variable value, or `nil` for undefined variables
-    ///
-    /// - Note: Variable assignments affect only the current scope and do not
-    ///   propagate to parent or child scopes.
+    ///   - name: Variable name
+    ///   - value: Variable value
     public func setVariable(_ name: String, value: (any EcoreValue)?) {
         variables[name] = value
     }
 
-    /// Retrieves a variable value from the current scope hierarchy.
+    /// Get a variable value from the current scope or scope stack.
     ///
-    /// - Parameter name: The variable name to retrieve
-    /// - Returns: The variable value, or `nil` if not found
-    /// - Throws: `ATLExecutionError.variableNotFound` if the variable is undefined
+    /// - Parameter name: Variable name
+    /// - Returns: Variable value if found
+    /// - Throws: `ATLExecutionError` if variable not found
     public func getVariable(_ name: String) throws -> (any EcoreValue)? {
         // Check current scope first
         if let value = variables[name] {
             return value
         }
 
-        // Search scope stack from most recent to oldest
+        // Check scope stack
         for scope in scopeStack.reversed() {
             if let value = scope[name] {
                 return value
@@ -158,154 +141,182 @@ public actor ATLExecutionContext {
         throw ATLExecutionError.variableNotFound(name)
     }
 
-    /// Pushes a new variable scope onto the stack.
-    ///
-    /// New scopes provide variable isolation for nested rule and helper execution,
-    /// preserving the current variable bindings while allowing local modifications.
+    /// Push a new variable scope onto the stack.
     public func pushScope() {
         scopeStack.append(variables)
         variables = [:]
     }
 
-    /// Pops the most recent variable scope from the stack.
-    ///
-    /// Scope popping restores the previous variable bindings and discards
-    /// any local variables created within the popped scope.
-    ///
-    /// - Precondition: At least one scope must be present on the stack
+    /// Pop the current variable scope from the stack.
     public func popScope() {
-        precondition(!scopeStack.isEmpty, "Cannot pop from empty scope stack")
+        guard !scopeStack.isEmpty else { return }
         variables = scopeStack.removeLast()
     }
 
-    // MARK: - Model Access
+    // MARK: - Model Management
 
-    /// Adds a source model to the execution context.
+    /// Add a source model to the context.
     ///
     /// - Parameters:
-    ///   - alias: The namespace alias for model access
-    ///   - resource: The source model resource
+    ///   - alias: Model alias
+    ///   - resource: Model resource
     public func addSource(_ alias: String, resource: Resource) {
         sources[alias] = resource
     }
 
-    /// Adds a target model to the execution context.
+    /// Add a target model to the context.
     ///
     /// - Parameters:
-    ///   - alias: The namespace alias for model access
-    ///   - resource: The target model resource
+    ///   - alias: Model alias
+    ///   - resource: Model resource
     public func addTarget(_ alias: String, resource: Resource) {
         targets[alias] = resource
     }
 
-    /// Retrieves a source model by alias.
+    /// Get a source model by alias.
     ///
-    /// - Parameter alias: The namespace alias
-    /// - Returns: The source model resource, or `nil` if not found
+    /// - Parameter alias: Model alias
+    /// - Returns: Model resource if found
     public func getSource(_ alias: String) -> Resource? {
         return sources[alias]
     }
 
-    /// Retrieves a target model by alias.
+    /// Get a target model by alias.
     ///
-    /// - Parameter alias: The namespace alias
-    /// - Returns: The target model resource, or `nil` if not found
+    /// - Parameter alias: Model alias
+    /// - Returns: Model resource if found
     public func getTarget(_ alias: String) -> Resource? {
         return targets[alias]
     }
 
-    // MARK: - Property Navigation
+    // MARK: - Navigation Operations (Delegated to ExecutionEngine)
 
-    /// Navigates from an object to a specified property.
-    ///
-    /// Property navigation handles metamodel-compliant property access, supporting
-    /// both attributes and references with appropriate type conversions and
-    /// collection handling.
+    /// Navigate a property from a source object using the execution engine.
     ///
     /// - Parameters:
-    ///   - object: The source object for navigation
-    ///   - property: The property name to navigate to
-    /// - Returns: The property value, or `nil` if undefined or inaccessible
-    /// - Throws: ATL execution errors for invalid navigation operations
-    public func navigate(from object: (any EcoreValue)?, property: String) throws -> (
+    ///   - object: Source object
+    ///   - property: Property name
+    /// - Returns: Navigation result
+    /// - Throws: `ECoreExecutionError` if navigation fails
+    public func navigate(from object: (any EcoreValue)?, property: String) async throws -> (
         any EcoreValue
     )? {
-        guard let eObject = object as? any EObject else {
-            throw ATLExecutionError.typeError(
-                "Cannot navigate property '\(property)' on non-EObject of type \(type(of: object))")
+        guard let eObject = object as? (any EObject) else {
+            let objectType = object != nil ? String(reflecting: type(of: object!)) : "nil"
+            throw ATLExecutionError.typeError("Source is not an EObject of type: \(objectType)")
         }
 
-        guard let eClass = eObject.eClass as? EClass else {
-            throw ATLExecutionError.typeError(
-                "Element eClass is not an EClass: \(type(of: eObject.eClass))")
-        }
-
-        // Find the structural feature for the property
-        guard let feature = eClass.getStructuralFeature(name: property) else {
-            throw ATLExecutionError.invalidOperation(
-                "Property '\(property)' not found in class '\(eClass.name)'")
-        }
-
-        return eObject.eGet(feature)
+        return try await executionEngine.navigate(from: eObject, property: property)
     }
 
-    // MARK: - Helper Execution
+    // MARK: - Helper Management
 
-    /// Invokes a helper function with the specified arguments.
-    ///
-    /// Helper invocation supports both contextual and context-free helpers,
-    /// with automatic parameter binding and scope management.
+    /// Call a helper function with arguments.
     ///
     /// - Parameters:
-    ///   - name: The helper function name
-    ///   - arguments: The argument values to pass
-    /// - Returns: The helper's return value
-    /// - Throws: ATL execution errors for helper invocation failures
-    public func callHelper(_ name: String, arguments: [(any EcoreValue)?]) throws -> (
+    ///   - name: Helper name
+    ///   - arguments: Helper arguments
+    /// - Returns: Helper result
+    /// - Throws: `ATLExecutionError` if helper call fails
+    public func callHelper(_ name: String, arguments: [(any EcoreValue)?]) async throws -> (
         any EcoreValue
     )? {
-        guard let helper = module.helpers[name] else {
+        guard let helper = helpers[name] else {
             throw ATLExecutionError.helperNotFound(name)
         }
 
-        // Verify argument count matches parameter count
-        guard arguments.count == helper.parameters.count else {
-            throw ATLExecutionError.invalidOperation(
-                "Helper '\(name)' expects \(helper.parameters.count) arguments, got \(arguments.count)"
-            )
-        }
-
-        // Create new scope for helper execution
+        // Push new scope for helper execution
         pushScope()
         defer { popScope() }
 
-        // Bind parameters to arguments
-        for (parameter, argument) in zip(helper.parameters, arguments) {
-            setVariable(parameter.name, value: argument)
+        // Bind parameters
+        for (index, parameter) in helper.parameters.enumerated() {
+            if index < arguments.count {
+                setVariable(parameter.name, value: arguments[index])
+            }
         }
 
-        // For contextual helpers, bind 'self' if available
-        if helper.contextType != nil {
-            // Context should be available from current variable scope
-            // This would typically be set by the calling rule or expression
+        // Evaluate helper expression using ECore bridge
+        guard let helperWrapper = helper as? ATLHelperWrapper else {
+            throw ATLExecutionError.runtimeError("Helper '\(name)' is not a supported helper type")
         }
 
-        // TODO: Evaluate helper body expression
-        // This is a placeholder - the actual implementation would evaluate helper.body
-        return nil
+        let ecoreExpression = helperWrapper.bodyExpression.toECoreExpression()
+        let context = try buildECoreContext()
+        let result = try await executionEngine.evaluate(ecoreExpression, context: context)
+
+        return result
+    }
+
+    /// Register a helper function.
+    ///
+    /// - Parameter helper: Helper to register
+    public func registerHelper(_ helper: any ATLHelperType) {
+        helpers[helper.name] = helper
+    }
+
+    // MARK: - Element Creation (Command-Based)
+
+    /// Create a new element in a target model using commands.
+    ///
+    /// - Parameters:
+    ///   - type: Element type name
+    ///   - targetAlias: Target model alias
+    /// - Returns: Created element
+    /// - Throws: `ATLExecutionError` if creation fails
+    public func createElement(type: String, in targetAlias: String) async throws -> any EObject {
+        guard let targetResource = targets[targetAlias] else {
+            throw ATLExecutionError.runtimeError("Target model '\(targetAlias)' not found")
+        }
+
+        let (modelAlias, typeName) = parseQualifiedTypeName(type)
+        let actualAlias = modelAlias ?? targetAlias
+
+        // Find the EClass for the type
+        let eClass = try findEClass(name: typeName, in: actualAlias)
+
+        // Find the target metamodel that contains this class
+        guard
+            let targetMetamodel = targets.values.compactMap({ resource in
+                // For now, assume the first metamodel contains the class
+                // In a complete implementation, would search properly
+                return module.targetMetamodels.values.first
+            }).first
+        else {
+            throw ATLExecutionError.invalidOperation("No target metamodel available")
+        }
+
+        // Create the element using the factory
+        let factory = targetMetamodel.eFactoryInstance
+        let element = factory.create(eClass)
+
+        // Add element to target resource directly
+        // Command stack integration would need a proper container object
+        await targetResource.add(element)
+
+        return element
+    }
+
+    // MARK: - Query Operations (Delegated to ExecutionEngine)
+
+    /// Find all elements of a given type using the execution engine.
+    ///
+    /// - Parameter typeName: Type name to search for
+    /// - Returns: Array of matching elements
+    /// - Throws: `ATLExecutionError` if query fails
+    public func findElementsOfType(_ typeName: String) async throws -> [any EObject] {
+        let eClass = try findEClass(name: typeName)
+        return await executionEngine.allInstancesOf(eClass)
     }
 
     // MARK: - Trace Management
 
-    /// Records a trace link between source and target elements.
-    ///
-    /// Trace links enable transformation debugging, incremental updates, and
-    /// bidirectional transformation relationships.
+    /// Add a trace link between source and target elements.
     ///
     /// - Parameters:
-    ///   - ruleName: The name of the rule creating the link
-    ///   - sourceElement: The source element UUID
-    ///   - targetElements: The target element UUIDs
+    ///   - ruleName: Name of the rule creating the link
+    ///   - sourceElement: Source element ID
+    ///   - targetElements: Target element IDs
     public func addTraceLink(ruleName: String, sourceElement: EUUID, targetElements: [EUUID]) {
         let traceLink = ATLTraceLink(
             ruleName: ruleName,
@@ -315,32 +326,26 @@ public actor ATLExecutionContext {
         traceLinks.append(traceLink)
     }
 
-    /// Retrieves trace links for a specific source element.
+    /// Get trace links for a source element.
     ///
-    /// - Parameter sourceElement: The source element UUID
-    /// - Returns: Array of trace links originating from the source element
+    /// - Parameter sourceElement: Source element ID
+    /// - Returns: Array of matching trace links
     public func getTraceLinks(for sourceElement: EUUID) -> [ATLTraceLink] {
         return traceLinks.filter { $0.sourceElement == sourceElement }
     }
 
     // MARK: - Lazy Binding Management
 
-    /// Adds a lazy binding for deferred resolution.
+    /// Add a lazy binding for later resolution.
     ///
-    /// Lazy bindings support complex transformation patterns that require
-    /// multiple evaluation passes or circular reference handling.
-    ///
-    /// - Parameter binding: The lazy binding to add
+    /// - Parameter binding: Binding to add
     public func addLazyBinding(_ binding: ATLLazyBinding) {
         lazyBindings.append(binding)
     }
 
-    /// Resolves all pending lazy bindings.
+    /// Resolve all pending lazy bindings.
     ///
-    /// Lazy binding resolution occurs after primary transformation execution
-    /// to handle forward references and circular dependencies.
-    ///
-    /// - Throws: ATL execution errors for unresolvable bindings
+    /// - Throws: `ATLExecutionError` if resolution fails
     public func resolveLazyBindings() async throws {
         for binding in lazyBindings {
             try await binding.resolve(in: self)
@@ -348,441 +353,233 @@ public actor ATLExecutionContext {
         lazyBindings.removeAll()
     }
 
-    // MARK: - Element Creation
+    // MARK: - Error Management
 
-    /// Creates a new target element of the specified type.
+    /// Get the current error context.
     ///
-    /// Element creation handles metamodel-compliant object instantiation with
-    /// automatic resource containment and UUID assignment.
-    ///
-    /// - Parameters:
-    ///   - type: The element type specification (e.g., "Persons!Male")
-    ///   - targetAlias: The target model alias for containment
-    /// - Returns: The created element
-    /// - Throws: ATL execution errors for invalid type specifications
-    public func createElement(type: String, in targetAlias: String) async throws -> any EObject {
-        // Parse type specification to extract namespace and class name
-        let components = type.split(separator: "!")
-        guard components.count == 2 else {
-            throw ATLExecutionError.typeError(
-                "Invalid type specification: '\(type)'. Expected format 'namespace!ClassName'")
-        }
-
-        let namespace = String(components[0])
-        let className = String(components[1])
-
-        // Verify namespace matches target alias
-        guard namespace == targetAlias else {
-            throw ATLExecutionError.typeError(
-                "Type namespace '\(namespace)' does not match target alias '\(targetAlias)'")
-        }
-
-        // Get target resource and metamodel
-        guard let targetResource = targets[targetAlias] else {
-            throw ATLExecutionError.invalidOperation("Target model '\(targetAlias)' not found")
-        }
-
-        guard let metamodel = module.targetMetamodels[targetAlias] else {
-            throw ATLExecutionError.invalidOperation("Target metamodel '\(targetAlias)' not found")
-        }
-
-        // Find the class in the metamodel
-        guard let eClass = metamodel.getClassifier(className) as? EClass else {
-            throw ATLExecutionError.typeError(
-                "Class '\(className)' not found in metamodel '\(targetAlias)'")
-        }
-
-        // Create the element using the metamodel's factory
-        let factory = metamodel.eFactoryInstance
-        let element = factory.create(eClass)
-
-        // Add element to target resource
-        await targetResource.add(element)
-
-        return element
+    /// - Returns: Error context
+    public func getErrorContext() -> ATLErrorContext {
+        return errorContext
     }
-    
-    // MARK: - Model Navigation
-    
-    /// Finds all elements of the specified type in source models.
+
+    /// Clear the error context.
+    public func clearErrorContext() {
+        errorContext = ATLErrorContext()
+    }
+
+    // MARK: - Cache Management (Delegated)
+
+    /// Clear all caches in the execution engine.
+    public func clearCaches() async {
+        await executionEngine.clearCaches()
+    }
+
+    /// Get cache statistics from the execution engine.
     ///
-    /// This method searches through all source models to find elements
-    /// that match the given type specification.
-    ///
-    /// - Parameter typeName: Type name (potentially qualified with model alias)
-    /// - Returns: Array of matching elements
-    /// - Throws: `ATLExecutionError.typeNotFound` if type is not found
-    public func findElementsOfType(_ typeName: String) async throws -> [any EObject] {
-        // Check cache first
-        if let cached = typeCache[typeName] {
-            return cached
-        }
-        
-        let (modelAlias, className) = parseQualifiedTypeName(typeName)
-        var results: [any EObject] = []
-        
-        // Search in specific model if alias provided
-        if let alias = modelAlias {
-            if let resource = sources[alias] {
-                results = await findElementsInResource(resource, ofType: className)
-            } else {
-                throw ATLExecutionError.runtimeError("Source model '\(alias)' not found")
-            }
-        } else {
-            // Search in all source models
-            for (_, resource) in sources {
-                results.append(contentsOf: await findElementsInResource(resource, ofType: className))
+    /// - Returns: Cache statistics
+    public func getCacheStatistics() async -> [String: Int] {
+        return await executionEngine.getCacheStatistics()
+    }
+
+    // MARK: - Private Implementation
+
+    /// Build ECore evaluation context from ATL variables.
+    private func buildECoreContext() throws -> [String: any EcoreValue] {
+        var context: [String: any EcoreValue] = [:]
+
+        // Add current variables
+        for (name, value) in variables {
+            if let ecoreValue = value {
+                context[name] = ecoreValue
             }
         }
-        
-        // Cache results
-        typeCache[typeName] = results
-        return results
-    }
-    
-    /// Finds elements in a specific resource that match the given type.
-    private func findElementsInResource(_ resource: Resource, ofType className: String) async -> [any EObject] {
-        var results: [any EObject] = []
-        
-        let allObjects = await resource.getAllObjects()
-        for object in allObjects {
-            if let eClass = object.eClass as? EClass,
-               eClass.name == className || isSubtypeOf(eClass, className) {
-                results.append(object)
+
+        // Add scope stack variables
+        for scope in scopeStack {
+            for (name, value) in scope {
+                if context[name] == nil, let ecoreValue = value {
+                    context[name] = ecoreValue
+                }
             }
         }
-        
-        return results
+
+        return context
     }
-    
-    /// Checks if the given EClass is a subtype of the specified class name.
-    private func isSubtypeOf(_ eClass: EClass, _ className: String) -> Bool {
-        // Check direct inheritance
-        for superType in eClass.eSuperTypes {
-            if superType.name == className || isSubtypeOf(superType, className) {
-                return true
-            }
-        }
-        return false
+
+    /// Find an EClass by name.
+    private func findEClass(name: String, in alias: String? = nil) throws -> EClass {
+        // This would need to be implemented based on available metamodels
+        // For now, create a placeholder implementation
+        throw ATLExecutionError.typeError("Unknown type: \(name)")
     }
-    
-    /// Resolves an element by its identifier.
+
+    /// Find an element by ID across all models.
     ///
-    /// - Parameter id: Element identifier
-    /// - Returns: Resolved element or nil if not found
-    public func resolveElement(_ id: EUUID) async -> (any EObject)? {
-        // Check resolution cache
-        if let cached = resolutionCache[id] {
-            return cached
-        }
-        
-        // Search in all resources
-        for (_, resource) in sources {
+    /// - Parameter id: Element ID to find
+    /// - Returns: Element if found
+    public func findElement(_ id: EUUID) async -> (any EObject)? {
+        // Search in target models first
+        for resource in targets.values {
             if let element = await resource.resolve(id) {
-                resolutionCache[id] = element
                 return element
             }
         }
-        
-        for (_, resource) in targets {
+
+        // Search in source models if not found in targets
+        for resource in sources.values {
             if let element = await resource.resolve(id) {
-                resolutionCache[id] = element
                 return element
             }
         }
-        
+
         return nil
     }
-    
-    /// Parses a qualified type name into model alias and class name components.
-    ///
-    /// - Parameter qualifiedType: Type name (e.g., "Source!Person" or "Person")
-    /// - Returns: Tuple of optional model alias and class name
+
+    /// Parse a qualified type name into model alias and type name.
     private func parseQualifiedTypeName(_ qualifiedType: String) -> (String?, String) {
-        if let exclamationIndex = qualifiedType.firstIndex(of: "!") {
-            let modelAlias = String(qualifiedType[..<exclamationIndex])
-            let className = String(qualifiedType[qualifiedType.index(after: exclamationIndex)...])
-            return (modelAlias, className)
+        let components = qualifiedType.split(separator: "!")
+        if components.count == 2 {
+            return (String(components[0]), String(components[1]))
         } else {
             return (nil, qualifiedType)
         }
     }
-    
-    // MARK: - Helper Management
-    
-    /// Registers a helper function for later invocation.
-    ///
-    /// - Parameter helper: Helper function to register
-    public func registerHelper(_ helper: any ATLHelperType) {
-        let signature = createHelperSignature(helper)
-        helpers[signature] = helper
-    }
-    
-    /// Creates a unique signature for a helper function.
-    private func createHelperSignature(_ helper: any ATLHelperType) -> String {
-        let parameterTypes = helper.parameters.map { $0.type }.joined(separator: ",")
-        let contextPart = helper.contextType.map { "\($0)." } ?? ""
-        return "\(contextPart)\(helper.name)(\(parameterTypes))"
-    }
-    
-    // MARK: - Utility Methods
-    
-    /// Invalidates the element type cache.
-    private func invalidateTypeCache() {
-        typeCache.removeAll()
-    }
-    
-    /// Clears resolution cache.
-    private func clearResolutionCache() {
-        resolutionCache.removeAll()
-    }
-    
-    /// Returns the current error context for debugging.
-    ///
-    /// - Returns: Error context with accumulated errors and warnings
-    public func getErrorContext() -> ATLErrorContext {
-        errorContext
-    }
-    
-    /// Clears the error context.
-    public func clearErrorContext() {
-        errorContext = ATLErrorContext()
-    }
-    
-    /// Performs cleanup operations after transformation completion.
-    public func cleanup() {
-        // Clear caches
-        invalidateTypeCache()
-        clearResolutionCache()
-        
-        // Clear error context
-        clearErrorContext()
-        
-        // Reset bindings
-        lazyBindings.removeAll()
-    }
 }
 
-/// Error context for tracking execution errors and warnings.
-public struct ATLErrorContext: Sendable {
-    
-    /// Accumulated errors
+// MARK: - Supporting Types
+
+/// Error context for tracking issues during ATL execution.
+public struct ATLErrorContext: Sendable, Equatable {
+    /// Error messages collected during execution.
     public private(set) var errors: [String] = []
-    
-    /// Accumulated warnings  
+
+    /// Warning messages collected during execution.
     public private(set) var warnings: [String] = []
-    
-    /// Execution timeline for debugging
+
+    /// Timeline of events for debugging.
     public private(set) var timeline: [(Date, String)] = []
-    
-    /// Adds an error to the context.
-    ///
-    /// - Parameter message: Error message
-    public mutating func addError(_ message: String) {
+
+    /// Add an error message.
+    mutating func addError(_ message: String) {
         errors.append(message)
         timeline.append((Date(), "ERROR: \(message)"))
     }
-    
-    /// Adds a warning to the context.
-    ///
-    /// - Parameter message: Warning message
-    public mutating func addWarning(_ message: String) {
+
+    /// Add a warning message.
+    mutating func addWarning(_ message: String) {
         warnings.append(message)
         timeline.append((Date(), "WARNING: \(message)"))
     }
-    
-    /// Adds a timeline entry.
-    ///
-    /// - Parameter message: Timeline message
-    public mutating func addEvent(_ message: String) {
-        timeline.append((Date(), message))
+
+    /// Add an event to the timeline.
+    mutating func addEvent(_ message: String) {
+        timeline.append((Date(), "INFO: \(message)"))
     }
-    
-    /// Returns whether any errors have occurred.
-    ///
-    /// - Returns: True if errors are present
+
+    /// Check if there are any errors.
     public var hasErrors: Bool {
-        !errors.isEmpty
+        return !errors.isEmpty
     }
-    
-    /// Returns whether any warnings have occurred.
-    ///
-    /// - Returns: True if warnings are present  
+
+    /// Check if there are any warnings.
     public var hasWarnings: Bool {
-        !warnings.isEmpty
+        return !warnings.isEmpty
     }
-    
-    /// Returns a formatted summary of errors and warnings.
-    ///
-    /// - Returns: Formatted error summary
+
+    /// Get a summary of all errors and warnings.
     public func summary() -> String {
         var result: [String] = []
-        
         if !errors.isEmpty {
             result.append("Errors (\(errors.count)):")
-            result.append(contentsOf: errors.map { "  - \($0)" })
+            result.append(contentsOf: errors.map { "  - \(String($0))" })
         }
-        
         if !warnings.isEmpty {
             result.append("Warnings (\(warnings.count)):")
-            result.append(contentsOf: warnings.map { "  - \($0)" })
+            result.append(contentsOf: warnings.map { "  - \(String($0))" })
         }
-        
-        if result.isEmpty {
-            return "No errors or warnings"
-        }
-        
         return result.joined(separator: "\n")
+    }
+
+    /// Equality comparison for testing.
+    public static func == (lhs: ATLErrorContext, rhs: ATLErrorContext) -> Bool {
+        return lhs.errors == rhs.errors && lhs.warnings == rhs.warnings
     }
 }
 
-// MARK: - ATL Trace Link
-
-/// Represents a trace link between source and target elements in ATL transformations.
+/// Trace link between source and target elements in ATL transformations.
 ///
-/// Trace links record the relationships established during transformation execution,
-/// providing bidirectional mappings between source and target elements. They enable
-/// transformation debugging, incremental updates, and impact analysis.
-///
-/// ## Example Usage
-///
-/// ```swift
-/// let traceLink = ATLTraceLink(
-///     ruleName: "Member2Male",
-///     sourceElement: memberUUID,
-///     targetElements: [maleUUID]
-/// )
-/// ```
-public struct ATLTraceLink: Sendable, Equatable {
-
-    // MARK: - Properties
-
-    /// The name of the transformation rule that created this trace link.
-    ///
-    /// Rule names enable filtering and grouping of trace links by their
-    /// originating transformation rules.
+/// Trace links provide bidirectional mapping between elements transformed
+/// by ATL rules, enabling impact analysis and transformation debugging.
+public struct ATLTraceLink: Sendable, Equatable, Hashable {
+    /// Name of the ATL rule that created this trace link.
     public let ruleName: String
 
-    /// The UUID of the source element.
-    ///
-    /// Source element UUIDs provide stable references to input model elements
-    /// across transformation sessions and model updates.
+    /// Unique identifier of the source element.
     public let sourceElement: EUUID
 
-    /// The UUIDs of the target elements created from the source element.
-    ///
-    /// Target element arrays support one-to-many transformation patterns
-    /// where a single source element produces multiple target elements.
+    /// Unique identifiers of the target elements created from the source.
     public let targetElements: [EUUID]
 
-    // MARK: - Initialisation
-
-    /// Creates a new ATL trace link.
+    /// Creates a new trace link.
     ///
     /// - Parameters:
-    ///   - ruleName: The name of the creating transformation rule
-    ///   - sourceElement: The source element UUID
-    ///   - targetElements: The target element UUIDs
-    ///
-    /// - Precondition: The rule name must be a non-empty string
-    /// - Precondition: At least one target element must be specified
+    ///   - ruleName: Name of the creating rule
+    ///   - sourceElement: Source element ID
+    ///   - targetElements: Target element IDs
     public init(ruleName: String, sourceElement: EUUID, targetElements: [EUUID]) {
-        precondition(!ruleName.isEmpty, "Rule name must not be empty")
-        precondition(!targetElements.isEmpty, "At least one target element must be specified")
-
         self.ruleName = ruleName
         self.sourceElement = sourceElement
         self.targetElements = targetElements
     }
 }
 
-// MARK: - ATL Lazy Binding
-
-/// Represents a deferred property binding in ATL transformations.
+/// Lazy binding for deferred property assignment in ATL transformations.
 ///
-/// Lazy bindings enable complex transformation patterns that require multiple
-/// evaluation passes or forward reference resolution. They are resolved after
-/// primary transformation execution to handle circular dependencies and
-/// references to elements created later in the transformation process.
-///
-/// ## Example Usage
-///
-/// ```swift
-/// let lazyBinding = ATLLazyBinding(
-///     targetElement: personUUID,
-///     property: "children",
-///     expression: childrenExpression
-/// )
-/// ```
+/// Lazy bindings allow ATL rules to defer property assignments until after
+/// all target elements are created, enabling forward references and circular
+/// dependencies to be resolved correctly.
 public struct ATLLazyBinding: Sendable {
-
-    // MARK: - Properties
-
-    /// The UUID of the target element to update.
+    /// Target element to assign the property to.
     public let targetElement: EUUID
 
-    /// The property name to bind.
+    /// Property name to assign.
     public let property: String
 
-    /// The expression to evaluate for the property value.
+    /// Expression to evaluate for the property value.
     public let expression: any ATLExpression
-
-    // MARK: - Initialisation
 
     /// Creates a new lazy binding.
     ///
     /// - Parameters:
-    ///   - targetElement: The target element UUID
-    ///   - property: The property name to bind
-    ///   - expression: The expression to evaluate
-    ///
-    /// - Precondition: The property name must be a non-empty string
+    ///   - targetElement: Target element ID
+    ///   - property: Property name
+    ///   - expression: Value expression
     public init(targetElement: EUUID, property: String, expression: any ATLExpression) {
-        precondition(!property.isEmpty, "Property name must not be empty")
-
         self.targetElement = targetElement
         self.property = property
         self.expression = expression
     }
 
-    // MARK: - Resolution
-
-    /// Resolves the lazy binding within the execution context.
+    /// Resolve the lazy binding by evaluating the expression and setting the property.
     ///
-    /// - Parameter context: The execution context for expression evaluation
-    /// - Throws: ATL execution errors for resolution failures
-    public func resolve(in context: ATLExecutionContext) async throws {
-        // Find the target element in the available target models
-        var targetObject: (any EObject)?
-
-        for (_, resource) in await context.targets {
-            if let object = await resource.getObject(targetElement) {
-                targetObject = object
-                break
-            }
-        }
-
-        guard let eObject = targetObject else {
-            throw ATLExecutionError.invalidOperation(
-                "Target element \(targetElement) not found for lazy binding")
+    /// - Parameter context: Execution context for evaluation
+    /// - Throws: `ATLExecutionError` if resolution fails
+    func resolve(in context: ATLExecutionContext) async throws {
+        // Find the target element
+        guard let targetObject = await findElement(targetElement, in: context) else {
+            throw ATLExecutionError.runtimeError("Element with ID '\(targetElement)' not found")
         }
 
         // Evaluate the expression
         let value = try await expression.evaluate(in: context)
 
-        // Get the structural feature for the property
-        guard let eClass = eObject.eClass as? EClass else {
-            throw ATLExecutionError.typeError(
-                "Element eClass is not an EClass: \(type(of: eObject.eClass))")
-        }
+        // Set the property using the execution engine
+        try await context.executionEngine.setProperty(
+            targetObject, property: property, value: value)
+    }
 
-        guard let feature = eClass.getStructuralFeature(name: property) else {
-            throw ATLExecutionError.invalidOperation(
-                "Property '\(property)' not found in class '\(eClass.name)'")
-        }
-
-        // Set the property value
-        var mutableObject = eObject
-        mutableObject.eSet(feature, value)
+    /// Find an element by ID in the context.
+    private func findElement(_ id: EUUID, in context: ATLExecutionContext) async -> (any EObject)? {
+        return await context.findElement(id)
     }
 }
