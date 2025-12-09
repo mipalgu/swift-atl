@@ -1922,6 +1922,141 @@ public struct ATLOperationExpression: ATLExpression, Sendable, Equatable, Hashab
     }
 }
 
+// MARK: - ATL Iterate Expression
+
+/// Represents an ATL iterate expression with complex syntax.
+///
+/// The iterate expression supports the OCL-style iterate syntax:
+/// ```
+/// collection->iterate(param; accumulator : Type = defaultValue | body_expression)
+/// ```
+///
+/// ## Example Usage
+///
+/// ```swift
+/// let iterateExpr = ATLIterateExpression(
+///     source: ATLVariableExpression(name: "numbers"),
+///     parameter: "n",
+///     accumulator: "sum",
+///     accumulatorType: "Integer",
+///     defaultValue: ATLLiteralExpression(value: 0),
+///     body: ATLBinaryOperationExpression(
+///         left: ATLVariableExpression(name: "sum"),
+///         operator: .add,
+///         right: ATLVariableExpression(name: "n")
+///     )
+/// )
+/// ```
+public struct ATLIterateExpression: ATLExpression, Sendable, Equatable, Hashable {
+
+    // MARK: - Properties
+
+    /// The source collection expression.
+    public let source: any ATLExpression
+
+    /// The iteration parameter name.
+    public let parameter: String
+
+    /// The accumulator variable name.
+    public let accumulator: String
+
+    /// The accumulator type (optional).
+    public let accumulatorType: String?
+
+    /// The default value for the accumulator.
+    public let defaultValue: any ATLExpression
+
+    /// The body expression that computes the new accumulator value.
+    public let body: any ATLExpression
+
+    // MARK: - Initialization
+
+    /// Creates a new iterate expression.
+    ///
+    /// - Parameters:
+    ///   - source: The source collection expression
+    ///   - parameter: The iteration parameter name
+    ///   - accumulator: The accumulator variable name
+    ///   - accumulatorType: The accumulator type (optional)
+    ///   - defaultValue: The default value for the accumulator
+    ///   - body: The body expression
+    public init(
+        source: any ATLExpression,
+        parameter: String,
+        accumulator: String,
+        accumulatorType: String? = nil,
+        defaultValue: any ATLExpression,
+        body: any ATLExpression
+    ) {
+        self.source = source
+        self.parameter = parameter
+        self.accumulator = accumulator
+        self.accumulatorType = accumulatorType
+        self.defaultValue = defaultValue
+        self.body = body
+    }
+
+    // MARK: - ATLExpression Protocol
+
+    /// Evaluates the iterate expression in the given execution context.
+    ///
+    /// - Parameter context: The execution context
+    /// - Returns: The final accumulator value after iteration
+    /// - Throws: ATLExecutionError if evaluation fails
+    @MainActor
+    public func evaluate(in context: ATLExecutionContext) async throws -> (any EcoreValue)? {
+        // Evaluate the source collection
+        guard let sourceValue = try await source.evaluate(in: context) else {
+            throw ATLExecutionError.typeError("iterate() requires non-nil collection")
+        }
+
+        guard let collection = sourceValue as? [Any] else {
+            throw ATLExecutionError.typeError("iterate() requires Collection receiver")
+        }
+
+        // Evaluate the default accumulator value
+        var accValue = try await defaultValue.evaluate(in: context)
+
+        // Create a new scope for iteration
+        context.pushScope()
+        defer {
+            context.popScope()
+        }
+
+        // Iterate over the collection
+        for item in collection {
+            // Set the iteration parameter
+            context.setVariable(parameter, value: item as? (any EcoreValue))
+            // Set the accumulator variable
+            context.setVariable(accumulator, value: accValue)
+            // Evaluate the body expression to get the new accumulator value
+            accValue = try await body.evaluate(in: context)
+        }
+
+        return accValue
+    }
+
+    // MARK: - Equatable
+
+    public static func == (lhs: ATLIterateExpression, rhs: ATLIterateExpression) -> Bool {
+        return areATLExpressionsEqual(lhs.source, rhs.source) && lhs.parameter == rhs.parameter
+            && lhs.accumulator == rhs.accumulator && lhs.accumulatorType == rhs.accumulatorType
+            && areATLExpressionsEqual(lhs.defaultValue, rhs.defaultValue)
+            && areATLExpressionsEqual(lhs.body, rhs.body)
+    }
+
+    // MARK: - Hashable
+
+    public func hash(into hasher: inout Hasher) {
+        hashATLExpression(source, into: &hasher)
+        hasher.combine(parameter)
+        hasher.combine(accumulator)
+        hasher.combine(accumulatorType)
+        hashATLExpression(defaultValue, into: &hasher)
+        hashATLExpression(body, into: &hasher)
+    }
+}
+
 // MARK: - ATL Collection Expression
 
 /// Represents an ATL collection operation expression.
