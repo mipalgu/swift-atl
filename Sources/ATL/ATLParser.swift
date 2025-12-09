@@ -118,7 +118,8 @@ private class ATLLexer {
     private static let keywords: Set<String> = [
         "module", "create", "from", "helper", "def", "context", "rule", "query",
         "if", "then", "else", "endif", "and", "or", "not", "true", "false",
-        "let", "in", "do", "to", "self", "Integer", "String", "Boolean", "Real",
+        "let", "in", "do", "to", "self", "lazy",
+        "Integer", "String", "Boolean", "Real",
     ]
 
     private static let `operators`: Set<String> = [
@@ -380,6 +381,14 @@ private class ATLSyntaxParser {
             if currentToken()?.type == .keyword("helper") {
                 let helper = try parseHelper()
                 helpers[helper.name] = helper
+            } else if currentToken()?.type == .keyword("lazy") {
+                // Parse lazy rule (same as called rule in ATL)
+                advance()  // consume 'lazy'
+                guard consumeKeyword("rule") else {
+                    throw ATLParseError.invalidSyntax("Expected 'rule' keyword after 'lazy'")
+                }
+                let rule = try parseLazyRule()
+                calledRules[rule.name] = rule
             } else if currentToken()?.type == .keyword("rule") {
                 let rule = try parseRule()
                 if let matchedRule = rule as? ATLMatchedRule {
@@ -809,6 +818,67 @@ private class ATLSyntaxParser {
         return ATLCalledRule(
             name: name,
             parameters: parameters,
+            targetPatterns: targetPatterns,
+            body: []  // Simplified for now
+        )
+    }
+
+    private func parseLazyRule() throws -> ATLCalledRule {
+        // Parse rule name
+        guard let nameToken = currentToken(),
+            case .identifier(let ruleName) = nameToken.type
+        else {
+            throw ATLParseError.invalidSyntax("Expected lazy rule name")
+        }
+        advance()
+
+        guard consumePunctuation("{") else {
+            throw ATLParseError.invalidSyntax("Expected '{' to start lazy rule body")
+        }
+
+        // Parse 'from' clause to extract parameter
+        guard consumeKeyword("from") else {
+            throw ATLParseError.invalidSyntax("Expected 'from' clause in lazy rule")
+        }
+
+        // Parse source pattern (which becomes the parameter)
+        guard let varToken = currentToken(),
+            case .identifier(let varName) = varToken.type
+        else {
+            throw ATLParseError.invalidSyntax("Expected source variable name")
+        }
+        advance()
+
+        guard consumeOperator(":") else {
+            throw ATLParseError.invalidSyntax("Expected ':' after source variable name")
+        }
+        let paramType = try parseTypeExpression()
+
+        let parameter = ATLParameter(name: varName, type: paramType)
+
+        // Parse 'to' clause
+        guard consumeKeyword("to") else {
+            throw ATLParseError.invalidSyntax("Expected 'to' clause in lazy rule")
+        }
+        var targetPatterns: [ATLTargetPattern] = []
+
+        repeat {
+            targetPatterns.append(try parseTargetPattern())
+
+            if currentToken()?.type == .punctuation(",") {
+                advance()
+            } else {
+                break
+            }
+        } while !isAtEnd() && currentToken()?.type != .punctuation("}")
+
+        guard consumePunctuation("}") else {
+            throw ATLParseError.invalidSyntax("Expected '}' to end lazy rule")
+        }
+
+        return ATLCalledRule(
+            name: ruleName,
+            parameters: [parameter],
             targetPatterns: targetPatterns,
             body: []  // Simplified for now
         )
@@ -1257,6 +1327,16 @@ private class ATLSyntaxParser {
 
         case .identifier(let name):
             advance()
+
+            // Check for metamodel-qualified type: Model!Type
+            if let currentTok = currentToken(), case .operator(let op) = currentTok.type, op == "!" {
+                advance()  // consume '!'
+                guard let typeToken = currentToken(), case .identifier(let typeName) = typeToken.type else {
+                    throw ATLParseError.invalidSyntax("Expected type name after '!' in metamodel-qualified type")
+                }
+                advance()  // consume type name
+                return ATLTypeLiteralExpression(typeName: "\(name)!\(typeName)")
+            }
 
             // Check for function call
             if let currentTok = currentToken(), case .punctuation(let punct) = currentTok.type,

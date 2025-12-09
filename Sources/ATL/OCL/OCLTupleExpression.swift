@@ -45,6 +45,10 @@ public struct OCLTupleExpression: OCLExpression {
         self.fields = fields
     }
 
+    /// Evaluates the tuple expression by evaluating all field values.
+    ///
+    /// - Parameter context: The execution context for evaluation
+    /// - Returns: An ordered dictionary containing the field names and evaluated values
     @MainActor
     public func evaluate(in context: OCLExecutionContext) async throws -> (any EcoreValue)? {
         var result: OrderedDictionary<String, any EcoreValue> = [:]
@@ -60,6 +64,12 @@ public struct OCLTupleExpression: OCLExpression {
         return result as? (any EcoreValue)
     }
 
+    /// Tests equality between two tuple expressions.
+    ///
+    /// - Parameters:
+    ///   - lhs: The left-hand side expression
+    ///   - rhs: The right-hand side expression
+    /// - Returns: `true` if all field names, types, and values are equal
     public static func == (lhs: OCLTupleExpression, rhs: OCLTupleExpression) -> Bool {
         guard lhs.fields.count == rhs.fields.count else { return false }
 
@@ -75,6 +85,9 @@ public struct OCLTupleExpression: OCLExpression {
         return true
     }
 
+    /// Hashes the tuple expression into the given hasher.
+    ///
+    /// - Parameter hasher: The hasher to use for combining values
     public func hash(into hasher: inout Hasher) {
         hasher.combine(fields.count)
         for field in fields {

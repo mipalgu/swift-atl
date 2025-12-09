@@ -144,7 +144,7 @@ lazy rule CreateDetailedReport {
 }
 
 -- Called rule for creating audit entries
-rule CreateAuditEntry {
+lazy rule CreateAuditEntry {
     from
         source : SourceModel!Element
     to

@@ -120,15 +120,29 @@ public struct OCLVariableExpression: OCLExpression {
         self.name = name
     }
 
+    /// Evaluates the variable expression by retrieving its value from the execution context.
+    ///
+    /// - Parameter context: The execution context containing variable bindings
+    /// - Returns: The value bound to the variable name
+    /// - Throws: `OCLExecutionError.variableNotFound` if the variable is not in scope
     @MainActor
     public func evaluate(in context: OCLExecutionContext) async throws -> (any EcoreValue)? {
         return try context.getVariable(name)
     }
 
+    /// Tests equality between two variable expressions.
+    ///
+    /// - Parameters:
+    ///   - lhs: The left-hand side expression
+    ///   - rhs: The right-hand side expression
+    /// - Returns: `true` if both expressions reference the same variable name
     public static func == (lhs: OCLVariableExpression, rhs: OCLVariableExpression) -> Bool {
         return lhs.name == rhs.name
     }
 
+    /// Hashes the variable expression into the given hasher.
+    ///
+    /// - Parameter hasher: The hasher to use for combining values
     public func hash(into hasher: inout Hasher) {
         hasher.combine(name)
     }
@@ -159,11 +173,21 @@ public struct OCLLiteralExpression: OCLExpression {
         self.value = value
     }
 
+    /// Evaluates the literal expression by returning its value.
+    ///
+    /// - Parameter context: The execution context (unused for literals)
+    /// - Returns: The literal value
     @MainActor
     public func evaluate(in context: OCLExecutionContext) async throws -> (any EcoreValue)? {
         return value
     }
 
+    /// Tests equality between two literal expressions.
+    ///
+    /// - Parameters:
+    ///   - lhs: The left-hand side expression
+    ///   - rhs: The right-hand side expression
+    /// - Returns: `true` if both expressions represent equal values
     public static func == (lhs: OCLLiteralExpression, rhs: OCLLiteralExpression) -> Bool {
         guard let lhsValue = lhs.value, let rhsValue = rhs.value else {
             return lhs.value == nil && rhs.value == nil
@@ -171,6 +195,9 @@ public struct OCLLiteralExpression: OCLExpression {
         return String(describing: lhsValue) == String(describing: rhsValue)
     }
 
+    /// Hashes the literal expression into the given hasher.
+    ///
+    /// - Parameter hasher: The hasher to use for combining values
     public func hash(into hasher: inout Hasher) {
         if let value = value {
             hasher.combine(String(describing: value))
@@ -215,6 +242,11 @@ public struct OCLNavigationExpression: OCLExpression {
         self.property = property
     }
 
+    /// Evaluates the navigation expression by traversing from the source to the property.
+    ///
+    /// - Parameter context: The execution context providing navigation capabilities
+    /// - Returns: The value of the property, or `nil` if the source evaluates to `nil`
+    /// - Throws: Navigation errors if the property cannot be accessed
     @MainActor
     public func evaluate(in context: OCLExecutionContext) async throws -> (any EcoreValue)? {
         guard let sourceObject = try await source.evaluate(in: context) else {
@@ -223,10 +255,19 @@ public struct OCLNavigationExpression: OCLExpression {
         return try await context.navigate(from: sourceObject, property: property)
     }
 
+    /// Tests equality between two navigation expressions.
+    ///
+    /// - Parameters:
+    ///   - lhs: The left-hand side expression
+    ///   - rhs: The right-hand side expression
+    /// - Returns: `true` if both expressions navigate the same property from equal sources
     public static func == (lhs: OCLNavigationExpression, rhs: OCLNavigationExpression) -> Bool {
         return lhs.property == rhs.property && areOCLExpressionsEqual(lhs.source, rhs.source)
     }
 
+    /// Hashes the navigation expression into the given hasher.
+    ///
+    /// - Parameter hasher: The hasher to use for combining values
     public func hash(into hasher: inout Hasher) {
         hasher.combine(property)
         hashOCLExpression(source, into: &hasher)
@@ -279,6 +320,10 @@ public struct OCLConditionalExpression: OCLExpression {
         self.elseExpression = elseExpression
     }
 
+    /// Evaluates the conditional expression based on the condition's boolean value.
+    ///
+    /// - Parameter context: The execution context for evaluating sub-expressions
+    /// - Returns: The value of the then-expression if condition is true, otherwise the else-expression
     @MainActor
     public func evaluate(in context: OCLExecutionContext) async throws -> (any EcoreValue)? {
         let conditionValue = try await condition.evaluate(in: context)
@@ -291,12 +336,21 @@ public struct OCLConditionalExpression: OCLExpression {
         }
     }
 
+    /// Tests equality between two conditional expressions.
+    ///
+    /// - Parameters:
+    ///   - lhs: The left-hand side expression
+    ///   - rhs: The right-hand side expression
+    /// - Returns: `true` if all three components (condition, then, else) are equal
     public static func == (lhs: OCLConditionalExpression, rhs: OCLConditionalExpression) -> Bool {
         return areOCLExpressionsEqual(lhs.condition, rhs.condition)
             && areOCLExpressionsEqual(lhs.thenExpression, rhs.thenExpression)
             && areOCLExpressionsEqual(lhs.elseExpression, rhs.elseExpression)
     }
 
+    /// Hashes the conditional expression into the given hasher.
+    ///
+    /// - Parameter hasher: The hasher to use for combining values
     public func hash(into hasher: inout Hasher) {
         hashOCLExpression(condition, into: &hasher)
         hashOCLExpression(thenExpression, into: &hasher)
@@ -372,6 +426,11 @@ public struct OCLBinaryOperationExpression: OCLExpression {
         self.right = right
     }
 
+    /// Evaluates the binary operation by applying the operator to the left and right operands.
+    ///
+    /// - Parameter context: The execution context for evaluating operands
+    /// - Returns: The result of the binary operation
+    /// - Throws: Type or arithmetic errors if the operation cannot be performed
     @MainActor
     public func evaluate(in context: OCLExecutionContext) async throws -> (any EcoreValue)? {
         let leftValue = try await left.evaluate(in: context)
@@ -381,6 +440,13 @@ public struct OCLBinaryOperationExpression: OCLExpression {
     }
 
     /// Evaluates the binary operation with the given operands.
+    ///
+    /// - Parameters:
+    ///   - leftValue: The evaluated left operand
+    ///   - operator: The binary operator to apply
+    ///   - rightValue: The evaluated right operand
+    /// - Returns: The result of applying the operator
+    /// - Throws: Execution errors for unsupported or invalid operations
     private func evaluateOperation(
         _ leftValue: (any EcoreValue)?,
         _ operator: OCLBinaryOperator,
@@ -417,12 +483,21 @@ public struct OCLBinaryOperationExpression: OCLExpression {
         }
     }
 
+    /// Tests equality between two binary operation expressions.
+    ///
+    /// - Parameters:
+    ///   - lhs: The left-hand side expression
+    ///   - rhs: The right-hand side expression
+    /// - Returns: `true` if the operator and both operands are equal
     public static func == (lhs: OCLBinaryOperationExpression, rhs: OCLBinaryOperationExpression) -> Bool {
         return lhs.`operator` == rhs.`operator`
             && areOCLExpressionsEqual(lhs.left, rhs.left)
             && areOCLExpressionsEqual(lhs.right, rhs.right)
     }
 
+    /// Hashes the binary operation expression into the given hasher.
+    ///
+    /// - Parameter hasher: The hasher to use for combining values
     public func hash(into hasher: inout Hasher) {
         hasher.combine(`operator`)
         hashOCLExpression(left, into: &hasher)
@@ -467,6 +542,11 @@ public struct OCLUnaryOperationExpression: OCLExpression {
         self.operand = operand
     }
 
+    /// Evaluates the unary operation by applying the operator to the operand.
+    ///
+    /// - Parameter context: The execution context for evaluating the operand
+    /// - Returns: The result of the unary operation
+    /// - Throws: Type errors if the operator cannot be applied to the operand value
     @MainActor
     public func evaluate(in context: OCLExecutionContext) async throws -> (any EcoreValue)? {
         let operandValue = try await operand.evaluate(in: context)
@@ -489,10 +569,19 @@ public struct OCLUnaryOperationExpression: OCLExpression {
         }
     }
 
+    /// Tests equality between two unary operation expressions.
+    ///
+    /// - Parameters:
+    ///   - lhs: The left-hand side expression
+    ///   - rhs: The right-hand side expression
+    /// - Returns: `true` if the operator and operand are equal
     public static func == (lhs: OCLUnaryOperationExpression, rhs: OCLUnaryOperationExpression) -> Bool {
         return lhs.`operator` == rhs.`operator` && areOCLExpressionsEqual(lhs.operand, rhs.operand)
     }
 
+    /// Hashes the unary operation expression into the given hasher.
+    ///
+    /// - Parameter hasher: The hasher to use for combining values
     public func hash(into hasher: inout Hasher) {
         hasher.combine(`operator`)
         hashOCLExpression(operand, into: &hasher)
@@ -556,6 +645,14 @@ public struct OCLLetExpression: OCLExpression {
         self.inExpression = inExpression
     }
 
+    /// Evaluates the let expression by binding the variable and evaluating the body.
+    ///
+    /// Creates a new scope, evaluates the initialisation expression, binds the variable
+    /// to the result, and then evaluates the body expression within that scope.
+    ///
+    /// - Parameter context: The execution context for evaluation
+    /// - Returns: The result of evaluating the body expression
+    /// - Throws: Execution errors if initialisation or body evaluation fails
     @MainActor
     public func evaluate(in context: OCLExecutionContext) async throws -> (any EcoreValue)? {
         // Evaluate the initialisation expression
@@ -574,6 +671,12 @@ public struct OCLLetExpression: OCLExpression {
         return try await inExpression.evaluate(in: context)
     }
 
+    /// Tests equality between two let expressions.
+    ///
+    /// - Parameters:
+    ///   - lhs: The left-hand side expression
+    ///   - rhs: The right-hand side expression
+    /// - Returns: `true` if all components (name, type, init, body) are equal
     public static func == (lhs: OCLLetExpression, rhs: OCLLetExpression) -> Bool {
         return lhs.variableName == rhs.variableName
             && lhs.variableType == rhs.variableType
@@ -581,6 +684,9 @@ public struct OCLLetExpression: OCLExpression {
             && areOCLExpressionsEqual(lhs.inExpression, rhs.inExpression)
     }
 
+    /// Hashes the let expression into the given hasher.
+    ///
+    /// - Parameter hasher: The hasher to use for combining values
     public func hash(into hasher: inout Hasher) {
         hasher.combine(variableName)
         hasher.combine(variableType)
@@ -625,6 +731,13 @@ public enum OCLExecutionError: Error, LocalizedError, Sendable {
 
 /// Arithmetic operations for OCL expressions.
 public enum OCLArithmeticOperations {
+    /// Adds two values, supporting numeric and string concatenation.
+    ///
+    /// - Parameters:
+    ///   - left: The left operand
+    ///   - right: The right operand
+    /// - Returns: The sum of the values
+    /// - Throws: `OCLExecutionError.invalidOperation` if the values cannot be added
     public static func add(_ left: (any EcoreValue)?, _ right: (any EcoreValue)?) throws -> (any EcoreValue)? {
         switch (left, right) {
         case (let l as Int, let r as Int):
@@ -643,6 +756,13 @@ public enum OCLArithmeticOperations {
         }
     }
 
+    /// Subtracts one numeric value from another.
+    ///
+    /// - Parameters:
+    ///   - left: The left operand
+    ///   - right: The right operand
+    /// - Returns: The difference of the values
+    /// - Throws: `OCLExecutionError.invalidOperation` if the values cannot be subtracted
     public static func subtract(_ left: (any EcoreValue)?, _ right: (any EcoreValue)?) throws -> (any EcoreValue)? {
         switch (left, right) {
         case (let l as Int, let r as Int):
@@ -659,6 +779,13 @@ public enum OCLArithmeticOperations {
         }
     }
 
+    /// Multiplies two numeric values.
+    ///
+    /// - Parameters:
+    ///   - left: The left operand
+    ///   - right: The right operand
+    /// - Returns: The product of the values
+    /// - Throws: `OCLExecutionError.invalidOperation` if the values cannot be multiplied
     public static func multiply(_ left: (any EcoreValue)?, _ right: (any EcoreValue)?) throws -> (any EcoreValue)? {
         switch (left, right) {
         case (let l as Int, let r as Int):
@@ -675,6 +802,13 @@ public enum OCLArithmeticOperations {
         }
     }
 
+    /// Divides one numeric value by another.
+    ///
+    /// - Parameters:
+    ///   - left: The dividend
+    ///   - right: The divisor
+    /// - Returns: The quotient of the values
+    /// - Throws: `OCLExecutionError.divisionByZero` if the divisor is zero, or `OCLExecutionError.invalidOperation` if the values cannot be divided
     public static func divide(_ left: (any EcoreValue)?, _ right: (any EcoreValue)?) throws -> (any EcoreValue)? {
         switch (left, right) {
         case (let l as Int, let r as Int):
@@ -700,6 +834,12 @@ public enum OCLArithmeticOperations {
 
 /// Comparison operations for OCL expressions.
 public enum OCLComparisonOperations {
+    /// Tests equality between two values.
+    ///
+    /// - Parameters:
+    ///   - left: The left value
+    ///   - right: The right value
+    /// - Returns: `true` if the values are equal
     public static func areEqual(_ left: (any EcoreValue)?, _ right: (any EcoreValue)?) -> Bool {
         switch (left, right) {
         case (nil, nil):
@@ -711,6 +851,13 @@ public enum OCLComparisonOperations {
         }
     }
 
+    /// Compares two values for ordering.
+    ///
+    /// - Parameters:
+    ///   - left: The left value
+    ///   - right: The right value
+    /// - Returns: -1 if left < right, 0 if equal, 1 if left > right
+    /// - Throws: `OCLExecutionError.invalidOperation` if the values cannot be compared
     public static func compare(_ left: (any EcoreValue)?, _ right: (any EcoreValue)?) throws -> Int {
         switch (left, right) {
         case (let l as Int, let r as Int):
@@ -736,6 +883,13 @@ public enum OCLComparisonOperations {
 
 /// Logical operations for OCL expressions.
 public enum OCLLogicalOperations {
+    /// Performs logical AND on two boolean values.
+    ///
+    /// - Parameters:
+    ///   - left: The left boolean value
+    ///   - right: The right boolean value
+    /// - Returns: The result of the logical AND operation
+    /// - Throws: `OCLExecutionError.invalidOperation` if either value is not a boolean
     public static func and(_ left: (any EcoreValue)?, _ right: (any EcoreValue)?) throws -> Bool {
         guard let leftBool = left as? Bool, let rightBool = right as? Bool else {
             throw OCLExecutionError.invalidOperation("Logical AND requires boolean operands")
@@ -743,6 +897,13 @@ public enum OCLLogicalOperations {
         return leftBool && rightBool
     }
 
+    /// Performs logical OR on two boolean values.
+    ///
+    /// - Parameters:
+    ///   - left: The left boolean value
+    ///   - right: The right boolean value
+    /// - Returns: The result of the logical OR operation
+    /// - Throws: `OCLExecutionError.invalidOperation` if either value is not a boolean
     public static func or(_ left: (any EcoreValue)?, _ right: (any EcoreValue)?) throws -> Bool {
         guard let leftBool = left as? Bool, let rightBool = right as? Bool else {
             throw OCLExecutionError.invalidOperation("Logical OR requires boolean operands")
@@ -754,6 +915,11 @@ public enum OCLLogicalOperations {
 // MARK: - OCL Expression Utilities
 
 /// Safely compares two OCL expressions for equality.
+///
+/// - Parameters:
+///   - lhs: The left-hand side expression
+///   - rhs: The right-hand side expression
+/// - Returns: `true` if the expressions are equal
 public func areOCLExpressionsEqual(_ lhs: any OCLExpression, _ rhs: any OCLExpression) -> Bool {
     guard type(of: lhs) == type(of: rhs) else { return false }
 
@@ -778,6 +944,10 @@ public func areOCLExpressionsEqual(_ lhs: any OCLExpression, _ rhs: any OCLExpre
 }
 
 /// Safely hashes an OCL expression.
+///
+/// - Parameters:
+///   - expression: The expression to hash
+///   - hasher: The hasher to combine values into
 public func hashOCLExpression(_ expression: any OCLExpression, into hasher: inout Hasher) {
     switch expression {
     case let expr as OCLLiteralExpression:

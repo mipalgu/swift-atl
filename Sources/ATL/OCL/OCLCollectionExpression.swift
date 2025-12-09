@@ -44,6 +44,12 @@ public struct OCLLambdaExpression: OCLExpression {
         self.body = body
     }
 
+    /// Evaluates the lambda expression by evaluating its body.
+    ///
+    /// Note: Use `evaluateWith(parameterValue:in:)` to bind a parameter value before evaluation.
+    ///
+    /// - Parameter context: The execution context
+    /// - Returns: The result of evaluating the body expression
     @MainActor
     public func evaluate(in context: OCLExecutionContext) async throws -> (any EcoreValue)? {
         return try await body.evaluate(in: context)
@@ -70,10 +76,19 @@ public struct OCLLambdaExpression: OCLExpression {
         return try await body.evaluate(in: context)
     }
 
+    /// Tests equality between two lambda expressions.
+    ///
+    /// - Parameters:
+    ///   - lhs: The left-hand side expression
+    ///   - rhs: The right-hand side expression
+    /// - Returns: `true` if the parameter names and body expressions are equal
     public static func == (lhs: OCLLambdaExpression, rhs: OCLLambdaExpression) -> Bool {
         return lhs.parameter == rhs.parameter && areOCLExpressionsEqual(lhs.body, rhs.body)
     }
 
+    /// Hashes the lambda expression into the given hasher.
+    ///
+    /// - Parameter hasher: The hasher to use for combining values
     public func hash(into hasher: inout Hasher) {
         hasher.combine(parameter)
         hashOCLExpression(body, into: &hasher)
@@ -145,6 +160,11 @@ public struct OCLIterateExpression: OCLExpression {
         self.body = body
     }
 
+    /// Evaluates the iterate expression by folding over the collection.
+    ///
+    /// - Parameter context: The execution context for evaluation
+    /// - Returns: The final accumulator value after iterating over all elements
+    /// - Throws: Type errors if the source is not a collection
     @MainActor
     public func evaluate(in context: OCLExecutionContext) async throws -> (any EcoreValue)? {
         guard let sourceValue = try await source.evaluate(in: context) else {
@@ -171,6 +191,12 @@ public struct OCLIterateExpression: OCLExpression {
         return accValue
     }
 
+    /// Tests equality between two iterate expressions.
+    ///
+    /// - Parameters:
+    ///   - lhs: The left-hand side expression
+    ///   - rhs: The right-hand side expression
+    /// - Returns: `true` if all components are equal
     public static func == (lhs: OCLIterateExpression, rhs: OCLIterateExpression) -> Bool {
         return areOCLExpressionsEqual(lhs.source, rhs.source)
             && lhs.parameter == rhs.parameter
@@ -180,6 +206,9 @@ public struct OCLIterateExpression: OCLExpression {
             && areOCLExpressionsEqual(lhs.body, rhs.body)
     }
 
+    /// Hashes the iterate expression into the given hasher.
+    ///
+    /// - Parameter hasher: The hasher to use for combining values
     public func hash(into hasher: inout Hasher) {
         hashOCLExpression(source, into: &hasher)
         hasher.combine(parameter)
@@ -226,6 +255,11 @@ public struct OCLCollectionLiteralExpression: OCLExpression {
         self.elements = elements
     }
 
+    /// Evaluates the collection literal by evaluating all element expressions.
+    ///
+    /// - Parameter context: The execution context for evaluation
+    /// - Returns: A collection of the specified type containing the evaluated elements
+    /// - Throws: Execution errors if element evaluation fails or the collection type is unsupported
     @MainActor
     public func evaluate(in context: OCLExecutionContext) async throws -> (any EcoreValue)? {
         var evaluatedElements: [String] = []
@@ -258,6 +292,12 @@ public struct OCLCollectionLiteralExpression: OCLExpression {
         }
     }
 
+    /// Tests equality between two collection literal expressions.
+    ///
+    /// - Parameters:
+    ///   - lhs: The left-hand side expression
+    ///   - rhs: The right-hand side expression
+    /// - Returns: `true` if collection types and element types match
     public static func == (lhs: OCLCollectionLiteralExpression, rhs: OCLCollectionLiteralExpression) -> Bool {
         guard lhs.collectionType == rhs.collectionType && lhs.elements.count == rhs.elements.count else {
             return false
@@ -271,6 +311,9 @@ public struct OCLCollectionLiteralExpression: OCLExpression {
         return true
     }
 
+    /// Hashes the collection literal expression into the given hasher.
+    ///
+    /// - Parameter hasher: The hasher to use for combining values
     public func hash(into hasher: inout Hasher) {
         hasher.combine(collectionType)
         hasher.combine(elements.count)
@@ -348,6 +391,11 @@ public struct OCLCollectionExpression: OCLExpression {
         self.body = body
     }
 
+    /// Evaluates the collection expression by applying the operation to the source.
+    ///
+    /// - Parameter context: The execution context for evaluation
+    /// - Returns: The result of the collection operation
+    /// - Throws: Execution errors if the operation fails
     @MainActor
     public func evaluate(in context: OCLExecutionContext) async throws -> (any EcoreValue)? {
         let sourceValue = try await source.evaluate(in: context)
@@ -383,6 +431,12 @@ public struct OCLCollectionExpression: OCLExpression {
         }
     }
 
+    /// Tests equality between two collection expressions.
+    ///
+    /// - Parameters:
+    ///   - lhs: The left-hand side expression
+    ///   - rhs: The right-hand side expression
+    /// - Returns: `true` if the operation, source, iterator, and body are equal
     public static func == (lhs: OCLCollectionExpression, rhs: OCLCollectionExpression) -> Bool {
         guard lhs.operation == rhs.operation && lhs.iterator == rhs.iterator else { return false }
 
@@ -400,6 +454,9 @@ public struct OCLCollectionExpression: OCLExpression {
         }
     }
 
+    /// Hashes the collection expression into the given hasher.
+    ///
+    /// - Parameter hasher: The hasher to use for combining values
     public func hash(into hasher: inout Hasher) {
         hasher.combine(operation)
         hasher.combine(iterator)

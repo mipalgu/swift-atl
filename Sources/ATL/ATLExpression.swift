@@ -385,6 +385,73 @@ public struct ATLLiteralExpression: ATLExpression, Equatable, Hashable {
     }
 }
 
+// MARK: - Type Literal Expression
+
+/// Represents type literal expressions in ATL/OCL.
+///
+/// Type literals represent references to types that can be used in operations like
+/// `oclIsKindOf()` or as generic type parameters. They support both simple types
+/// and metamodel-qualified types.
+///
+/// ## Overview
+///
+/// Type literals can represent:
+/// - **Simple types**: `String`, `Integer`, `Boolean`
+/// - **Metamodel-qualified types**: `Class!Class`, `UML!Package`
+/// - **Generic types**: `Sequence(Integer)`, `Set(String)`
+///
+/// ## Example Usage
+///
+/// ```swift
+/// // Simple type literal
+/// let stringType = ATLTypeLiteralExpression(typeName: "String")
+///
+/// // Metamodel-qualified type literal
+/// let classType = ATLTypeLiteralExpression(typeName: "Class!Class")
+///
+/// // Generic type literal
+/// let seqType = ATLTypeLiteralExpression(typeName: "Sequence(Integer)")
+/// ```
+public struct ATLTypeLiteralExpression: ATLExpression, Sendable, Equatable, Hashable {
+
+    // MARK: - Properties
+
+    /// The type name represented by this expression.
+    ///
+    /// This can be a simple type name, a metamodel-qualified type (Model!Type),
+    /// or a generic type with parameters.
+    public let typeName: String
+
+    // MARK: - Initialisation
+
+    /// Creates a new type literal expression.
+    ///
+    /// - Parameter typeName: The type name to represent
+    public init(typeName: String) {
+        precondition(!typeName.isEmpty, "Type name must not be empty")
+        self.typeName = typeName
+    }
+
+    // MARK: - Expression Evaluation
+
+    @MainActor
+    public func evaluate(in context: ATLExecutionContext) async throws -> (any EcoreValue)? {
+        // Type literals evaluate to their string representation
+        // This allows them to be used in type-checking operations
+        return typeName
+    }
+
+    // MARK: - Equatable & Hashable
+
+    public static func == (lhs: ATLTypeLiteralExpression, rhs: ATLTypeLiteralExpression) -> Bool {
+        return lhs.typeName == rhs.typeName
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(typeName)
+    }
+}
+
 // MARK: - Binary Operation Expression
 
 /// Represents binary operation expressions in ATL.
