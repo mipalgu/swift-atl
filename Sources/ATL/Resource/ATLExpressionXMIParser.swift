@@ -31,6 +31,12 @@ import Foundation
 /// <expression xsi:type="ocl:VariableExp" varName="x"/>
 /// <expression xsi:type="ocl:IntegerExp" integerSymbol="42"/>
 /// ```
+///
+/// ## Architecture
+///
+/// This parser uses a recursive descent approach with DOM-based XML parsing.
+/// Each expression type has a dedicated parsing method, eliminating shared state
+/// and naturally handling arbitrary nesting through recursion.
 public struct ATLExpressionXMIParser {
 
     // MARK: - Initialisation
@@ -50,20 +56,412 @@ public struct ATLExpressionXMIParser {
             throw ExpressionParseError.invalidXML("Failed to convert XMI to UTF-8")
         }
 
-        let delegate = ExpressionParserDelegate()
-        let parser = XMLParser(data: data)
-        parser.delegate = delegate
-
-        guard parser.parse() else {
-            let error = delegate.error ?? parser.parserError?.localizedDescription ?? "Unknown error"
-            throw ExpressionParseError.parsingFailed(error)
+        let document = try XMLDocument(data: data, options: [])
+        guard let root = document.rootElement() else {
+            throw ExpressionParseError.invalidXML("No root element")
         }
 
-        guard let expression = delegate.expression else {
-            throw ExpressionParseError.noExpression("No expression was parsed")
+        // Find first expression element (could be direct child or nested)
+        guard let exprElement = findFirstExpression(in: root) else {
+            throw ExpressionParseError.noExpression("No expression element found")
         }
 
-        return expression
+        return try parseExpression(exprElement)
+    }
+
+    // MARK: - Helper Methods
+
+    /// Finds the first expression element in the tree.
+    private func findFirstExpression(in element: XMLElement) -> XMLElement? {
+        if element.name == "expression" {
+            return element
+        }
+
+        for child in element.children ?? [] {
+            if let childElement = child as? XMLElement,
+               let found = findFirstExpression(in: childElement) {
+                return found
+            }
+        }
+
+        return nil
+    }
+
+    /// Gets attribute value from element.
+    private func attribute(_ name: String, from element: XMLElement) -> String? {
+        return element.attribute(forName: name)?.stringValue
+    }
+
+    /// Gets required attribute value from element.
+    private func requiredAttribute(_ name: String, from element: XMLElement) throws -> String {
+        guard let value = attribute(name, from: element) else {
+            throw ExpressionParseError.missingAttribute("Missing required attribute '\(name)'")
+        }
+        return value
+    }
+
+    /// Finds first child element with given name.
+    private func child(_ name: String, in element: XMLElement) -> XMLElement? {
+        return element.elements(forName: name).first
+    }
+
+    /// Finds first expression element within a named container.
+    private func childExpression(_ containerName: String, in element: XMLElement) throws -> XMLElement? {
+        guard let container = child(containerName, in: element) else {
+            return nil
+        }
+        return child("expression", in: container)
+    }
+
+    // MARK: - Expression Parsing Dispatcher
+
+    /// Parses an expression element based on its xsi:type.
+    private func parseExpression(_ element: XMLElement) throws -> any ATLExpression {
+        // Get type from xsi:type or type attribute
+        guard let type = attribute("xsi:type", from: element) ?? attribute("type", from: element) else {
+            throw ExpressionParseError.missingAttribute("Missing xsi:type or type attribute")
+        }
+
+        // Dispatch to appropriate parser based on type
+        if type.contains("VariableExp") {
+            return try parseVariable(element)
+        } else if type.contains("IntegerExp") {
+            return try parseInteger(element)
+        } else if type.contains("RealExp") {
+            return try parseReal(element)
+        } else if type.contains("StringExp") {
+            return try parseString(element)
+        } else if type.contains("BooleanExp") {
+            return try parseBoolean(element)
+        } else if type.contains("OclUndefinedExp") {
+            return parseUndefined()
+        } else if type.contains("TypeExp") {
+            return try parseTypeLiteral(element)
+        } else if type.contains("NavigationOrAttributeCallExp") {
+            return try parseNavigation(element)
+        } else if type.contains("OperationCallExp") {
+            return try parseOperationCall(element)
+        } else if type.contains("HelperCallExp") {
+            return try parseHelperCall(element)
+        } else if type.contains("IfExp") {
+            return try parseConditional(element)
+        } else if type.contains("IteratorExp") {
+            return try parseIterator(element)
+        } else if type.contains("IterateExp") {
+            return try parseIterate(element)
+        } else if type.contains("LetExp") {
+            return try parseLet(element)
+        } else if type.contains("LambdaExp") {
+            return try parseLambda(element)
+        } else if type.contains("TupleLiteralExp") {
+            return try parseTuple(element)
+        } else if type.contains("CollectionLiteralExp") {
+            return try parseCollectionLiteral(element)
+        } else {
+            throw ExpressionParseError.unsupportedType("Unsupported expression type: \(type)")
+        }
+    }
+
+    // MARK: - Literal Expression Parsers
+
+    private func parseVariable(_ element: XMLElement) throws -> ATLVariableExpression {
+        let varName = try requiredAttribute("varName", from: element)
+        return ATLVariableExpression(name: varName)
+    }
+
+    private func parseInteger(_ element: XMLElement) throws -> ATLLiteralExpression {
+        let symbol = try requiredAttribute("integerSymbol", from: element)
+        guard let value = Int(symbol) else {
+            throw ExpressionParseError.invalidXML("Invalid integer value: \(symbol)")
+        }
+        return ATLLiteralExpression(value: value)
+    }
+
+    private func parseReal(_ element: XMLElement) throws -> ATLLiteralExpression {
+        let symbol = try requiredAttribute("realSymbol", from: element)
+        guard let value = Double(symbol) else {
+            throw ExpressionParseError.invalidXML("Invalid real value: \(symbol)")
+        }
+        return ATLLiteralExpression(value: value)
+    }
+
+    private func parseString(_ element: XMLElement) throws -> ATLLiteralExpression {
+        let symbol = try requiredAttribute("stringSymbol", from: element)
+        return ATLLiteralExpression(value: symbol)
+    }
+
+    private func parseBoolean(_ element: XMLElement) throws -> ATLLiteralExpression {
+        let symbol = try requiredAttribute("booleanSymbol", from: element)
+        guard let value = Bool(symbol) else {
+            throw ExpressionParseError.invalidXML("Invalid boolean value: \(symbol)")
+        }
+        return ATLLiteralExpression(value: value)
+    }
+
+    private func parseUndefined() -> ATLLiteralExpression {
+        return ATLLiteralExpression(value: nil)
+    }
+
+    private func parseTypeLiteral(_ element: XMLElement) throws -> ATLTypeLiteralExpression {
+        let typeName = try requiredAttribute("typeName", from: element)
+        return ATLTypeLiteralExpression(typeName: typeName)
+    }
+
+    // MARK: - Navigation Expression Parser
+
+    private func parseNavigation(_ element: XMLElement) throws -> ATLNavigationExpression {
+        let name = try requiredAttribute("name", from: element)
+
+        guard let sourceElement = try childExpression("source", in: element) else {
+            throw ExpressionParseError.missingAttribute("Missing source for navigation")
+        }
+
+        let source = try parseExpression(sourceElement)
+        return ATLNavigationExpression(source: source, property: name)
+    }
+
+    // MARK: - Operation Expression Parsers
+
+    private func parseOperationCall(_ element: XMLElement) throws -> any ATLExpression {
+        let opName = try requiredAttribute("operationName", from: element)
+
+        // Parse source
+        let sourceElement = try childExpression("source", in: element)
+        let source = try sourceElement.map { try parseExpression($0) }
+
+        // Parse arguments
+        let argumentElements = element.elements(forName: "arguments")
+        var arguments: [any ATLExpression] = []
+        for argContainer in argumentElements {
+            if let argExpr = child("expression", in: argContainer) {
+                arguments.append(try parseExpression(argExpr))
+            }
+        }
+
+        // Determine expression type based on operation name and argument count
+        if let src = source, arguments.isEmpty {
+            // Unary operation or method call with no arguments
+            if let op = ATLUnaryOperator(rawValue: opName) {
+                return ATLUnaryOperationExpression(operator: op, operand: src)
+            } else {
+                return ATLMethodCallExpression(receiver: src, methodName: opName, arguments: [])
+            }
+        } else if let src = source, arguments.count == 1 {
+            // Binary operation or method call with one argument
+            if let op = ATLBinaryOperator(rawValue: opName) {
+                return ATLBinaryOperationExpression(left: src, operator: op, right: arguments[0])
+            } else {
+                return ATLMethodCallExpression(receiver: src, methodName: opName, arguments: arguments)
+            }
+        } else if let src = source {
+            // Method call with multiple arguments
+            return ATLMethodCallExpression(receiver: src, methodName: opName, arguments: arguments)
+        } else {
+            throw ExpressionParseError.invalidXML("OperationCallExp must have a source")
+        }
+    }
+
+    private func parseHelperCall(_ element: XMLElement) throws -> ATLHelperCallExpression {
+        let helperName = try requiredAttribute("helperName", from: element)
+
+        // Parse arguments
+        let argumentElements = element.elements(forName: "arguments")
+        var arguments: [any ATLExpression] = []
+        for argContainer in argumentElements {
+            if let argExpr = child("expression", in: argContainer) {
+                arguments.append(try parseExpression(argExpr))
+            }
+        }
+
+        return ATLHelperCallExpression(helperName: helperName, arguments: arguments)
+    }
+
+    // MARK: - Control Flow Expression Parsers
+
+    private func parseConditional(_ element: XMLElement) throws -> ATLConditionalExpression {
+        // Parse condition
+        guard let conditionElement = try childExpression("condition", in: element) else {
+            throw ExpressionParseError.missingAttribute("Missing condition in IfExp")
+        }
+        let condition = try parseExpression(conditionElement)
+
+        // Parse then expression
+        guard let thenElement = try childExpression("thenExpression", in: element) else {
+            throw ExpressionParseError.missingAttribute("Missing thenExpression in IfExp")
+        }
+        let thenExpr = try parseExpression(thenElement)
+
+        // Parse else expression
+        guard let elseElement = try childExpression("elseExpression", in: element) else {
+            throw ExpressionParseError.missingAttribute("Missing elseExpression in IfExp")
+        }
+        let elseExpr = try parseExpression(elseElement)
+
+        return ATLConditionalExpression(
+            condition: condition,
+            thenExpression: thenExpr,
+            elseExpression: elseExpr
+        )
+    }
+
+    // MARK: - Collection Expression Parsers
+
+    private func parseIterator(_ element: XMLElement) throws -> any ATLExpression {
+        let name = try requiredAttribute("name", from: element)
+
+        // Parse source
+        guard let sourceElement = try childExpression("source", in: element) else {
+            throw ExpressionParseError.missingAttribute("Missing source in IteratorExp")
+        }
+        let source = try parseExpression(sourceElement)
+
+        // Parse iterator name (optional)
+        let iteratorName = child("iterators", in: element).flatMap { attribute("name", from: $0) }
+
+        // Parse body (optional)
+        let bodyElement = try childExpression("body", in: element)
+        let body = try bodyElement.map { try parseExpression($0) }
+
+        // Create collection expression
+        guard let operation = ATLCollectionOperation(rawValue: name) else {
+            throw ExpressionParseError.unsupportedType("Unknown collection operation: \(name)")
+        }
+
+        return ATLCollectionExpression(
+            source: source,
+            operation: operation,
+            iterator: iteratorName,
+            body: body
+        )
+    }
+
+    private func parseIterate(_ element: XMLElement) throws -> ATLIterateExpression {
+        // Parse source
+        guard let sourceElement = try childExpression("source", in: element) else {
+            throw ExpressionParseError.missingAttribute("Missing source in IterateExp")
+        }
+        let source = try parseExpression(sourceElement)
+
+        // Parse iterator name
+        guard let iteratorsElement = child("iterators", in: element),
+              let iteratorName = attribute("name", from: iteratorsElement) else {
+            throw ExpressionParseError.missingAttribute("Missing iterator in IterateExp")
+        }
+
+        // Parse accumulator (result)
+        guard let resultElement = child("result", in: element),
+              let accumulatorName = attribute("name", from: resultElement) else {
+            throw ExpressionParseError.missingAttribute("Missing result in IterateExp")
+        }
+
+        // Parse accumulator type (optional)
+        let accumulatorType = resultElement.attribute(forName: "type")?.stringValue
+
+        // Parse accumulator init expression
+        guard let initElement = try childExpression("initExpression", in: resultElement) else {
+            throw ExpressionParseError.missingAttribute("Missing initExpression in IterateExp result")
+        }
+        let initExpr = try parseExpression(initElement)
+
+        // Parse body
+        guard let bodyElement = try childExpression("body", in: element) else {
+            throw ExpressionParseError.missingAttribute("Missing body in IterateExp")
+        }
+        let body = try parseExpression(bodyElement)
+
+        return ATLIterateExpression(
+            source: source,
+            parameter: iteratorName,
+            accumulator: accumulatorName,
+            accumulatorType: accumulatorType,
+            defaultValue: initExpr,
+            body: body
+        )
+    }
+
+    private func parseCollectionLiteral(_ element: XMLElement) throws -> ATLCollectionLiteralExpression {
+        let kind = attribute("kind", from: element) ?? "Sequence"
+
+        // Parse parts (collection elements)
+        let partsElements = element.elements(forName: "parts")
+        var elements: [any ATLExpression] = []
+        for partContainer in partsElements {
+            if let partExpr = child("expression", in: partContainer) {
+                elements.append(try parseExpression(partExpr))
+            }
+        }
+
+        return ATLCollectionLiteralExpression(collectionType: kind, elements: elements)
+    }
+
+    // MARK: - Advanced Expression Parsers
+
+    private func parseLet(_ element: XMLElement) throws -> ATLLetExpression {
+        // Parse variable
+        guard let variableElement = child("variable", in: element),
+              let varName = attribute("name", from: variableElement) else {
+            throw ExpressionParseError.missingAttribute("Missing variable in LetExp")
+        }
+
+        let varType = attribute("type", from: variableElement)
+
+        // Parse init expression
+        guard let initElement = try childExpression("initExpression", in: variableElement) else {
+            throw ExpressionParseError.missingAttribute("Missing initExpression in LetExp variable")
+        }
+        let initExpr = try parseExpression(initElement)
+
+        // Parse in expression
+        guard let inElement = try childExpression("in_", in: element) else {
+            throw ExpressionParseError.missingAttribute("Missing in_ in LetExp")
+        }
+        let inExpr = try parseExpression(inElement)
+
+        return ATLLetExpression(
+            variableName: varName,
+            variableType: varType,
+            initExpression: initExpr,
+            inExpression: inExpr
+        )
+    }
+
+    private func parseLambda(_ element: XMLElement) throws -> ATLLambdaExpression {
+        // Parse parameter
+        guard let parameterElement = child("parameter", in: element),
+              let paramName = attribute("name", from: parameterElement) else {
+            throw ExpressionParseError.missingAttribute("Missing parameter in LambdaExp")
+        }
+
+        // Parse body
+        guard let bodyElement = try childExpression("body", in: element) else {
+            throw ExpressionParseError.missingAttribute("Missing body in LambdaExp")
+        }
+        let body = try parseExpression(bodyElement)
+
+        return ATLLambdaExpression(parameter: paramName, body: body)
+    }
+
+    private func parseTuple(_ element: XMLElement) throws -> ATLTupleExpression {
+        // Parse tuple parts
+        let partElements = element.elements(forName: "tuplePart")
+        var fields: [(name: String, type: String?, value: any ATLExpression)] = []
+
+        for partElement in partElements {
+            guard let name = attribute("name", from: partElement) else {
+                throw ExpressionParseError.missingAttribute("Missing name in tuplePart")
+            }
+
+            let type = attribute("type", from: partElement)
+
+            guard let initElement = try childExpression("initExpression", in: partElement) else {
+                throw ExpressionParseError.missingAttribute("Missing initExpression in tuplePart")
+            }
+            let initExpr = try parseExpression(initElement)
+
+            fields.append((name: name, type: type, value: initExpr))
+        }
+
+        return ATLTupleExpression(fields: fields)
     }
 }
 
@@ -84,460 +482,6 @@ public enum ExpressionParseError: Error, LocalizedError {
         case .noExpression(let message): return "No expression: \(message)"
         case .unsupportedType(let message): return "Unsupported type: \(message)"
         case .missingAttribute(let message): return "Missing attribute: \(message)"
-        }
-    }
-}
-
-// MARK: - Expression Parser Delegate
-
-/// XML parser delegate for parsing ATL expressions.
-private class ExpressionParserDelegate: NSObject, XMLParserDelegate {
-
-    // MARK: - State
-
-    var expression: (any ATLExpression)?
-    var error: String?
-
-    // Parsing context stack
-    private var contextStack: [ParsingContext] = []
-    private var currentElement: String?
-    private var currentAttributes: [String: String] = [:]
-
-    // MARK: - Parsing Context
-
-    private enum ParsingContext {
-        case expression(type: String, attributes: [String: String])
-        case source
-        case arguments
-        case condition
-        case thenExpression
-        case elseExpression
-        case body
-        case initExpression
-        case in_
-        case variable
-        case iterators
-        case result
-        case parts
-        case tuplePart(name: String, type: String?)
-        case value
-        case filter
-        case parameter
-    }
-
-    // Temporary storage for building complex expressions
-    private var sourceExpression: (any ATLExpression)?
-    private var argumentExpressions: [any ATLExpression] = []
-    private var conditionExpression: (any ATLExpression)?
-    private var thenExpr: (any ATLExpression)?
-    private var elseExpr: (any ATLExpression)?
-    private var bodyExpression: (any ATLExpression)?
-    private var initExpression: (any ATLExpression)?
-    private var inExpression: (any ATLExpression)?
-    private var variableName: String?
-    private var variableType: String?
-    private var iteratorName: String?
-    private var accumulatorName: String?
-    private var accumulatorInit: (any ATLExpression)?
-    private var collectionParts: [any ATLExpression] = []
-    private var tupleFields: [(name: String, type: String?, value: any ATLExpression)] = []
-    private var currentTuplePartName: String?
-    private var currentTuplePartType: String?
-
-    // MARK: - XMLParserDelegate Methods
-
-    func parser(
-        _ parser: XMLParser,
-        didStartElement elementName: String,
-        namespaceURI: String?,
-        qualifiedName qName: String?,
-        attributes attributeDict: [String: String] = [:]
-    ) {
-        currentElement = elementName
-        currentAttributes = attributeDict
-
-        switch elementName {
-        case "expression":
-            handleExpressionStart(attributes: attributeDict)
-
-        case "source":
-            contextStack.append(.source)
-
-        case "arguments":
-            contextStack.append(.arguments)
-
-        case "condition":
-            contextStack.append(.condition)
-
-        case "thenExpression":
-            contextStack.append(.thenExpression)
-
-        case "elseExpression":
-            contextStack.append(.elseExpression)
-
-        case "body":
-            contextStack.append(.body)
-
-        case "initExpression":
-            contextStack.append(.initExpression)
-
-        case "in_":
-            contextStack.append(.in_)
-
-        case "variable":
-            contextStack.append(.variable)
-            variableName = attributeDict["name"]
-            variableType = attributeDict["type"]
-
-        case "iterators":
-            contextStack.append(.iterators)
-            iteratorName = attributeDict["name"]
-
-        case "result":
-            contextStack.append(.result)
-            accumulatorName = attributeDict["name"]
-
-        case "parts":
-            contextStack.append(.parts)
-
-        case "tuplePart":
-            let name = attributeDict["name"] ?? ""
-            let type = attributeDict["type"]
-            contextStack.append(.tuplePart(name: name, type: type))
-            currentTuplePartName = name
-            currentTuplePartType = type
-
-        case "value":
-            contextStack.append(.value)
-
-        case "filter":
-            contextStack.append(.filter)
-
-        case "parameter":
-            contextStack.append(.parameter)
-            iteratorName = attributeDict["name"]
-
-        default:
-            break
-        }
-    }
-
-    func parser(
-        _ parser: XMLParser,
-        didEndElement elementName: String,
-        namespaceURI: String?,
-        qualifiedName qName: String?
-    ) {
-        if elementName == "expression" {
-            handleExpressionEnd()
-        } else if !contextStack.isEmpty {
-            contextStack.removeLast()
-        }
-
-        // Reset tuple part context
-        if elementName == "tuplePart" {
-            currentTuplePartName = nil
-            currentTuplePartType = nil
-        }
-    }
-
-    func parser(_ parser: XMLParser, parseErrorOccurred parseError: Error) {
-        error = parseError.localizedDescription
-    }
-
-    // MARK: - Expression Handling
-
-    private func handleExpressionStart(attributes: [String: String]) {
-        guard let type = attributes["xsi:type"] ?? attributes["type"] else {
-            return
-        }
-
-        // Handle simple expressions that don't need sub-elements
-        // These are self-contained and we build them immediately
-        var simpleExpr: (any ATLExpression)? = nil
-
-        if type.contains("VariableExp") {
-            if let varName = attributes["varName"] {
-                simpleExpr = ATLVariableExpression(name: varName)
-            }
-        } else if type.contains("IntegerExp") {
-            if let intSymbol = attributes["integerSymbol"], let value = Int(intSymbol) {
-                simpleExpr = ATLLiteralExpression(value: value)
-            }
-        } else if type.contains("RealExp") {
-            if let realSymbol = attributes["realSymbol"], let value = Double(realSymbol) {
-                simpleExpr = ATLLiteralExpression(value: value)
-            }
-        } else if type.contains("StringExp") {
-            if let stringSymbol = attributes["stringSymbol"] {
-                simpleExpr = ATLLiteralExpression(value: stringSymbol)
-            }
-        } else if type.contains("BooleanExp") {
-            if let boolSymbol = attributes["booleanSymbol"], let value = Bool(boolSymbol) {
-                simpleExpr = ATLLiteralExpression(value: value)
-            }
-        } else if type.contains("OclUndefinedExp") {
-            simpleExpr = ATLLiteralExpression(value: nil)
-        } else if type.contains("TypeExp") {
-            if let typeName = attributes["typeName"] {
-                simpleExpr = ATLTypeLiteralExpression(typeName: typeName)
-            }
-        }
-
-        if let expr = simpleExpr {
-            // Simple expression - store it directly without pushing context
-            storeExpression(expr)
-        } else {
-            // Complex expression - push context and wait for sub-elements
-            contextStack.append(.expression(type: type, attributes: attributes))
-        }
-    }
-
-    private func handleExpressionEnd() {
-        guard let context = contextStack.last,
-              case .expression(let type, let attributes) = context else {
-            return
-        }
-
-        contextStack.removeLast()
-
-        // Build complex expressions that required sub-elements
-        let expr: (any ATLExpression)?
-
-        if type.contains("NavigationOrAttributeCallExp") {
-            if let name = attributes["name"], let source = sourceExpression {
-                expr = ATLNavigationExpression(source: source, property: name)
-                sourceExpression = nil
-            } else {
-                expr = nil
-            }
-        } else if type.contains("OperationCallExp") {
-            if let opName = attributes["operationName"] {
-                if let source = sourceExpression, argumentExpressions.isEmpty {
-                    // Unary operation
-                    if let op = ATLUnaryOperator(rawValue: opName) {
-                        expr = ATLUnaryOperationExpression(operator: op, operand: source)
-                    } else {
-                        // Method call with no arguments
-                        expr = ATLMethodCallExpression(receiver: source, methodName: opName, arguments: [])
-                    }
-                    sourceExpression = nil
-                } else if let source = sourceExpression, argumentExpressions.count == 1 {
-                    // Binary operation or method call with one argument
-                    if let op = ATLBinaryOperator(rawValue: opName) {
-                        expr = ATLBinaryOperationExpression(
-                            left: source,
-                            operator: op,
-                            right: argumentExpressions[0]
-                        )
-                    } else {
-                        expr = ATLMethodCallExpression(
-                            receiver: source,
-                            methodName: opName,
-                            arguments: argumentExpressions
-                        )
-                    }
-                    sourceExpression = nil
-                    argumentExpressions = []
-                } else if let source = sourceExpression {
-                    // Method call with multiple arguments
-                    expr = ATLMethodCallExpression(
-                        receiver: source,
-                        methodName: opName,
-                        arguments: argumentExpressions
-                    )
-                    sourceExpression = nil
-                    argumentExpressions = []
-                } else {
-                    expr = nil
-                }
-            } else {
-                expr = nil
-            }
-        } else if type.contains("HelperCallExp") {
-            if let helperName = attributes["helperName"] {
-                expr = ATLHelperCallExpression(helperName: helperName, arguments: argumentExpressions)
-                argumentExpressions = []
-            } else {
-                expr = nil
-            }
-        } else if type.contains("IfExp") {
-            if let condition = conditionExpression,
-               let thenBranch = thenExpr,
-               let elseBranch = elseExpr {
-                expr = ATLConditionalExpression(
-                    condition: condition,
-                    thenExpression: thenBranch,
-                    elseExpression: elseBranch
-                )
-                conditionExpression = nil
-                thenExpr = nil
-                elseExpr = nil
-            } else {
-                expr = nil
-            }
-        } else if type.contains("IteratorExp") {
-            if let name = attributes["name"], let source = sourceExpression {
-                if let iterator = iteratorName, let body = bodyExpression {
-                    expr = ATLLambdaExpression(parameter: iterator, body: body)
-                    sourceExpression = nil
-                    iteratorName = nil
-                    bodyExpression = nil
-                } else if let body = bodyExpression {
-                    // Collection expression without explicit iterator
-                    if let operation = ATLCollectionOperation(rawValue: name) {
-                        expr = ATLCollectionExpression(
-                            source: source,
-                            operation: operation,
-                            iterator: iteratorName,
-                            body: body
-                        )
-                        sourceExpression = nil
-                        iteratorName = nil
-                        bodyExpression = nil
-                    } else {
-                        expr = nil
-                    }
-                } else {
-                    // Collection expression without body (simple operations like size)
-                    if let operation = ATLCollectionOperation(rawValue: name) {
-                        expr = ATLCollectionExpression(
-                            source: source,
-                            operation: operation,
-                            iterator: nil,
-                            body: nil
-                        )
-                        sourceExpression = nil
-                    } else {
-                        expr = nil
-                    }
-                }
-            } else {
-                expr = nil
-            }
-        } else if type.contains("IterateExp") {
-            if let source = sourceExpression,
-               let iterator = iteratorName,
-               let accumulator = accumulatorName,
-               let initExpr = accumulatorInit,
-               let body = bodyExpression {
-                expr = ATLIterateExpression(
-                    source: source,
-                    parameter: iterator,
-                    accumulator: accumulator,
-                    accumulatorType: nil,
-                    defaultValue: initExpr,
-                    body: body
-                )
-                sourceExpression = nil
-                iteratorName = nil
-                accumulatorName = nil
-                accumulatorInit = nil
-                bodyExpression = nil
-            } else {
-                expr = nil
-            }
-        } else if type.contains("LetExp") {
-            if let varName = variableName,
-               let initExpr = initExpression,
-               let inExpr = inExpression {
-                expr = ATLLetExpression(
-                    variableName: varName,
-                    variableType: variableType,
-                    initExpression: initExpr,
-                    inExpression: inExpr
-                )
-                variableName = nil
-                variableType = nil
-                initExpression = nil
-                inExpression = nil
-            } else {
-                expr = nil
-            }
-        } else if type.contains("TupleLiteralExp") {
-            expr = ATLTupleExpression(fields: tupleFields)
-            tupleFields = []
-        } else if type.contains("CollectionLiteralExp") {
-            let kind = attributes["kind"] ?? "Sequence"
-            expr = ATLCollectionLiteralExpression(collectionType: kind, elements: collectionParts)
-            collectionParts = []
-        } else if type.contains("LambdaExp") {
-            if let param = iteratorName, let body = bodyExpression {
-                expr = ATLLambdaExpression(parameter: param, body: body)
-                iteratorName = nil
-                bodyExpression = nil
-            } else {
-                expr = nil
-            }
-        } else {
-            // Already handled in handleExpressionStart
-            expr = nil
-        }
-
-        if let expr = expr {
-            storeExpression(expr)
-        }
-    }
-
-    private func storeExpression(_ expr: any ATLExpression) {
-        // Store expression in appropriate context
-        guard contextStack.count >= 1 else {
-            // Top-level expression
-            expression = expr
-            return
-        }
-
-        let parentContext = contextStack[contextStack.count - 1]
-
-        switch parentContext {
-        case .source:
-            sourceExpression = expr
-
-        case .arguments:
-            argumentExpressions.append(expr)
-
-        case .condition:
-            conditionExpression = expr
-
-        case .thenExpression:
-            thenExpr = expr
-
-        case .elseExpression:
-            elseExpr = expr
-
-        case .body:
-            bodyExpression = expr
-
-        case .initExpression:
-            // Could be for variable, accumulator, or tuple part
-            if contextStack.count >= 2 {
-                let grandparentContext = contextStack[contextStack.count - 2]
-                if case .result = grandparentContext {
-                    accumulatorInit = expr
-                } else if case .tuplePart = grandparentContext {
-                    if let name = currentTuplePartName {
-                        tupleFields.append((name: name, type: currentTuplePartType, value: expr))
-                    }
-                } else {
-                    initExpression = expr
-                }
-            } else {
-                initExpression = expr
-            }
-
-        case .in_:
-            inExpression = expr
-
-        case .parts:
-            collectionParts.append(expr)
-
-        case .value, .filter:
-            // Store as generic expression for now
-            expression = expr
-
-        default:
-            // Default to top-level if context not recognized
-            expression = expr
         }
     }
 }
