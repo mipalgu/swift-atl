@@ -54,6 +54,9 @@ public enum ATLParseError: Error, Sendable {
 ///   It may not support all advanced ATL features found in Eclipse ATL.
 public actor ATLParser {
 
+    /// Public initializer for ATLParser
+    public init() {}
+
     /// Parse an ATL file and return an ATL module
     /// - Parameter url: The URL of the ATL file to parse
     /// - Returns: An ATLModule representing the parsed ATL content
@@ -667,14 +670,16 @@ private class ATLSyntaxParser {
                     while !isAtEnd() && !(currentToken()?.type == .punctuation(")")) {
                         // Parse field name
                         guard let fieldToken = currentToken(),
-                              case .identifier(let fieldName) = fieldToken.type else {
+                            case .identifier(let fieldName) = fieldToken.type
+                        else {
                             throw ATLParseError.invalidSyntax("Expected field name in TupleType")
                         }
                         advance()
 
                         // Expect ':'
                         guard consumeOperator(":") else {
-                            throw ATLParseError.invalidSyntax("Expected ':' after field name in TupleType")
+                            throw ATLParseError.invalidSyntax(
+                                "Expected ':' after field name in TupleType")
                         }
 
                         // Parse field type
@@ -997,7 +1002,8 @@ private class ATLSyntaxParser {
 
             // Check if this is an 'else if' chain (no endif for nested if)
             let elseExpr: any ATLExpression
-            if let token = currentToken(), case .keyword(let keyword) = token.type, keyword == "if" {
+            if let token = currentToken(), case .keyword(let keyword) = token.type, keyword == "if"
+            {
                 // This is 'else if' - parse as nested conditional WITHOUT consuming endif
                 // (the endif belongs to the outermost if)
                 advance()  // consume 'if'
@@ -1329,10 +1335,14 @@ private class ATLSyntaxParser {
             advance()
 
             // Check for metamodel-qualified type: Model!Type
-            if let currentTok = currentToken(), case .operator(let op) = currentTok.type, op == "!" {
+            if let currentTok = currentToken(), case .operator(let op) = currentTok.type, op == "!"
+            {
                 advance()  // consume '!'
-                guard let typeToken = currentToken(), case .identifier(let typeName) = typeToken.type else {
-                    throw ATLParseError.invalidSyntax("Expected type name after '!' in metamodel-qualified type")
+                guard let typeToken = currentToken(),
+                    case .identifier(let typeName) = typeToken.type
+                else {
+                    throw ATLParseError.invalidSyntax(
+                        "Expected type name after '!' in metamodel-qualified type")
                 }
                 advance()  // consume type name
                 return ATLTypeLiteralExpression(typeName: "\(name)!\(typeName)")
@@ -1572,7 +1582,8 @@ private class ATLSyntaxParser {
 
         // Expect '=' for initialisation
         guard consumeOperator("=") else {
-            throw ATLParseError.invalidSyntax("Expected '=' after variable declaration in let expression")
+            throw ATLParseError.invalidSyntax(
+                "Expected '=' after variable declaration in let expression")
         }
 
         // Parse initialisation expression (stopping before 'in')
@@ -1609,7 +1620,8 @@ private class ATLSyntaxParser {
         // Parse fields
         while !isAtEnd() && !(currentToken()?.type == .punctuation("}")) {
             // Parse field name
-            guard let fieldToken = currentToken(), case .identifier(let fieldName) = fieldToken.type else {
+            guard let fieldToken = currentToken(), case .identifier(let fieldName) = fieldToken.type
+            else {
                 throw ATLParseError.invalidSyntax("Expected field name in tuple")
             }
             advance()

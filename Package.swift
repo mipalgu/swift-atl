@@ -11,10 +11,11 @@ let package = Package(
             name: "ATL",
             targets: ["ATL"]
         ),
-        .executable(
-            name: "swift-atl",
-            targets: ["swift-atl"]
-        ),
+        // Temporarily disabled until backend is complete and tested
+        // .executable(
+        //     name: "swift-atl",
+        //     targets: ["swift-atl"]
+        // ),
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-argument-parser", from: "1.6.2"),
@@ -33,17 +34,19 @@ let package = Package(
                 .enableUpcomingFeature("StrictConcurrency")
             ]
         ),
-        .executableTarget(
-            name: "swift-atl",
-            dependencies: [
-                "ATL",
-                .product(name: "ECore", package: "swift-ecore"),
-                .product(name: "ArgumentParser", package: "swift-argument-parser"),
-            ],
-            swiftSettings: [
-                .enableUpcomingFeature("StrictConcurrency")
-            ]
-        ),
+        // Temporarily disabled until backend is complete and tested
+        // .executableTarget(
+        //     name: "swift-atl",
+        //     dependencies: [
+        //         "ATL",
+        //         .product(name: "ECore", package: "swift-ecore"),
+        //         .product(name: "ArgumentParser", package: "swift-argument-parser"),
+        //         .product(name: "SwiftXML", package: "SwiftXML"),
+        //     ],
+        //     swiftSettings: [
+        //         .enableUpcomingFeature("StrictConcurrency")
+        //     ]
+        // ),
         .testTarget(
             name: "ATLTests",
             dependencies: [
