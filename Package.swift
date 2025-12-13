@@ -11,16 +11,9 @@ let package = Package(
             name: "ATL",
             targets: ["ATL"]
         ),
-        // Temporarily disabled until backend is complete and tested
-        // .executable(
-        //     name: "swift-atl",
-        //     targets: ["swift-atl"]
-        // ),
     ],
     dependencies: [
-        .package(url: "https://github.com/apple/swift-argument-parser", from: "1.6.2"),
         .package(url: "https://github.com/apple/swift-collections", from: "1.0.0"),
-        .package(url: "https://github.com/swiftxml/SwiftXML.git", from: "1.0.0"),
         .package(url: "https://github.com/mipalgu/swift-ecore.git", branch: "main"),
     ],
     targets: [
@@ -34,19 +27,6 @@ let package = Package(
                 .enableUpcomingFeature("StrictConcurrency")
             ]
         ),
-        // Temporarily disabled until backend is complete and tested
-        // .executableTarget(
-        //     name: "swift-atl",
-        //     dependencies: [
-        //         "ATL",
-        //         .product(name: "ECore", package: "swift-ecore"),
-        //         .product(name: "ArgumentParser", package: "swift-argument-parser"),
-        //         .product(name: "SwiftXML", package: "SwiftXML"),
-        //     ],
-        //     swiftSettings: [
-        //         .enableUpcomingFeature("StrictConcurrency")
-        //     ]
-        // ),
         .testTarget(
             name: "ATLTests",
             dependencies: [
