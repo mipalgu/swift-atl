@@ -1,6 +1,6 @@
 # Swift ATL - Atlas Transformation Language Library
 
-A pure Swift implementation of the Eclipse Atlas Transformation Language (ATL) with full XMI serialization support.
+A pure Swift implementation of the Eclipse Atlas Transformation Language (ATL) with full XMI serialisation support.
 
 **Note**: This package provides the ATL library. The `swift-atl` command-line tool is available in the [swift-modelling](https://github.com/mipalgu/swift-modelling) package.
 
@@ -10,7 +10,7 @@ A pure Swift implementation of the Eclipse Atlas Transformation Language (ATL) w
 - **Cross-Platform**: Full support for macOS 15.0+ and Linux
 - **Eclipse ATL Compatibility**: Syntax-compatible with Eclipse ATL transformations
 - **Complete ATL Parser**: Full ATL/OCL syntax support with 96/96 tests passing
-- **XMI Serialization**: Complete Eclipse ATL XMI format support with 134/134 round-trip tests passing
+- **XMI Serialisation**: Complete Eclipse ATL XMI format support with 134/134 round-trip tests passing
 - **Resource Framework**: Integration with ECore Resource/ResourceSet for metamodel management
 - **Expression System**: 16+ expression types (literals, navigation, operations, collections, control flow)
 - **Advanced OCL**: Let expressions, tuple expressions, iterate operations, lambda expressions
@@ -89,10 +89,10 @@ try await xmiResource.save()
 
 The `swift-atl` command-line tool is available in the [swift-modelling](https://github.com/mipalgu/swift-modelling) package and provides comprehensive transformation functionality:
 
-- **parse**: Parse and analyze ATL transformation files
+- **parse**: Parse and analyse ATL transformation files
 - **validate**: Validate ATL transformation syntax and semantics
 - **test**: Test ATL transformation files with comprehensive checks
-- **analyze**: Analyze complexity metrics and transformation patterns
+- **analyse**: Analyse complexity metrics and transformation patterns
 - **compile**: Compile ATL transformations to optimised format (planned)
 - **transform**: Execute model transformations (in development)
 - **generate**: Generate code from models (planned)
@@ -106,7 +106,7 @@ To use the CLI tool, install the [swift-modelling](https://github.com/mipalgu/sw
 - [x] **ATL Parser**: Complete syntax support for all ATL constructs (96/96 tests passing)
 - [x] **Module System**: Full ATL module support with source/target metamodels
 - [x] **Matched Rules**: Pattern matching with guards and multiple target patterns
-- [x] **Called Rules**: Parameterized transformation rules
+- [x] **Called Rules**: Parameterised transformation rules
 - [x] **Lazy Rules**: Deferred rule execution with lazy binding resolution
 - [x] **Helper Functions**: Context helpers and standalone helper functions
 - [x] **OCL Expressions**: Complete expression system (16+ types)
@@ -129,12 +129,12 @@ To use the CLI tool, install the [swift-modelling](https://github.com/mipalgu/sw
 - [x] **Iterate Expressions**: Custom iteration with accumulator
 - [x] **Tuple Expressions**: Tuple construction and field access
 
-### ATL XMI Serialization
+### ATL XMI Serialisation
 
 - [x] **ATL Resource Framework**: Integration with ECore Resource/ResourceSet
-- [x] **XMI Serialization**: Eclipse ATL XMI format for all constructs
+- [x] **XMI Serialisation**: Eclipse ATL XMI format for all constructs
 - [x] **XMI Parsing**: Recursive descent parser for expression trees
-- [x] **Expression Serialization**: All 16+ expression types supported
+- [x] **Expression Serialisation**: All 16+ expression types supported
 - [x] **Expression Parsing**: DOM-based architecture for correctness
 - [x] **Round-Trip Tests**: 134/134 tests passing including nested expressions
 - [x] **Eclipse Compatibility**: Proper namespace and format compliance
@@ -149,7 +149,7 @@ To use the CLI tool, install the [swift-modelling](https://github.com/mipalgu/sw
 - [ ] **Helper Execution**: Context and standalone helper invocation
 - [ ] **OCL Expression Evaluation**: Full expression evaluation engine
 - [ ] **Model Loading**: XMI/JSON source model loading
-- [ ] **Model Saving**: Target model serialization
+- [ ] **Model Saving**: Target model serialisation
 
 
 ## Architecture
@@ -158,7 +158,7 @@ Swift ATL is built on a layered architecture:
 
 1. **ATL Parser:** Lexer → Parser → AST construction
 2. **ATL Module:** Module, Rule, Helper, Expression structures
-3. **Resource Framework:** ATLResource with XMI serialization
+3. **Resource Framework:** ATLResource with XMI serialisation
 4. **Execution Engine** (In Development): Virtual machine for transformation execution
 
 ### Design Principles
