@@ -1189,7 +1189,7 @@ public struct ATLMethodCallExpression: ATLExpression, Sendable, Equatable, Hasha
             throw ATLExecutionError.typeError("allInstances() requires type name as receiver")
         }
 
-        // Parse type specification (e.g., "MyModel!MyClass")
+        // Parse type specification (e.g., "MyMetamodel!MyClass")
         let typeComponents = typeName.split(separator: "!")
         guard typeComponents.count == 2 else {
             throw ATLExecutionError.typeError(
@@ -1197,8 +1197,13 @@ public struct ATLMethodCallExpression: ATLExpression, Sendable, Equatable, Hasha
             )
         }
 
-        let modelAlias = String(typeComponents[0])
+        let metamodelName = String(typeComponents[0])
         let className = String(typeComponents[1])
+
+        // Find the model alias that uses this metamodel
+        guard let modelAlias = context.module.sourceMetamodels.first(where: { $0.value.name == metamodelName })?.key else {
+            throw ATLExecutionError.invalidOperation("No source model found for metamodel '\(metamodelName)'")
+        }
 
         // Get the source resource for the specified model
         guard let sourceResource = context.getSource(modelAlias) else {

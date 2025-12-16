@@ -168,23 +168,28 @@ public final class ATLVirtualMachine {
             )
         }
 
-        let sourceAlias = String(typeComponents[0])
+        let metamodelName = String(typeComponents[0])
         let sourceClassName = String(typeComponents[1])
 
-        // Get source resource
-        guard let sourceResource = executionContext.getSource(sourceAlias) else {
-            throw ATLExecutionError.invalidOperation("Source model '\(sourceAlias)' not found")
+        // Find the model alias that uses this metamodel
+        guard let modelAlias = module.sourceMetamodels.first(where: { $0.value.name == metamodelName })?.key else {
+            throw ATLExecutionError.invalidOperation("No source model found for metamodel '\(metamodelName)'")
         }
 
-        // Get source metamodel
-        guard let sourceMetamodel = module.sourceMetamodels[sourceAlias] else {
-            throw ATLExecutionError.invalidOperation("Source metamodel '\(sourceAlias)' not found")
+        // Get source resource using the model alias
+        guard let sourceResource = executionContext.getSource(modelAlias) else {
+            throw ATLExecutionError.invalidOperation("Source model '\(modelAlias)' not found")
+        }
+
+        // Get source metamodel using the model alias
+        guard let sourceMetamodel = module.sourceMetamodels[modelAlias] else {
+            throw ATLExecutionError.invalidOperation("Source metamodel '\(modelAlias)' not found")
         }
 
         // Find source class
         guard let sourceClass = sourceMetamodel.getClassifier(sourceClassName) as? EClass else {
             throw ATLExecutionError.typeError(
-                "Class '\(sourceClassName)' not found in metamodel '\(sourceAlias)'"
+                "Class '\(sourceClassName)' not found in metamodel '\(metamodelName)'"
             )
         }
 

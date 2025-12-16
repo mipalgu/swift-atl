@@ -264,26 +264,26 @@ public final class ATLExecutionContext: Sendable {
     ///   - targetAlias: Target model alias
     /// - Returns: Created element
     /// - Throws: `ATLExecutionError` if creation fails
-    public func createElement(type: String, in targetAlias: String) async throws -> any EObject {
-        guard let targetResource = targets[targetAlias] else {
-            throw ATLExecutionError.runtimeError("Target model '\(targetAlias)' not found")
+    public func createElement(type: String, in metamodelName: String) async throws -> any EObject {
+        // Parse the type specification
+        let (parsedMetamodel, typeName) = parseQualifiedTypeName(type)
+        let actualMetamodelName = parsedMetamodel ?? metamodelName
+
+        // Find the model alias that uses this metamodel
+        guard let modelAlias = module.targetMetamodels.first(where: { $0.value.name == actualMetamodelName })?.key else {
+            throw ATLExecutionError.invalidOperation("No target model found for metamodel '\(actualMetamodelName)'")
         }
 
-        let (modelAlias, typeName) = parseQualifiedTypeName(type)
-        let actualAlias = modelAlias ?? targetAlias
+        guard let targetResource = targets[modelAlias] else {
+            throw ATLExecutionError.runtimeError("Target model '\(modelAlias)' not found")
+        }
 
         // Find the EClass for the type
-        let eClass = try findEClass(name: typeName, in: actualAlias)
+        let eClass = try findEClass(name: typeName, in: modelAlias)
 
-        // Find the target metamodel that contains this class
-        guard
-            let targetMetamodel = targets.values.compactMap({ resource in
-                // For now, assume the first metamodel contains the class
-                // In a complete implementation, would search properly
-                return module.targetMetamodels.values.first
-            }).first
-        else {
-            throw ATLExecutionError.invalidOperation("No target metamodel available")
+        // Get the target metamodel for this model alias
+        guard let targetMetamodel = module.targetMetamodels[modelAlias] else {
+            throw ATLExecutionError.invalidOperation("No target metamodel found for model '\(modelAlias)'")
         }
 
         // Create the element using the factory
@@ -407,9 +407,34 @@ public final class ATLExecutionContext: Sendable {
     }
 
     /// Find an EClass by name.
-    private func findEClass(name: String, in alias: String? = nil) throws -> EClass {
-        // This would need to be implemented based on available metamodels
-        // For now, create a placeholder implementation
+    private func findEClass(name: String, in modelAlias: String? = nil) throws -> EClass {
+        // If a model alias is provided, look only in that metamodel
+        if let modelAlias = modelAlias {
+            if let metamodel = module.targetMetamodels[modelAlias] {
+                if let eClass = metamodel.getClassifier(name) as? EClass {
+                    return eClass
+                }
+            } else if let metamodel = module.sourceMetamodels[modelAlias] {
+                if let eClass = metamodel.getClassifier(name) as? EClass {
+                    return eClass
+                }
+            }
+            throw ATLExecutionError.typeError("Class '\(name)' not found in model '\(modelAlias)'")
+        }
+
+        // Otherwise, search all target metamodels first, then source metamodels
+        for metamodel in module.targetMetamodels.values {
+            if let eClass = metamodel.getClassifier(name) as? EClass {
+                return eClass
+            }
+        }
+
+        for metamodel in module.sourceMetamodels.values {
+            if let eClass = metamodel.getClassifier(name) as? EClass {
+                return eClass
+            }
+        }
+
         throw ATLExecutionError.typeError("Unknown type: \(name)")
     }
 
