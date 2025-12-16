@@ -66,23 +66,149 @@ public actor ATLParser {
             throw ATLParseError.fileNotFound(url.path)
         }
 
-        return try await parseContent(content, filename: url.lastPathComponent)
+        // Pass the full path for proper relative path resolution
+        return try await parseContent(content, filename: url.path)
     }
 
     /// Parse ATL content from a string
     /// - Parameters:
     ///   - content: The ATL source content
     ///   - filename: Optional filename for error reporting
+    ///   - searchPaths: Optional array of directory paths to search for metamodel files
     /// - Returns: An ATLModule representing the parsed ATL content
     /// - Throws: ATLParseError if parsing fails
-    public func parseContent(_ content: String, filename: String = "unknown") async throws
-        -> ATLModule
-    {
+    public func parseContent(
+        _ content: String,
+        filename: String = "unknown",
+        searchPaths: [String] = []
+    ) async throws -> ATLModule {
         let lexer = ATLLexer(content: content)
         let tokens = try lexer.tokenize()
         let parser = ATLSyntaxParser(tokens: tokens, filename: filename)
 
-        return try parser.parseModule()
+        var module = try parser.parseModule()
+
+        // Load metamodels from @path directives
+        let baseURL = URL(fileURLWithPath: filename)
+        module = try await loadMetamodels(
+            into: module,
+            pathDirectives: lexer.pathDirectives,
+            relativeTo: baseURL,
+            searchPaths: searchPaths
+        )
+
+        return module
+    }
+
+    /// Loads all metamodels specified by @path directives and replaces dummy metamodels.
+    ///
+    /// - Parameters:
+    ///   - module: The parsed ATL module with dummy metamodels
+    ///   - pathDirectives: Dictionary mapping metamodel names to file paths from @path directives
+    ///   - baseURL: The URL of the ATL file (for resolving relative paths)
+    ///   - searchPaths: Array of directory paths to search for metamodel files
+    /// - Returns: The module with real loaded metamodels
+    private func loadMetamodels(
+        into module: ATLModule,
+        pathDirectives: [String: String],
+        relativeTo baseURL: URL,
+        searchPaths: [String]
+    ) async throws -> ATLModule {
+        var sourceMetamodels = module.sourceMetamodels
+        var targetMetamodels = module.targetMetamodels
+
+        // Load source metamodels
+        for (alias, metamodel) in sourceMetamodels {
+            if let filePath = pathDirectives[metamodel.name],
+               let loadedPackage = try await loadMetamodel(
+                   name: metamodel.name,
+                   from: filePath,
+                   relativeTo: baseURL,
+                   searchPaths: searchPaths
+               )
+            {
+                sourceMetamodels[alias] = loadedPackage
+            }
+        }
+
+        // Load target metamodels
+        for (alias, metamodel) in targetMetamodels {
+            if let filePath = pathDirectives[metamodel.name],
+               let loadedPackage = try await loadMetamodel(
+                   name: metamodel.name,
+                   from: filePath,
+                   relativeTo: baseURL,
+                   searchPaths: searchPaths
+               )
+            {
+                targetMetamodels[alias] = loadedPackage
+            }
+        }
+
+        // Return new module with loaded metamodels
+        return ATLModule(
+            name: module.name,
+            sourceMetamodels: sourceMetamodels,
+            targetMetamodels: targetMetamodels,
+            helpers: module.helpers,
+            matchedRules: module.matchedRules,
+            calledRules: module.calledRules
+        )
+    }
+
+    /// Loads a metamodel from an Ecore file.
+    ///
+    /// - Parameters:
+    ///   - metamodelName: The name of the metamodel (from @path directive)
+    ///   - filePath: The file path from the @path directive
+    ///   - baseURL: The URL of the ATL file (for resolving relative paths)
+    ///   - searchPaths: Array of directory paths to search for metamodel files
+    /// - Returns: The loaded EPackage, or nil if loading fails
+    private func loadMetamodel(
+        name metamodelName: String,
+        from filePath: String,
+        relativeTo baseURL: URL,
+        searchPaths: [String]
+    ) async throws -> EPackage? {
+        var candidateURLs: [URL] = []
+
+        if filePath.hasPrefix("/") {
+            // Workspace-relative path - search in search paths
+            // Remove leading '/' to get relative path
+            let relativePath = String(filePath.dropFirst())
+
+            // Try each search path
+            for searchPath in searchPaths {
+                let candidate = URL(fileURLWithPath: searchPath)
+                    .appendingPathComponent(relativePath)
+                candidateURLs.append(candidate)
+            }
+        } else {
+            // Regular relative path - resolve relative to ATL file
+            let base = baseURL.deletingLastPathComponent()
+            candidateURLs.append(base.appendingPathComponent(filePath))
+        }
+
+        // Try each candidate URL
+        for candidateURL in candidateURLs {
+            let resolved = candidateURL.standardizedFileURL
+
+            guard FileManager.default.fileExists(atPath: resolved.path) else {
+                continue
+            }
+
+            do {
+                // Use EPackage initializer to load the .ecore file
+                let package = try await EPackage(url: resolved)
+                return package
+            } catch {
+                // Try next candidate if this one fails to parse
+                continue
+            }
+        }
+
+        // None of the candidates worked
+        return nil
     }
 }
 
@@ -117,6 +243,10 @@ private class ATLLexer {
     private var position: String.Index
     private var line: Int = 1
     private var column: Int = 1
+
+    /// Storage for @path directives extracted from comments
+    /// Maps metamodel name to file path (e.g., "Families" -> "/Families2Persons/Families.ecore")
+    var pathDirectives: [String: String] = [:]
 
     private static let keywords: Set<String> = [
         "module", "create", "from", "helper", "def", "context", "rule", "query",
@@ -157,6 +287,31 @@ private class ATLLexer {
         return tokens
     }
 
+    /// Extracts and stores @path directives from comments.
+    ///
+    /// Expected format: `@path MetamodelName=/path/to/Metamodel.ecore`
+    ///
+    /// - Parameter comment: The comment text (without the leading `--`)
+    private func extractPathDirective(from comment: String) {
+        let trimmed = comment.trimmingCharacters(in: .whitespaces)
+
+        // Remove "@path " prefix
+        guard trimmed.hasPrefix("@path ") else { return }
+        let directive = String(trimmed.dropFirst(6))  // Remove "@path "
+
+        // Parse "Name=/path/to/file.ecore"
+        let components = directive.split(separator: "=", maxSplits: 1)
+        guard components.count == 2 else {
+            // Malformed @path directive - silently ignore
+            return
+        }
+
+        let metamodelName = String(components[0]).trimmingCharacters(in: .whitespaces)
+        let filePath = String(components[1]).trimmingCharacters(in: .whitespaces)
+
+        pathDirectives[metamodelName] = filePath
+    }
+
     private func nextToken() throws -> ATLToken {
         guard position < content.endIndex else {
             return ATLToken(type: .eof, value: "", line: line, column: column)
@@ -190,6 +345,10 @@ private class ATLLexer {
                 comment.append(content[position])
                 advance()
             }
+
+            // Extract @path directive if present
+            extractPathDirective(from: comment)
+
             return ATLToken(
                 type: .comment(comment), value: "--" + comment, line: startLine, column: startColumn
             )
