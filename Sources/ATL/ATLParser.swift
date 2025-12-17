@@ -944,7 +944,8 @@ private class ATLSyntaxParser {
         return ATLMatchedRule(
             name: name,
             sourcePattern: sourcePattern,
-            targetPatterns: targetPatterns
+            targetPatterns: targetPatterns,
+            guard: sourcePattern.guard
         )
     }
 
@@ -1210,7 +1211,7 @@ private class ATLSyntaxParser {
         while currentToken()?.type == .keyword("or") {
             advance()
             let right = try parseAndExpression()
-            expr = ATLBinaryOperationExpression(
+            expr = ATLBinaryExpression(
                 left: expr,
                 operator: .or,
                 right: right
@@ -1226,7 +1227,7 @@ private class ATLSyntaxParser {
         while currentToken()?.type == .keyword("and") {
             advance()
             let right = try parseEqualityExpression()
-            expr = ATLBinaryOperationExpression(
+            expr = ATLBinaryExpression(
                 left: expr,
                 operator: .and,
                 right: right
@@ -1246,7 +1247,7 @@ private class ATLSyntaxParser {
             advance()
             let right = try parseRelationalExpression()
             let binOp: ATLBinaryOperator = op == "=" ? .equals : .notEquals
-            expr = ATLBinaryOperationExpression(
+            expr = ATLBinaryExpression(
                 left: expr,
                 operator: binOp,
                 right: right
@@ -1274,7 +1275,7 @@ private class ATLSyntaxParser {
                 default: return .lessThan
                 }
             }()
-            expr = ATLBinaryOperationExpression(
+            expr = ATLBinaryExpression(
                 left: expr,
                 operator: binOp,
                 right: right
@@ -1294,7 +1295,7 @@ private class ATLSyntaxParser {
             advance()
             let right = try parseMultiplicativeExpression()
             let binOp: ATLBinaryOperator = op == "+" ? .plus : .minus
-            expr = ATLBinaryOperationExpression(
+            expr = ATLBinaryExpression(
                 left: expr,
                 operator: binOp,
                 right: right
@@ -1314,7 +1315,7 @@ private class ATLSyntaxParser {
             advance()
             let right = try parseUnaryExpression()
             let binOp: ATLBinaryOperator = op == "*" ? .multiply : .divide
-            expr = ATLBinaryOperationExpression(
+            expr = ATLBinaryExpression(
                 left: expr,
                 operator: binOp,
                 right: right
@@ -1329,7 +1330,7 @@ private class ATLSyntaxParser {
         if currentToken()?.type == .keyword("not") {
             advance()
             let expr = try parseUnaryExpression()
-            return ATLUnaryOperationExpression(
+            return ATLUnaryExpression(
                 operator: .not,
                 operand: expr
             )
@@ -1339,7 +1340,7 @@ private class ATLSyntaxParser {
         if let token = currentToken(), case .operator(let op) = token.type, op == "-" {
             advance()
             let expr = try parseUnaryExpression()
-            return ATLUnaryOperationExpression(
+            return ATLUnaryExpression(
                 operator: .minus,
                 operand: expr
             )

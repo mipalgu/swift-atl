@@ -61,7 +61,7 @@ struct ATLBasicTests {
         let operation = ATLBinaryOperator.plus
 
         // When
-        let expression = ATLBinaryOperationExpression(
+        let expression = ATLBinaryExpression(
             left: leftExpr,
             operator: operation,
             right: rightExpr

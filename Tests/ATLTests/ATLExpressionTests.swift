@@ -87,7 +87,7 @@ struct ATLExpressionTests {
         let operation = ATLBinaryOperator.plus
 
         // When
-        let expression = ATLBinaryOperationExpression(
+        let expression = ATLBinaryExpression(
             left: leftExpr,
             operator: operation,
             right: rightExpr
@@ -171,9 +171,9 @@ struct ATLExpressionTests {
         let right1 = ATLLiteralExpression(value: 5)
         let right2 = ATLLiteralExpression(value: 5)
 
-        let expr1 = ATLBinaryOperationExpression(left: left1, operator: .plus, right: right1)
-        let expr2 = ATLBinaryOperationExpression(left: left2, operator: .plus, right: right2)
-        let expr3 = ATLBinaryOperationExpression(left: left1, operator: .minus, right: right1)
+        let expr1 = ATLBinaryExpression(left: left1, operator: .plus, right: right1)
+        let expr2 = ATLBinaryExpression(left: left2, operator: .plus, right: right2)
+        let expr3 = ATLBinaryExpression(left: left1, operator: .minus, right: right1)
 
         // Then
         #expect(expr1 == expr2)
@@ -226,7 +226,7 @@ struct ATLExpressionTests {
             ATLNavigationExpression(source: ATLVariableExpression(name: "obj"), property: "prop"),
             ATLHelperCallExpression(helperName: "helper", arguments: []),
             ATLLiteralExpression(value: "literal"),
-            ATLBinaryOperationExpression(
+            ATLBinaryExpression(
                 left: ATLLiteralExpression(value: 1),
                 operator: .plus,
                 right: ATLLiteralExpression(value: 2)

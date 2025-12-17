@@ -242,14 +242,14 @@ public struct ATLExpressionXMIParser {
         if let src = source, arguments.isEmpty {
             // Unary operation or method call with no arguments
             if let op = ATLUnaryOperator(rawValue: opName) {
-                return ATLUnaryOperationExpression(operator: op, operand: src)
+                return ATLUnaryExpression(operator: op, operand: src)
             } else {
                 return ATLMethodCallExpression(receiver: src, methodName: opName, arguments: [])
             }
         } else if let src = source, arguments.count == 1 {
             // Binary operation or method call with one argument
             if let op = ATLBinaryOperator(rawValue: opName) {
-                return ATLBinaryOperationExpression(left: src, operator: op, right: arguments[0])
+                return ATLBinaryExpression(left: src, operator: op, right: arguments[0])
             } else {
                 return ATLMethodCallExpression(receiver: src, methodName: opName, arguments: arguments)
             }

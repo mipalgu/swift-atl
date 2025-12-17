@@ -155,7 +155,7 @@ struct ATLExpressionRoundTripTests {
         // Given: A binary operation (x + 10)
         let left = ATLVariableExpression(name: "x")
         let right = ATLLiteralExpression(value: 10)
-        let original = ATLBinaryOperationExpression(
+        let original = ATLBinaryExpression(
             left: left,
             operator: .plus,
             right: right
@@ -166,7 +166,7 @@ struct ATLExpressionRoundTripTests {
         let parsed = try parser.parse(wrapExpression(xmi))
 
         // Then: Should be equivalent
-        guard let parsedBinary = parsed as? ATLBinaryOperationExpression else {
+        guard let parsedBinary = parsed as? ATLBinaryExpression else {
             Issue.record("Parsed expression should be binary operation")
             return
         }
@@ -191,7 +191,7 @@ struct ATLExpressionRoundTripTests {
         // Given: A comparison (age >= 18)
         let left = ATLVariableExpression(name: "age")
         let right = ATLLiteralExpression(value: 18)
-        let original = ATLBinaryOperationExpression(
+        let original = ATLBinaryExpression(
             left: left,
             operator: .greaterThanOrEqual,
             right: right
@@ -202,7 +202,7 @@ struct ATLExpressionRoundTripTests {
         let parsed = try parser.parse(wrapExpression(xmi))
 
         // Then: Should be equivalent
-        guard let parsedBinary = parsed as? ATLBinaryOperationExpression else {
+        guard let parsedBinary = parsed as? ATLBinaryExpression else {
             Issue.record("Parsed expression should be binary operation")
             return
         }
@@ -215,7 +215,7 @@ struct ATLExpressionRoundTripTests {
     func unaryOperationRoundTrip() throws {
         // Given: A unary operation (not x)
         let operand = ATLVariableExpression(name: "x")
-        let original = ATLUnaryOperationExpression(
+        let original = ATLUnaryExpression(
             operator: .not,
             operand: operand
         )
@@ -225,7 +225,7 @@ struct ATLExpressionRoundTripTests {
         let parsed = try parser.parse(wrapExpression(xmi))
 
         // Then: Should be equivalent
-        guard let parsedUnary = parsed as? ATLUnaryOperationExpression else {
+        guard let parsedUnary = parsed as? ATLUnaryExpression else {
             Issue.record("Parsed expression should be unary operation")
             return
         }
@@ -308,7 +308,7 @@ struct ATLExpressionRoundTripTests {
     @Test("Conditional round-trip")
     func conditionalRoundTrip() throws {
         // Given: A conditional (if x > 0 then 1 else -1)
-        let condition = ATLBinaryOperationExpression(
+        let condition = ATLBinaryExpression(
             left: ATLVariableExpression(name: "x"),
             operator: .greaterThan,
             right: ATLLiteralExpression(value: 0)
@@ -332,7 +332,7 @@ struct ATLExpressionRoundTripTests {
         }
 
         // Verify condition
-        guard let parsedCondition = parsedCond.condition as? ATLBinaryOperationExpression else {
+        guard let parsedCondition = parsedCond.condition as? ATLBinaryExpression else {
             Issue.record("Condition should be binary operation")
             return
         }
@@ -398,7 +398,7 @@ struct ATLExpressionRoundTripTests {
     func collectionSelectRoundTrip() throws {
         // Given: A select operation (list->select(e | e > 5))
         let source = ATLVariableExpression(name: "list")
-        let body = ATLBinaryOperationExpression(
+        let body = ATLBinaryExpression(
             left: ATLVariableExpression(name: "e"),
             operator: .greaterThan,
             right: ATLLiteralExpression(value: 5)
@@ -432,7 +432,7 @@ struct ATLExpressionRoundTripTests {
         }
         #expect(parsedSource.name == "list")
 
-        guard let parsedBody = parsedColl.body as? ATLBinaryOperationExpression else {
+        guard let parsedBody = parsedColl.body as? ATLBinaryExpression else {
             Issue.record("Body should be binary operation")
             return
         }
@@ -445,7 +445,7 @@ struct ATLExpressionRoundTripTests {
     func letExpressionRoundTrip() throws {
         // Given: A let expression (let x : Integer = 42 in x + 1)
         let initExpr = ATLLiteralExpression(value: 42)
-        let inExpr = ATLBinaryOperationExpression(
+        let inExpr = ATLBinaryExpression(
             left: ATLVariableExpression(name: "x"),
             operator: .plus,
             right: ATLLiteralExpression(value: 1)
@@ -476,7 +476,7 @@ struct ATLExpressionRoundTripTests {
         }
         #expect(initValue == 42)
 
-        guard let parsedIn = parsedLet.inExpression as? ATLBinaryOperationExpression else {
+        guard let parsedIn = parsedLet.inExpression as? ATLBinaryExpression else {
             Issue.record("In expression should be binary operation")
             return
         }
@@ -488,7 +488,7 @@ struct ATLExpressionRoundTripTests {
     @Test("Lambda expression round-trip")
     func lambdaExpressionRoundTrip() throws {
         // Given: A lambda expression (e | e * 2)
-        let body = ATLBinaryOperationExpression(
+        let body = ATLBinaryExpression(
             left: ATLVariableExpression(name: "e"),
             operator: .multiply,
             right: ATLLiteralExpression(value: 2)
@@ -506,7 +506,7 @@ struct ATLExpressionRoundTripTests {
         }
         #expect(parsedLambda.parameter == "e")
 
-        guard let parsedBody = parsedLambda.body as? ATLBinaryOperationExpression else {
+        guard let parsedBody = parsedLambda.body as? ATLBinaryExpression else {
             Issue.record("Body should be binary operation")
             return
         }
@@ -520,7 +520,7 @@ struct ATLExpressionRoundTripTests {
         // Given: An iterate expression (list->iterate(e; acc : Integer = 0 | acc + e))
         let source = ATLVariableExpression(name: "list")
         let defaultValue = ATLLiteralExpression(value: 0)
-        let body = ATLBinaryOperationExpression(
+        let body = ATLBinaryExpression(
             left: ATLVariableExpression(name: "acc"),
             operator: .plus,
             right: ATLVariableExpression(name: "e")
@@ -559,7 +559,7 @@ struct ATLExpressionRoundTripTests {
         }
         #expect(defaultVal == 0)
 
-        guard let parsedBody = parsedIterate.body as? ATLBinaryOperationExpression else {
+        guard let parsedBody = parsedIterate.body as? ATLBinaryExpression else {
             Issue.record("Body should be binary operation")
             return
         }
@@ -660,7 +660,7 @@ struct ATLExpressionRoundTripTests {
         // if list->select(e | e > 0)->size() > 0 then 'positive' else 'none'
 
         // list->select(e | e > 0)
-        let selectBody = ATLBinaryOperationExpression(
+        let selectBody = ATLBinaryExpression(
             left: ATLVariableExpression(name: "e"),
             operator: .greaterThan,
             right: ATLLiteralExpression(value: 0)
@@ -680,7 +680,7 @@ struct ATLExpressionRoundTripTests {
         )
 
         // size() > 0
-        let condition = ATLBinaryOperationExpression(
+        let condition = ATLBinaryExpression(
             left: sizeExpr,
             operator: .greaterThan,
             right: ATLLiteralExpression(value: 0)
@@ -703,7 +703,7 @@ struct ATLExpressionRoundTripTests {
         }
 
         // Verify condition is binary operation
-        guard let parsedCondition = parsedCond.condition as? ATLBinaryOperationExpression else {
+        guard let parsedCondition = parsedCond.condition as? ATLBinaryExpression else {
             Issue.record("Condition should be binary operation")
             return
         }

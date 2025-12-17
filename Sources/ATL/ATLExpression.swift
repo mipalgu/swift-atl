@@ -473,20 +473,20 @@ public struct ATLTypeLiteralExpression: ATLExpression, Sendable, Equatable, Hash
 ///
 /// ```swift
 /// // Arithmetic operation
-/// let addition = ATLBinaryOperationExpression(
+/// let addition = ATLBinaryExpression(
 ///     left: ATLVariableExpression(name: "x"),
 ///     operator: .plus,
 ///     right: ATLLiteralExpression(value: 10)
 /// )
 ///
 /// // Comparison operation
-/// let comparison = ATLBinaryOperationExpression(
+/// let comparison = ATLBinaryExpression(
 ///     left: ATLVariableExpression(name: "age"),
 ///     operator: .greaterThan,
 ///     right: ATLLiteralExpression(value: 18)
 /// )
 /// ```
-public struct ATLBinaryOperationExpression: ATLExpression, Sendable, Equatable, Hashable {
+public struct ATLBinaryExpression: ATLExpression, Sendable, Equatable, Hashable {
 
     // MARK: - Properties
 
@@ -696,7 +696,7 @@ public struct ATLBinaryOperationExpression: ATLExpression, Sendable, Equatable, 
 
     // MARK: - Equatable
 
-    public static func == (lhs: ATLBinaryOperationExpression, rhs: ATLBinaryOperationExpression)
+    public static func == (lhs: ATLBinaryExpression, rhs: ATLBinaryExpression)
         -> Bool
     {
         return lhs.`operator` == rhs.`operator`
@@ -765,7 +765,7 @@ public struct ATLConditionalExpression: ATLExpression, Sendable, Equatable, Hash
 }
 
 /// Unary operation expression for not, minus, etc.
-public struct ATLUnaryOperationExpression: ATLExpression, Sendable, Equatable, Hashable {
+public struct ATLUnaryExpression: ATLExpression, Sendable, Equatable, Hashable {
     /// The unary operator.
     public let `operator`: ATLUnaryOperator
 
@@ -804,7 +804,7 @@ public struct ATLUnaryOperationExpression: ATLExpression, Sendable, Equatable, H
         }
     }
 
-    public static func == (lhs: ATLUnaryOperationExpression, rhs: ATLUnaryOperationExpression)
+    public static func == (lhs: ATLUnaryExpression, rhs: ATLUnaryExpression)
         -> Bool
     {
         return lhs.`operator` == rhs.`operator`
@@ -833,7 +833,7 @@ public struct ATLUnaryOperationExpression: ATLExpression, Sendable, Equatable, H
 /// let letExpr = ATLLetExpression(
 ///     variableName: "avgPages",
 ///     variableType: "Real",
-///     initExpression: ATLBinaryOperationExpression(...),
+///     initExpression: ATLBinaryExpression(...),
 ///     inExpression: bodyExpression
 /// )
 /// ```
@@ -2205,7 +2205,7 @@ public struct ATLOperationExpression: ATLExpression, Sendable, Equatable, Hashab
 ///     accumulator: "sum",
 ///     accumulatorType: "Integer",
 ///     defaultValue: ATLLiteralExpression(value: 0),
-///     body: ATLBinaryOperationExpression(
+///     body: ATLBinaryExpression(
 ///         left: ATLVariableExpression(name: "sum"),
 ///         operator: .add,
 ///         right: ATLVariableExpression(name: "n")
@@ -2344,7 +2344,7 @@ public struct ATLIterateExpression: ATLExpression, Sendable, Equatable, Hashable
 ///     source: ATLVariableExpression(name: "numbers"),
 ///     operation: .select,
 ///     iterator: "n",
-///     body: ATLBinaryOperationExpression(
+///     body: ATLBinaryExpression(
 ///         left: ATLVariableExpression(name: "n"),
 ///         operator: .greaterThan,
 ///         right: ATLLiteralExpression(value: 0)
@@ -2574,11 +2574,11 @@ internal func areATLExpressionsEqual(_ lhs: any ATLExpression, _ rhs: any ATLExp
         return l == r
     case (let l as ATLHelperCallExpression, let r as ATLHelperCallExpression):
         return l == r
-    case (let l as ATLBinaryOperationExpression, let r as ATLBinaryOperationExpression):
+    case (let l as ATLBinaryExpression, let r as ATLBinaryExpression):
         return l == r
     case (let l as ATLConditionalExpression, let r as ATLConditionalExpression):
         return l == r
-    case (let l as ATLUnaryOperationExpression, let r as ATLUnaryOperationExpression):
+    case (let l as ATLUnaryExpression, let r as ATLUnaryExpression):
         return l == r
     case (let l as ATLMethodCallExpression, let r as ATLMethodCallExpression):
         return l == r
@@ -2607,11 +2607,11 @@ internal func hashATLExpression(_ expression: any ATLExpression, into hasher: in
         expr.hash(into: &hasher)
     case let expr as ATLHelperCallExpression:
         expr.hash(into: &hasher)
-    case let expr as ATLBinaryOperationExpression:
+    case let expr as ATLBinaryExpression:
         expr.hash(into: &hasher)
     case let expr as ATLConditionalExpression:
         expr.hash(into: &hasher)
-    case let expr as ATLUnaryOperationExpression:
+    case let expr as ATLUnaryExpression:
         expr.hash(into: &hasher)
     case let expr as ATLMethodCallExpression:
         expr.hash(into: &hasher)

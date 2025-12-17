@@ -50,9 +50,9 @@ extension ATLExpression {
             return navigationExpr.toECoreExpression()
         case let operationExpr as ATLOperationExpression:
             return operationExpr.toECoreExpression()
-        case let binaryOpExpr as ATLBinaryOperationExpression:
+        case let binaryOpExpr as ATLBinaryExpression:
             return binaryOpExpr.toECoreExpression()
-        case let unaryOpExpr as ATLUnaryOperationExpression:
+        case let unaryOpExpr as ATLUnaryExpression:
             return unaryOpExpr.toECoreExpression()
         case let conditionalExpr as ATLConditionalExpression:
             return conditionalExpr.toECoreExpression()
@@ -144,7 +144,7 @@ extension ATLOperationExpression {
 
 // MARK: - Binary Operation Expression Bridge
 
-extension ATLBinaryOperationExpression {
+extension ATLBinaryExpression {
     /// Convert ATL binary operation to appropriate ECore expression.
     func toECoreExpression() -> ECoreExpression {
         let leftExpr = left.toECoreExpression()
@@ -207,7 +207,7 @@ extension ATLBinaryOperationExpression {
 
 // MARK: - Unary Operation Expression Bridge
 
-extension ATLUnaryOperationExpression {
+extension ATLUnaryExpression {
     /// Convert ATL unary operation to ECore method call expression.
     func toECoreExpression() -> ECoreExpression {
         let operandExpr = operand.toECoreExpression()

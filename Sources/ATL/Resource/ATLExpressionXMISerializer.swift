@@ -59,9 +59,9 @@ public struct ATLExpressionXMISerializer {
             return serializeVariable(variable, indent: indentString)
         } else if let navigation = expression as? ATLNavigationExpression {
             return serializeNavigation(navigation, indent: indentString)
-        } else if let binary = expression as? ATLBinaryOperationExpression {
+        } else if let binary = expression as? ATLBinaryExpression {
             return serializeBinaryOperation(binary, indent: indentString)
-        } else if let unary = expression as? ATLUnaryOperationExpression {
+        } else if let unary = expression as? ATLUnaryExpression {
             return serializeUnaryOperation(unary, indent: indentString)
         } else if let conditional = expression as? ATLConditionalExpression {
             return serializeConditional(conditional, indent: indentString)
@@ -131,7 +131,7 @@ public struct ATLExpressionXMISerializer {
 
     // MARK: - Operation Serialization
 
-    private func serializeBinaryOperation(_ binary: ATLBinaryOperationExpression, indent: String) -> String {
+    private func serializeBinaryOperation(_ binary: ATLBinaryExpression, indent: String) -> String {
         let opName = binary.operator.rawValue
         var xmi = "\(indent)<expression xsi:type=\"ocl:OperationCallExp\" operationName=\"\(escapeXML(opName))\">\n"
 
@@ -147,7 +147,7 @@ public struct ATLExpressionXMISerializer {
         return xmi
     }
 
-    private func serializeUnaryOperation(_ unary: ATLUnaryOperationExpression, indent: String) -> String {
+    private func serializeUnaryOperation(_ unary: ATLUnaryExpression, indent: String) -> String {
         let opName = unary.operator.rawValue
         var xmi = "\(indent)<expression xsi:type=\"ocl:OperationCallExp\" operationName=\"\(escapeXML(opName))\">\n"
 

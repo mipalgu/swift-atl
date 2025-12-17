@@ -355,4 +355,164 @@ extension ATLModuleTests {
             targetMetamodels: ["Target": targetPackage]
         )
     }
+
+    // MARK: - Guard Expression Tests
+
+    @Test("Parse matched rule with guard condition")
+    func testParseRuleWithGuard() async throws {
+        // Given - ATL with guard condition
+        let atlContent = """
+        module TestGuard;
+        create OUT: Target from IN: Source;
+
+        rule FilteredRule {
+            from
+                s: Source!Element (s.value > 10)
+            to
+                t: Target!Result (
+                    name <- s.name
+                )
+        }
+        """
+
+        // When
+        let parser = ATLParser()
+        let module = try await parser.parseContent(atlContent)
+
+        // Then
+        #expect(module.matchedRules.count == 1)
+        let rule = module.matchedRules[0]
+        #expect(rule.name == "FilteredRule")
+
+        // Critical: Verify guard is present and parsed
+        #expect(rule.guard != nil, "Guard expression should be parsed from source pattern")
+
+        // Verify the guard is a binary operation (s.value > 10)
+        guard let guardExpr = rule.guard as? ATLBinaryExpression else {
+            Issue.record("Guard should be a binary expression")
+            return
+        }
+        #expect(guardExpr.operator == .greaterThan)
+    }
+
+    @Test("Parse matched rule without guard condition")
+    func testParseRuleWithoutGuard() async throws {
+        // Given - ATL without guard
+        let atlContent = """
+        module TestNoGuard;
+        create OUT: Target from IN: Source;
+
+        rule UnfilteredRule {
+            from
+                s: Source!Element
+            to
+                t: Target!Result (
+                    name <- s.name
+                )
+        }
+        """
+
+        // When
+        let parser = ATLParser()
+        let module = try await parser.parseContent(atlContent)
+
+        // Then
+        #expect(module.matchedRules.count == 1)
+        let rule = module.matchedRules[0]
+        #expect(rule.name == "UnfilteredRule")
+
+        // Verify guard is nil when not specified
+        #expect(rule.guard == nil, "Guard should be nil when not specified in source pattern")
+    }
+
+    @Test("Parse multiple rules with different guards")
+    func testParseMultipleRulesWithGuards() async throws {
+        // Given - ATL with multiple rules having different guards
+        let atlContent = """
+        module TestMultipleGuards;
+        create OUT: Target from IN: Source;
+
+        rule PositiveFilter {
+            from
+                s: Source!Element (s.value > 0)
+            to
+                t: Target!Positive (
+                    value <- s.value
+                )
+        }
+
+        rule NegativeFilter {
+            from
+                s: Source!Element (s.value < 0)
+            to
+                t: Target!Negative (
+                    value <- s.value
+                )
+        }
+
+        rule AllElements {
+            from
+                s: Source!Element
+            to
+                t: Target!All (
+                    value <- s.value
+                )
+        }
+        """
+
+        // When
+        let parser = ATLParser()
+        let module = try await parser.parseContent(atlContent)
+
+        // Then
+        #expect(module.matchedRules.count == 3)
+
+        let positiveRule = module.matchedRules[0]
+        #expect(positiveRule.name == "PositiveFilter")
+        #expect(positiveRule.guard != nil, "PositiveFilter should have guard")
+
+        let negativeRule = module.matchedRules[1]
+        #expect(negativeRule.name == "NegativeFilter")
+        #expect(negativeRule.guard != nil, "NegativeFilter should have guard")
+
+        let allRule = module.matchedRules[2]
+        #expect(allRule.name == "AllElements")
+        #expect(allRule.guard == nil, "AllElements should not have guard")
+    }
+
+    @Test("Parse rule with complex guard expression")
+    func testParseRuleWithComplexGuard() async throws {
+        // Given - ATL with complex guard using NOT and method call
+        let atlContent = """
+        module TestComplexGuard;
+        create OUT: Target from IN: Source;
+
+        helper context Source!Element def: isValid(): Boolean =
+            self.value > 0;
+
+        rule FilterInvalid {
+            from
+                s: Source!Element (not s.isValid())
+            to
+                t: Target!Invalid (
+                    value <- s.value
+                )
+        }
+        """
+
+        // When
+        let parser = ATLParser()
+        let module = try await parser.parseContent(atlContent)
+
+        // Then
+        #expect(module.matchedRules.count == 1)
+        let rule = module.matchedRules[0]
+        #expect(rule.name == "FilterInvalid")
+
+        // Verify guard is present
+        #expect(rule.guard != nil, "Complex guard should be parsed")
+
+        // The guard expression type checking is flexible - just verify it's not nil
+        // since the exact expression structure may vary based on parser implementation
+    }
 }

@@ -93,26 +93,26 @@ struct ATLInterpreterTests {
         let context = await createTestContext()
 
         // Arithmetic operations
-        let addition = ATLBinaryOperationExpression(
+        let addition = ATLBinaryExpression(
             left: ATLLiteralExpression(value: 10),
             operator: .plus,
             right: ATLLiteralExpression(value: 5)
         )
 
-        let multiplication = ATLBinaryOperationExpression(
+        let multiplication = ATLBinaryExpression(
             left: ATLLiteralExpression(value: 7),
             operator: .multiply,
             right: ATLLiteralExpression(value: 6)
         )
 
         // Comparison operations
-        let equality = ATLBinaryOperationExpression(
+        let equality = ATLBinaryExpression(
             left: ATLLiteralExpression(value: "test"),
             operator: .equals,
             right: ATLLiteralExpression(value: "test")
         )
 
-        let greaterThan = ATLBinaryOperationExpression(
+        let greaterThan = ATLBinaryExpression(
             left: ATLLiteralExpression(value: 10),
             operator: .greaterThan,
             right: ATLLiteralExpression(value: 5)
@@ -303,7 +303,7 @@ struct ATLInterpreterTests {
         // Lambda: x | x * 2
         let lambda = ATLLambdaExpression(
             parameter: "x",
-            body: ATLBinaryOperationExpression(
+            body: ATLBinaryExpression(
                 left: ATLVariableExpression(name: "x"),
                 operator: .multiply,
                 right: ATLLiteralExpression(value: 2)
@@ -325,7 +325,7 @@ struct ATLInterpreterTests {
         // Lambda: item | item.size() > 3
         let lambda = ATLLambdaExpression(
             parameter: "item",
-            body: ATLBinaryOperationExpression(
+            body: ATLBinaryExpression(
                 left: ATLMethodCallExpression(
                     receiver: ATLVariableExpression(name: "item"),
                     methodName: "size"
@@ -352,7 +352,7 @@ struct ATLInterpreterTests {
         let context = await createTestContext()
         context.setVariable("stringVar", value: "not a number")
 
-        let invalidOperation = ATLBinaryOperationExpression(
+        let invalidOperation = ATLBinaryExpression(
             left: ATLVariableExpression(name: "stringVar"),
             operator: .plus,
             right: ATLLiteralExpression(value: 5)
@@ -378,7 +378,7 @@ struct ATLInterpreterTests {
         // Given
         let context = await createTestContext()
 
-        let divisionByZero = ATLBinaryOperationExpression(
+        let divisionByZero = ATLBinaryExpression(
             left: ATLLiteralExpression(value: 10),
             operator: .divide,
             right: ATLLiteralExpression(value: 0)
