@@ -22,6 +22,7 @@ let package = Package(
             dependencies: [
                 .product(name: "ECore", package: "swift-ecore"),
                 .product(name: "EMFBase", package: "swift-ecore"),
+                .product(name: "OCL", package: "swift-ecore"),
                 .product(name: "OrderedCollections", package: "swift-collections"),
             ],
             swiftSettings: [

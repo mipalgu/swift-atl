@@ -8,6 +8,7 @@
 import ECore
 import EMFBase
 import Foundation
+import OCL
 import OrderedCollections
 
 // MARK: - Async Utilities
@@ -524,7 +525,7 @@ public struct ATLBinaryExpression: ATLExpression, Sendable, Equatable, Hashable 
         return try await evaluateOperation(leftValue, self.`operator`, rightValue)
     }
 
-    /// Evaluates the binary operation with the given operands.
+    /// Evaluates the binary operation with the given operands using swift-ecore's OCL library.
     ///
     /// - Parameters:
     ///   - leftValue: The evaluated left operand
@@ -538,177 +539,64 @@ public struct ATLBinaryExpression: ATLExpression, Sendable, Equatable, Hashable 
     )
         async throws -> (any EcoreValue)?
     {
-        switch `operator` {
-        case .plus:
-            return try addValues(leftValue, rightValue)
-        case .minus:
-            return try subtractValues(leftValue, rightValue)
-        case .multiply:
-            return try multiplyValues(leftValue, rightValue)
-        case .divide:
-            return try divideValues(leftValue, rightValue)
-        case .modulo:
-            return try moduloValues(leftValue, rightValue)
-        case .equals:
-            return areEqual(leftValue, rightValue)
-        case .notEquals:
-            return !areEqual(leftValue, rightValue)
-        case .lessThan:
-            return try compareValues(leftValue, rightValue) < 0
-        case .lessThanOrEqual:
-            return try compareValues(leftValue, rightValue) <= 0
-        case .greaterThan:
-            return try compareValues(leftValue, rightValue) > 0
-        case .greaterThanOrEqual:
-            return try compareValues(leftValue, rightValue) >= 0
-        case .and:
-            return try logicalAnd(leftValue, rightValue)
-        case .or:
-            return try logicalOr(leftValue, rightValue)
-        default:
-            throw ATLExecutionError.unsupportedOperation(
-                "Binary operator '\(`operator`.rawValue)' is not yet implemented")
+        guard let left = leftValue, let right = rightValue else {
+            throw ATLExecutionError.invalidOperation("Binary operation requires non-nil operands")
         }
-    }
 
-    // MARK: - Operation Implementations
-
-    private func addValues(_ left: (any EcoreValue)?, _ right: (any EcoreValue)?) throws -> (
-        any EcoreValue
-    )? {
-        switch (left, right) {
-        case (let l as Int, let r as Int):
-            return l + r
-        case (let l as Double, let r as Double):
-            return l + r
-        case (let l as String, let r as String):
-            return l + r
-        case (let l as Int, let r as Double):
-            return Double(l) + r
-        case (let l as Double, let r as Int):
-            return l + Double(r)
-        default:
-            throw ATLExecutionError.invalidOperation(
-                "Cannot add values of types \(type(of: left)) and \(type(of: right))")
+        do {
+            switch `operator` {
+            case .plus:
+                return try add(left, right)
+            case .minus:
+                return try subtract(left, right)
+            case .multiply:
+                return try multiply(left, right)
+            case .divide:
+                return try divide(left, right)
+            case .modulo:
+                return try modulo(left, right)
+            case .equals:
+                return equals(left, right)
+            case .notEquals:
+                return notEquals(left, right)
+            case .lessThan:
+                return try lessThan(left, right)
+            case .lessThanOrEqual:
+                return try lessThanOrEqual(left, right)
+            case .greaterThan:
+                return try greaterThan(left, right)
+            case .greaterThanOrEqual:
+                return try greaterThanOrEqual(left, right)
+            case .and:
+                return try and(left, right)
+            case .or:
+                return try or(left, right)
+            case .implies:
+                return try implies(left, right)
+            case .union:
+                return EcoreValueArray(try union(left, right))
+            case .intersection:
+                return EcoreValueArray(try intersection(left, right))
+            case .difference:
+                return EcoreValueArray(try difference(left, right))
+            case .includes:
+                return try includes(left, right)
+            case .excludes:
+                return try excludes(left, right)
+            }
+        } catch let error as OCLError {
+            // Convert OCL errors to ATL errors for consistent error handling
+            switch error {
+            case .divisionByZero:
+                throw ATLExecutionError.divisionByZero
+            case .typeError(let message):
+                throw ATLExecutionError.typeError(message)
+            case .invalidArguments(let message):
+                throw ATLExecutionError.invalidOperation(message)
+            default:
+                throw ATLExecutionError.runtimeError(error.description)
+            }
         }
-    }
-
-    private func subtractValues(_ left: (any EcoreValue)?, _ right: (any EcoreValue)?) throws -> (
-        any EcoreValue
-    )? {
-        switch (left, right) {
-        case (let l as Int, let r as Int):
-            return l - r
-        case (let l as Double, let r as Double):
-            return l - r
-        case (let l as Int, let r as Double):
-            return Double(l) - r
-        case (let l as Double, let r as Int):
-            return l - Double(r)
-        default:
-            throw ATLExecutionError.invalidOperation(
-                "Cannot subtract values of types \(type(of: left)) and \(type(of: right))")
-        }
-    }
-
-    private func multiplyValues(_ left: (any EcoreValue)?, _ right: (any EcoreValue)?) throws -> (
-        any EcoreValue
-    )? {
-        switch (left, right) {
-        case (let l as Int, let r as Int):
-            return l * r
-        case (let l as Double, let r as Double):
-            return l * r
-        case (let l as Int, let r as Double):
-            return Double(l) * r
-        case (let l as Double, let r as Int):
-            return l * Double(r)
-        default:
-            throw ATLExecutionError.invalidOperation(
-                "Cannot multiply values of types \(type(of: left)) and \(type(of: right))")
-        }
-    }
-
-    private func divideValues(_ left: (any EcoreValue)?, _ right: (any EcoreValue)?) throws -> (
-        any EcoreValue
-    )? {
-        switch (left, right) {
-        case (let l as Int, let r as Int):
-            guard r != 0 else { throw ATLExecutionError.divisionByZero }
-            return l / r
-        case (let l as Double, let r as Double):
-            guard r != 0.0 else { throw ATLExecutionError.divisionByZero }
-            return l / r
-        case (let l as Int, let r as Double):
-            guard r != 0.0 else { throw ATLExecutionError.divisionByZero }
-            return Double(l) / r
-        case (let l as Double, let r as Int):
-            guard r != 0 else { throw ATLExecutionError.divisionByZero }
-            return l / Double(r)
-        default:
-            throw ATLExecutionError.invalidOperation(
-                "Cannot divide values of types \(type(of: left)) and \(type(of: right))")
-        }
-    }
-
-    private func areEqual(_ left: (any EcoreValue)?, _ right: (any EcoreValue)?) -> Bool {
-        switch (left, right) {
-        case (nil, nil):
-            return true
-        case (nil, _), (_, nil):
-            return false
-        default:
-            return String(describing: left) == String(describing: right)
-        }
-    }
-
-    private func moduloValues(_ left: (any EcoreValue)?, _ right: (any EcoreValue)?) throws -> (
-        any EcoreValue
-    )? {
-        guard let leftInt = left as? Int, let rightInt = right as? Int else {
-            throw ATLExecutionError.typeError(
-                "Modulo operation requires integer operands, got \(type(of: left)) and \(type(of: right))"
-            )
-        }
-        guard rightInt != 0 else {
-            throw ATLExecutionError.divisionByZero
-        }
-        return leftInt % rightInt
-    }
-
-    private func compareValues(_ left: (any EcoreValue)?, _ right: (any EcoreValue)?) throws -> Int
-    {
-        switch (left, right) {
-        case (let l as Int, let r as Int):
-            return l < r ? -1 : (l > r ? 1 : 0)
-        case (let l as Double, let r as Double):
-            return l < r ? -1 : (l > r ? 1 : 0)
-        case (let l as String, let r as String):
-            return l.compare(r).rawValue
-        case (let l as Int, let r as Double):
-            let ld = Double(l)
-            return ld < r ? -1 : (ld > r ? 1 : 0)
-        case (let l as Double, let r as Int):
-            let rd = Double(r)
-            return l < rd ? -1 : (l > rd ? 1 : 0)
-        default:
-            throw ATLExecutionError.invalidOperation(
-                "Cannot compare values of types \(type(of: left)) and \(type(of: right))")
-        }
-    }
-
-    private func logicalAnd(_ left: (any EcoreValue)?, _ right: (any EcoreValue)?) throws -> Bool {
-        guard let leftBool = left as? Bool, let rightBool = right as? Bool else {
-            throw ATLExecutionError.invalidOperation("Logical AND requires boolean operands")
-        }
-        return leftBool && rightBool
-    }
-
-    private func logicalOr(_ left: (any EcoreValue)?, _ right: (any EcoreValue)?) throws -> Bool {
-        guard let leftBool = left as? Bool, let rightBool = right as? Bool else {
-            throw ATLExecutionError.invalidOperation("Logical OR requires boolean operands")
-        }
-        return leftBool || rightBool
     }
 
     // MARK: - Equatable
@@ -801,22 +689,26 @@ public struct ATLUnaryExpression: ATLExpression, Sendable, Equatable, Hashable {
 
     @MainActor
     public func evaluate(in context: ATLExecutionContext) async throws -> (any EcoreValue)? {
-        let operandValue = try await operand.evaluate(in: context)
+        guard let operandValue = try await operand.evaluate(in: context) else {
+            throw ATLExecutionError.invalidOperation("Unary operation requires non-nil operand")
+        }
 
-        switch `operator` {
-        case .not:
-            if let boolValue = operandValue as? Bool {
-                return !boolValue
-            } else {
-                throw ATLExecutionError.typeError("Cannot apply 'not' to non-boolean value")
+        do {
+            switch `operator` {
+            case .not:
+                return try not(operandValue)
+            case .minus:
+                return try negate(operandValue)
             }
-        case .minus:
-            if let intValue = operandValue as? Int {
-                return -intValue
-            } else if let doubleValue = operandValue as? Double {
-                return -doubleValue
-            } else {
-                throw ATLExecutionError.typeError("Cannot apply unary minus to non-numeric value")
+        } catch let error as OCLError {
+            // Convert OCL errors to ATL errors for consistent error handling
+            switch error {
+            case .typeError(let message):
+                throw ATLExecutionError.typeError(message)
+            case .invalidArguments(let message):
+                throw ATLExecutionError.invalidOperation(message)
+            default:
+                throw ATLExecutionError.runtimeError(error.description)
             }
         }
     }
