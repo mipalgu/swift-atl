@@ -6,6 +6,7 @@
 //  Copyright © 2025 Rene Hexel. All rights reserved.
 //
 import ECore
+import EMFBase
 import Foundation
 import OrderedCollections
 
@@ -546,6 +547,8 @@ public struct ATLBinaryExpression: ATLExpression, Sendable, Equatable, Hashable 
             return try multiplyValues(leftValue, rightValue)
         case .divide:
             return try divideValues(leftValue, rightValue)
+        case .modulo:
+            return try moduloValues(leftValue, rightValue)
         case .equals:
             return areEqual(leftValue, rightValue)
         case .notEquals:
@@ -657,6 +660,20 @@ public struct ATLBinaryExpression: ATLExpression, Sendable, Equatable, Hashable 
         default:
             return String(describing: left) == String(describing: right)
         }
+    }
+
+    private func moduloValues(_ left: (any EcoreValue)?, _ right: (any EcoreValue)?) throws -> (
+        any EcoreValue
+    )? {
+        guard let leftInt = left as? Int, let rightInt = right as? Int else {
+            throw ATLExecutionError.typeError(
+                "Modulo operation requires integer operands, got \(type(of: left)) and \(type(of: right))"
+            )
+        }
+        guard rightInt != 0 else {
+            throw ATLExecutionError.divisionByZero
+        }
+        return leftInt % rightInt
     }
 
     private func compareValues(_ left: (any EcoreValue)?, _ right: (any EcoreValue)?) throws -> Int
@@ -1073,6 +1090,7 @@ public struct ATLMethodCallExpression: ATLExpression, Sendable, Equatable, Hasha
     ///
     /// This method handles method resolution based on both method name and argument types,
     /// ensuring compliance with ATL/OCL method overloading semantics.
+    @MainActor
     private func dispatchMethod(
         methodName: String,
         receiver: (any EcoreValue)?,
@@ -1157,6 +1175,42 @@ public struct ATLMethodCallExpression: ATLExpression, Sendable, Equatable, Hasha
             return try handleReverse(receiver)
 
         default:
+            // Try to call as a context helper before failing
+            // Context helpers are called as methods on objects: receiver.helperName(args)
+            if let receiver = receiver {
+                // Check if this is a context helper
+                if let helper = context.module.helpers[methodName] as? ATLHelperWrapper,
+                   helper.contextType != nil {
+
+                    // Context helper - bind receiver as 'self' and evaluate directly
+                    context.pushScope()
+                    defer { context.popScope() }
+
+                    context.setVariable("self", value: receiver)
+
+                    // Bind parameters
+                    for (parameter, argument) in zip(helper.parameters, arguments) {
+                        context.setVariable(parameter.name, value: argument)
+                    }
+
+                    // Evaluate the helper body expression
+                    return try await helper.bodyExpression.evaluate(in: context)
+                } else {
+                    // Try regular helper call with receiver bound as 'self'
+                    context.setVariable("self", value: receiver)
+                    defer { context.setVariable("self", value: nil) }
+
+                    do {
+                        return try await context.callHelper(methodName, arguments: arguments)
+                    } catch ATLExecutionError.helperNotFound(_) {
+                        // Helper not found, fall through to error
+                    } catch {
+                        // Other helper evaluation error, rethrow
+                        throw error
+                    }
+                }
+            }
+
             throw ATLExecutionError.unsupportedOperation(
                 "Method signature '\(signature)' not supported")
         }

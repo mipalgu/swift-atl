@@ -8,6 +8,7 @@
 //  Serializes ATL modules to Eclipse ATL XMI format.
 //
 import ECore
+import EMFBase
 import Foundation
 
 /// Serializes ATL modules to Eclipse ATL XMI format.
@@ -105,7 +106,7 @@ public struct ATLXMISerializer {
 
     private func serializeOclModel(alias: String, package: EPackage, kind: String) -> String {
         // Use the package nsURI as the metamodel reference
-        let metamodel = package.nsURI ?? "http://\(package.name.lowercased())"
+        let metamodel = package.nsURI.isEmpty ? "http://\(package.name.lowercased())" : package.nsURI
         return """
           <inModels name="\(escapeXML(alias))" metamodel="\(escapeXML(metamodel))" kind="\(kind)"/>
 

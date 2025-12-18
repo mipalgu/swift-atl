@@ -563,4 +563,130 @@ struct ATLInterpreterTests {
 
         return context
     }
+
+    // MARK: - Context Helper Tests
+
+    @Test("Context helper called as method on object")
+    func testContextHelperAsMethod() async throws {
+        // Given - a context helper that checks if a value is positive
+        let isPositiveHelper = ATLHelperWrapper(
+            name: "isPositive",
+            contextType: "Integer",
+            returnType: "Boolean",
+            parameters: [],
+            body: ATLBinaryExpression(
+                left: ATLVariableExpression(name: "self"),
+                operator: .greaterThan,
+                right: ATLLiteralExpression(value: 0)
+            )
+        )
+
+        let module = ATLModule(
+            name: "TestContextHelper",
+            sourceMetamodels: ["IN": EPackage(name: "Source", nsURI: "http://test.source")],
+            targetMetamodels: ["OUT": EPackage(name: "Target", nsURI: "http://test.target")],
+            helpers: ["isPositive": isPositiveHelper]
+        )
+
+        let sourceResource = Resource(uri: "test://source.model")
+        let targetResource = Resource(uri: "test://target.model")
+        let sources: OrderedDictionary<String, Resource> = ["IN": sourceResource]
+        let targets: OrderedDictionary<String, Resource> = ["OUT": targetResource]
+
+        let executionEngine = ECoreExecutionEngine(models: [:])
+        let context = ATLExecutionContext(
+            module: module,
+            sources: sources,
+            targets: targets,
+            executionEngine: executionEngine
+        )
+
+        // When - calling the helper as a method on a positive integer
+        let methodCall = ATLMethodCallExpression(
+            receiver: ATLLiteralExpression(value: 5),
+            methodName: "isPositive",
+            arguments: []
+        )
+
+        let result = try await methodCall.evaluate(in: context)
+
+        // Then - should return true
+        #expect(result as? Bool == true, "isPositive() should return true for positive number")
+
+        // When - calling on a negative integer
+        let negativeCall = ATLMethodCallExpression(
+            receiver: ATLLiteralExpression(value: -3),
+            methodName: "isPositive",
+            arguments: []
+        )
+
+        let negativeResult = try await negativeCall.evaluate(in: context)
+
+        // Then - should return false
+        #expect(negativeResult as? Bool == false, "isPositive() should return false for negative number")
+    }
+
+    @Test("Context helper with complex logic")
+    func testContextHelperComplexLogic() async throws {
+        // Given - a context helper that checks if a number is even using self
+        let isEvenHelper = ATLHelperWrapper(
+            name: "checkEven",
+            contextType: "Integer",
+            returnType: "Boolean",
+            parameters: [],
+            body: ATLBinaryExpression(
+                left: ATLBinaryExpression(
+                    left: ATLVariableExpression(name: "self"),
+                    operator: .modulo,
+                    right: ATLLiteralExpression(value: 2)
+                ),
+                operator: .equals,
+                right: ATLLiteralExpression(value: 0)
+            )
+        )
+
+        let module = ATLModule(
+            name: "TestComplexHelper",
+            sourceMetamodels: ["IN": EPackage(name: "Source", nsURI: "http://test.source")],
+            targetMetamodels: ["OUT": EPackage(name: "Target", nsURI: "http://test.target")],
+            helpers: ["checkEven": isEvenHelper]
+        )
+
+        let sourceResource = Resource(uri: "test://source.model")
+        let targetResource = Resource(uri: "test://target.model")
+        let sources: OrderedDictionary<String, Resource> = ["IN": sourceResource]
+        let targets: OrderedDictionary<String, Resource> = ["OUT": targetResource]
+
+        let executionEngine = ECoreExecutionEngine(models: [:])
+        let context = ATLExecutionContext(
+            module: module,
+            sources: sources,
+            targets: targets,
+            executionEngine: executionEngine
+        )
+
+        // When - calling on an even number
+        let evenCall = ATLMethodCallExpression(
+            receiver: ATLLiteralExpression(value: 4),
+            methodName: "checkEven",
+            arguments: []
+        )
+
+        let evenResult = try await evenCall.evaluate(in: context)
+
+        // Then
+        #expect(evenResult as? Bool == true, "checkEven() should return true for even number")
+
+        // When - calling on an odd number
+        let oddCall = ATLMethodCallExpression(
+            receiver: ATLLiteralExpression(value: 7),
+            methodName: "checkEven",
+            arguments: []
+        )
+
+        let oddResult = try await oddCall.evaluate(in: context)
+
+        // Then
+        #expect(oddResult as? Bool == false, "checkEven() should return false for odd number")
+    }
 }

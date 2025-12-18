@@ -8,6 +8,7 @@
 //  ATL-specific resource for managing ATL modules with XMI serialization.
 //
 import ECore
+import EMFBase
 import Foundation
 
 /// A resource for managing ATL modules with XMI serialization support.

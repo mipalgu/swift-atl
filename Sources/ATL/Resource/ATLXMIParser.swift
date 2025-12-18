@@ -8,6 +8,7 @@
 //  Parses Eclipse ATL XMI format back to ATL modules.
 //
 import ECore
+import EMFBase
 import Foundation
 import OrderedCollections
 

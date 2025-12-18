@@ -6,6 +6,7 @@
 //  Copyright © 2025 Rene Hexel. All rights reserved.
 //
 import ECore
+import EMFBase
 import Foundation
 
 // MARK: - ATL Matched Rule

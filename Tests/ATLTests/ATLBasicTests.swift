@@ -10,6 +10,7 @@ import Testing
 
 @testable import ATL
 @testable import ECore
+@testable import EMFBase
 
 /// Basic test suite for ATL components without async operations.
 ///
