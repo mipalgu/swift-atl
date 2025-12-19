@@ -54,9 +54,12 @@ public enum ATLParseError: Error, Sendable {
 /// - Note: This is a simplified parser focused on supporting the Swift ATL implementation.
 ///   It may not support all advanced ATL features found in Eclipse ATL.
 public actor ATLParser {
+    private let debug: Bool
 
     /// Public initializer for ATLParser
-    public init() {}
+    public init(enableDebugging: Bool = false) {
+        debug = enableDebugging
+    }
 
     /// Parse an ATL file and return an ATL module
     /// - Parameter url: The URL of the ATL file to parse
@@ -201,8 +204,15 @@ public actor ATLParser {
             do {
                 // Use EPackage initializer to load the .ecore file
                 let package = try await EPackage(url: resolved)
+                if debug {
+                    print("[ATL] Loaded metamodel '\(metamodelName)' from: \(resolved.path)")
+                    print("[ATL]   Package name: '\(package.name)', nsURI: '\(package.nsURI)', nsPrefix: '\(package.nsPrefix)'")
+                }
                 return package
             } catch {
+                if debug {
+                    print("[ATL] Failed to load metamodel from: \(resolved.path) - \(error)")
+                }
                 // Try next candidate if this one fails to parse
                 continue
             }
