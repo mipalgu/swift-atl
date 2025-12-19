@@ -81,6 +81,9 @@ public final class ATLExecutionContext: Sendable {
     /// Optional command stack for undo/redo support.
     private let commandStack: CommandStack?
 
+    /// Debug mode flag for systematic tracing.
+    public var debug: Bool = false
+
     // MARK: - Initialisation
 
     /// Creates a new ATL execution context.

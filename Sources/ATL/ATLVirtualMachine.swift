@@ -72,22 +72,39 @@ public final class ATLVirtualMachine {
     /// and rule invocation patterns for debugging and optimisation.
     public private(set) var statistics: ATLExecutionStatistics
 
+    /// Debug mode flag for systematic tracing.
+    private var debug: Bool = false
+
     // MARK: - Initialisation
 
     /// Creates a new ATL virtual machine for the specified module.
     ///
     /// - Parameter module: The ATL module to execute
-    public init(module: ATLModule) {
+    public init(module: ATLModule, enableDebugging: Bool = false) {
         self.module = module
 
         // Create execution engine with empty models initially
         let executionEngine = ECoreExecutionEngine(models: [:])
 
-        self.executionContext = ATLExecutionContext(
+        executionContext = ATLExecutionContext(
             module: module,
             executionEngine: executionEngine
         )
-        self.statistics = ATLExecutionStatistics()
+        statistics = ATLExecutionStatistics()
+        debug = enableDebugging
+    }
+
+    // MARK: - Debug Configuration
+
+    /// Enable or disable debug output for systematic tracing.
+    ///
+    /// When enabled, the virtual machine prints detailed trace information
+    /// for rule execution, helper evaluation, and transformation progress.
+    ///
+    /// - Parameter enabled: Whether to enable debug output
+    public func enableDebug(_ enabled: Bool = true) {
+        debug = enabled
+        executionContext.debug = enabled
     }
 
     // MARK: - Transformation Execution
@@ -107,6 +124,12 @@ public final class ATLVirtualMachine {
         sources: OrderedDictionary<String, Resource>,
         targets: OrderedDictionary<String, Resource>
     ) async throws {
+        if debug {
+            print("[ATL] Executing transformation: \(module.name)")
+            print("[ATL] Source models: \(sources.keys.joined(separator: ", "))")
+            print("[ATL] Target models: \(targets.keys.joined(separator: ", "))")
+        }
+
         statistics.reset()
         let startTime = Date()
 
@@ -132,10 +155,21 @@ public final class ATLVirtualMachine {
             statistics.executionTime = Date().timeIntervalSince(startTime)
             statistics.successful = true
 
+            if debug {
+                print("[ATL] Transformation completed successfully")
+                print("[ATL] Execution time: \(statistics.executionTime)s")
+                print("[ATL] Rules executed: \(statistics.rulesExecuted)")
+            }
+
         } catch {
             statistics.executionTime = Date().timeIntervalSince(startTime)
             statistics.successful = false
             statistics.lastError = error
+
+            if debug {
+                print("[ATL] Transformation failed: \(error)")
+            }
+
             throw error
         }
     }
@@ -159,6 +193,10 @@ public final class ATLVirtualMachine {
     /// - Parameter rule: The matched rule to execute
     /// - Throws: ATL execution errors for rule execution failures
     private func executeMatchedRule(_ rule: ATLMatchedRule) async throws {
+        if debug {
+            print("[ATL] Executing rule: \(rule.name)")
+        }
+
         statistics.rulesExecuted += 1
 
         // Parse source pattern to determine element type and namespace
@@ -171,6 +209,10 @@ public final class ATLVirtualMachine {
 
         let metamodelName = String(typeComponents[0])
         let sourceClassName = String(typeComponents[1])
+
+        if debug {
+            print("[ATL]   Source type: \(metamodelName)!\(sourceClassName)")
+        }
 
         // Find the model alias that uses this metamodel
         guard let modelAlias = module.sourceMetamodels.first(where: { $0.value.name == metamodelName })?.key else {
@@ -213,6 +255,10 @@ public final class ATLVirtualMachine {
     private func executeRuleForElement(_ rule: ATLMatchedRule, sourceElement: any EObject)
         async throws
     {
+        if debug {
+            print("[ATL]   Checking rule '\(rule.name)' for element: \(sourceElement.eClass.name)")
+        }
+
         // Create new execution scope for rule
         executionContext.pushScope()
         defer {
@@ -226,9 +272,27 @@ public final class ATLVirtualMachine {
 
         // Evaluate guard condition if present
         if let guardExpression = rule.`guard` {
-            let guardResult = try await guardExpression.evaluate(in: executionContext)
-            guard let guardBool = guardResult as? Bool, guardBool else {
-                return  // Guard failed, skip rule execution
+            if debug {
+                print("[ATL]     Evaluating guard...")
+            }
+
+            do {
+                let guardResult = try await guardExpression.evaluate(in: executionContext)
+                guard let guardBool = guardResult as? Bool, guardBool else {
+                    if debug {
+                        print("[ATL]     Guard failed - skipping element")
+                    }
+                    return  // Guard failed, skip rule execution
+                }
+
+                if debug {
+                    print("[ATL]     Guard passed")
+                }
+            } catch {
+                if debug {
+                    print("[ATL]     Guard evaluation error: \(error)")
+                }
+                throw error
             }
         }
 
