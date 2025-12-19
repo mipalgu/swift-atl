@@ -689,4 +689,59 @@ struct ATLInterpreterTests {
         // Then
         #expect(oddResult as? Bool == false, "checkEven() should return false for odd number")
     }
+
+    // MARK: - OCL Standard Library Tests
+
+    @Test("oclIsUndefined method with nil value")
+    func testOclIsUndefinedWithNil() async throws {
+        // Given
+        let context = await createTestContext()
+        context.setVariable("nullValue", value: nil)
+
+        let oclIsUndefinedCall = ATLMethodCallExpression(
+            receiver: ATLVariableExpression(name: "nullValue"),
+            methodName: "oclIsUndefined"
+        )
+
+        // When
+        let result = try await oclIsUndefinedCall.evaluate(in: context)
+
+        // Then
+        #expect(result as? Bool == true, "oclIsUndefined() should return true for nil value")
+    }
+
+    @Test("oclIsUndefined method with non-nil value")
+    func testOclIsUndefinedWithValue() async throws {
+        // Given
+        let context = await createTestContext()
+        context.setVariable("definedValue", value: "Hello")
+
+        let oclIsUndefinedCall = ATLMethodCallExpression(
+            receiver: ATLVariableExpression(name: "definedValue"),
+            methodName: "oclIsUndefined"
+        )
+
+        // When
+        let result = try await oclIsUndefinedCall.evaluate(in: context)
+
+        // Then
+        #expect(result as? Bool == false, "oclIsUndefined() should return false for defined value")
+    }
+
+    @Test("oclIsUndefined method with direct nil literal")
+    func testOclIsUndefinedWithDirectNil() async throws {
+        // Given
+        let context = await createTestContext()
+
+        let oclIsUndefinedCall = ATLMethodCallExpression(
+            receiver: ATLLiteralExpression(value: nil),
+            methodName: "oclIsUndefined"
+        )
+
+        // When
+        let result = try await oclIsUndefinedCall.evaluate(in: context)
+
+        // Then
+        #expect(result as? Bool == true, "oclIsUndefined() should return true for nil literal")
+    }
 }

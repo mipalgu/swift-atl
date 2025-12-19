@@ -994,31 +994,17 @@ public struct ATLMethodCallExpression: ATLExpression, Sendable, Equatable, Hasha
         let signature = createMethodSignature(methodName: methodName, arguments: arguments)
 
         switch signature {
-        // Collection query operations
+        // ATL-specific operations that cannot be delegated
         case let sig where sig.starts(with: "allInstances"):
             return try await handleAllInstances(receiver, in: context)
-        case let sig where sig.starts(with: "size"):
-            return try handleSize(receiver)
-        case let sig where sig.starts(with: "isEmpty"):
-            return try handleIsEmpty(receiver)
-        case let sig where sig.starts(with: "includes") && arguments.count == 1:
-            return try handleIncludes(receiver, arguments[0])
-        case let sig where sig.starts(with: "excludes") && arguments.count == 1:
-            return try handleExcludes(receiver, arguments[0])
-        case let sig where sig.starts(with: "first"):
-            return try handleFirst(receiver)
-        case let sig where sig.starts(with: "last"):
-            return try handleLast(receiver)
 
-        // Collection filtering operations
+        // Complex collection operations requiring ATL context
         case let sig where sig.starts(with: "select") && arguments.count == 1:
             return try await handleSelect(receiver, arguments[0], context)
         case let sig where sig.starts(with: "reject") && arguments.count == 1:
             return try await handleReject(receiver, arguments[0], context)
         case let sig where sig.starts(with: "collect") && arguments.count == 1:
             return try await handleCollect(receiver, arguments[0], context)
-
-        // Collection aggregate operations
         case let sig where sig.starts(with: "exists") && arguments.count == 1:
             return try await handleExists(receiver, arguments[0], context)
         case let sig where sig.starts(with: "forAll") && arguments.count == 1:
@@ -1027,48 +1013,44 @@ public struct ATLMethodCallExpression: ATLExpression, Sendable, Equatable, Hasha
             return try await handleOne(receiver, arguments[0], context)
         case let sig where sig.starts(with: "iterate") && arguments.count == 2:
             return try await handleIterate(receiver, arguments[0], arguments[1], context)
-
-        // Collection type conversion
-        case let sig where sig.starts(with: "asSequence"):
-            return try handleAsSequence(receiver)
-        case let sig where sig.starts(with: "asSet"):
-            return try handleAsSet(receiver)
-        case let sig where sig.starts(with: "asBag"):
-            return try handleAsBag(receiver)
-        case let sig where sig.starts(with: "asOrderedSet"):
-            return try handleAsOrderedSet(receiver)
-
-        // Collection manipulation
-        case let sig where sig.starts(with: "union") && arguments.count == 1:
-            return try handleUnion(receiver, arguments[0])
-        case let sig where sig.starts(with: "intersection") && arguments.count == 1:
-            return try handleIntersection(receiver, arguments[0])
-        case let sig where sig.starts(with: "flatten"):
-            return try handleFlatten(receiver)
         case let sig where sig.starts(with: "sortedBy") && arguments.count == 1:
             return try await handleSortedBy(receiver, arguments[0], context)
 
-        // Arithmetic operations
-        case let sig where sig.starts(with: "mod") && arguments.count == 1:
-            return try handleMod(receiver, arguments[0])
-        case let sig where sig.starts(with: "power") && arguments.count == 1:
-            return try handlePower(receiver, arguments[0])
+        // ATL-specific operations not in OCL standard library
         case let sig where sig.starts(with: "isEven"):
             return try handleIsEven(receiver)
         case let sig where sig.starts(with: "square"):
             return try handleSquare(receiver)
-
-        // String operations
         case let sig where sig.starts(with: "toString"):
             return try handleToString(receiver)
-        case let sig where sig.starts(with: "toUpperCase"):
-            return try handleToUpperCase(receiver)
         case let sig where sig.starts(with: "reverse"):
             return try handleReverse(receiver)
 
         default:
-            // Try to call as a context helper before failing
-            // Context helpers are called as methods on objects: receiver.helperName(args)
+            // First try to delegate to ECoreExecutionEngine for standard OCL methods
+            do {
+                // Build context for ECore evaluation
+                var ecoreContext: [String: any EcoreValue] = [:]
+                ecoreContext["__receiver"] = receiver
+                for (index, argument) in arguments.enumerated() {
+                    ecoreContext["__arg\(index)"] = argument
+                }
+
+                // Create a method call expression that the ECore engine can handle
+                let methodCallExpr = ECoreExpression.methodCall(
+                    receiver: ECoreExpression.variable(name: "__receiver"),
+                    methodName: methodName,
+                    arguments: arguments.enumerated().map { index, _ in
+                        ECoreExpression.variable(name: "__arg\(index)")
+                    }
+                )
+
+                return try await context.executionEngine.evaluate(methodCallExpr, context: ecoreContext)
+            } catch {
+                // If ECoreExecutionEngine doesn't support the method, fall through to helper dispatch
+            }
+
+            // If not an OCL method, try to call as a context helper
             if let receiver = receiver {
                 // Check if this is a context helper
                 if let helper = context.module.helpers[methodName] as? ATLHelperWrapper,
