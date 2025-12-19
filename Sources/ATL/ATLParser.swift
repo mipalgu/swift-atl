@@ -203,7 +203,7 @@ public actor ATLParser {
 
             do {
                 // Use EPackage initializer to load the .ecore file
-                let package = try await EPackage(url: resolved)
+                let package = try await EPackage(url: resolved, enableDebugging: debug)
                 if debug {
                     print("[ATL] Loaded metamodel '\(metamodelName)' from: \(resolved.path)")
                     print("[ATL]   Package name: '\(package.name)', nsURI: '\(package.nsURI)', nsPrefix: '\(package.nsPrefix)'")
