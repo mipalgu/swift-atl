@@ -20,6 +20,7 @@ public enum ATLParseError: Error, Sendable {
     case unsupportedConstruct(String)
     case fileNotFound(String)
     case invalidEncoding
+    case metamodelNotFound(String)
 }
 
 /// Parser for ATL (Atlas Transformation Language) files
@@ -84,7 +85,8 @@ public actor ATLParser {
     public func parseContent(
         _ content: String,
         filename: String = "unknown",
-        searchPaths: [String] = []
+        searchPaths: [String] = [],
+        continueAfterErrors: Bool = true
     ) async throws -> ATLModule {
         let lexer = ATLLexer(content: content)
         let tokens = try lexer.tokenize()
@@ -98,7 +100,8 @@ public actor ATLParser {
             into: module,
             pathDirectives: lexer.pathDirectives,
             relativeTo: baseURL,
-            searchPaths: searchPaths
+            searchPaths: searchPaths,
+            continueAfterErrors: continueAfterErrors
         )
 
         return module
@@ -112,12 +115,7 @@ public actor ATLParser {
     ///   - baseURL: The URL of the ATL file (for resolving relative paths)
     ///   - searchPaths: Array of directory paths to search for metamodel files
     /// - Returns: The module with real loaded metamodels
-    private func loadMetamodels(
-        into module: ATLModule,
-        pathDirectives: [String: String],
-        relativeTo baseURL: URL,
-        searchPaths: [String]
-    ) async throws -> ATLModule {
+    private func loadMetamodels(into module: ATLModule, pathDirectives: [String: String], relativeTo baseURL: URL, searchPaths: [String], continueAfterErrors: Bool = true) async throws -> ATLModule {
         if debug {
             print("[ATL] loadMetamodels: Starting metamodel loading")
             print("[ATL]   Path directives: \(pathDirectives)")
@@ -152,13 +150,25 @@ public actor ATLParser {
                 ) {
                     sourceMetamodels[alias] = loadedPackage
                 } else {
-                    if debug {
-                        print("[ATL] Warning: Failed to load source metamodel '\(metamodel.name)' from '\(filePath)'")
+                    let errorMsg = "Failed to load source metamodel '\(metamodel.name)' from '\(filePath)'. Check that the file exists and the metamodel path is correct."
+                    if continueAfterErrors {
+                        if debug {
+                            print("[ATL] Warning: \(errorMsg), using fallback")
+                        }
+                        // Keep the original metamodel as fallback for tests and synthetic scenarios
+                    } else {
+                        throw ATLParseError.metamodelNotFound(errorMsg)
                     }
                 }
             } else {
-                if debug {
-                    print("[ATL] Warning: No path directive found for source metamodel '\(metamodel.name)'")
+                let errorMsg = "No @path directive found for source metamodel '\(metamodel.name)'. Add a @path directive like: -- @path \(metamodel.name)=/path/to/\(metamodel.name).ecore"
+                if continueAfterErrors {
+                    if debug {
+                        print("[ATL] Warning: \(errorMsg), using fallback")
+                    }
+                    // Keep the original metamodel as fallback for tests and synthetic scenarios
+                } else {
+                    throw ATLParseError.metamodelNotFound(errorMsg)
                 }
             }
         }
@@ -182,13 +192,50 @@ public actor ATLParser {
                 ) {
                     targetMetamodels[alias] = loadedPackage
                 } else {
-                    if debug {
-                        print("[ATL] Warning: Failed to load target metamodel '\(metamodel.name)' from '\(filePath)'")
+                    let errorMsg = "Failed to load target metamodel '\(metamodel.name)' from '\(filePath)'. Check that the file exists and the metamodel path is correct."
+                    if continueAfterErrors {
+                        if debug {
+                            print("[ATL] Warning: \(errorMsg), using fallback")
+                        }
+                        // Keep the original metamodel as fallback for tests and synthetic scenarios
+                    } else {
+                        throw ATLParseError.metamodelNotFound(errorMsg)
                     }
                 }
             } else {
-                if debug {
-                    print("[ATL] Warning: No path directive found for target metamodel '\(metamodel.name)'")
+                let errorMsg = "No @path directive found for target metamodel '\(metamodel.name)'. Add a @path directive like: -- @path \(metamodel.name)=/path/to/\(metamodel.name).ecore"
+                if continueAfterErrors {
+                    if debug {
+                        print("[ATL] Warning: \(errorMsg), using fallback")
+                    }
+                    // Keep the original metamodel as fallback for tests and synthetic scenarios
+                } else {
+                    throw ATLParseError.metamodelNotFound(errorMsg)
+                }
+            }
+        }
+
+        // Validate loaded metamodels and provide warnings for fallback instances
+        if debug {
+            print("[ATL] Metamodel loading summary:")
+            for (alias, metamodel) in sourceMetamodels {
+                if metamodel.nsURI.isEmpty || metamodel.nsURI == "http://\(metamodel.name.lowercased())" || metamodel.eClassifiers.isEmpty {
+                    print("[ATL] WARNING: Source metamodel '\(alias)' (\(metamodel.name)) appears to be a fallback instance")
+                    print("[ATL]   nsURI: '\(metamodel.nsURI)' (expected: actual metamodel URI)")
+                    print("[ATL]   Classifiers: \(metamodel.eClassifiers.count) (expected: > 0)")
+                    print("[ATL]   This may cause transformation failures. Check @path directive and file existence.")
+                } else {
+                    print("[ATL] ✓ Source metamodel '\(alias)' (\(metamodel.name)) loaded successfully")
+                }
+            }
+            for (alias, metamodel) in targetMetamodels {
+                if metamodel.nsURI.isEmpty || metamodel.nsURI == "http://\(metamodel.name.lowercased())" || metamodel.eClassifiers.isEmpty {
+                    print("[ATL] WARNING: Target metamodel '\(alias)' (\(metamodel.name)) appears to be a fallback instance")
+                    print("[ATL]   nsURI: '\(metamodel.nsURI)' (expected: actual metamodel URI)")
+                    print("[ATL]   Classifiers: \(metamodel.eClassifiers.count) (expected: > 0)")
+                    print("[ATL]   This may cause transformation failures. Check @path directive and file existence.")
+                } else {
+                    print("[ATL] ✓ Target metamodel '\(alias)' (\(metamodel.name)) loaded successfully")
                 }
             }
         }
