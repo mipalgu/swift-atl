@@ -118,34 +118,78 @@ public actor ATLParser {
         relativeTo baseURL: URL,
         searchPaths: [String]
     ) async throws -> ATLModule {
+        if debug {
+            print("[ATL] loadMetamodels: Starting metamodel loading")
+            print("[ATL]   Path directives: \(pathDirectives)")
+            print("[ATL]   Base URL: \(baseURL)")
+            print("[ATL]   Search paths: \(searchPaths)")
+        }
+
         var sourceMetamodels = module.sourceMetamodels
         var targetMetamodels = module.targetMetamodels
 
+        if debug {
+            print("[ATL]   Source metamodels to load: \(sourceMetamodels.keys.joined(separator: ", "))")
+            print("[ATL]   Target metamodels to load: \(targetMetamodels.keys.joined(separator: ", "))")
+        }
+
         // Load source metamodels
         for (alias, metamodel) in sourceMetamodels {
-            if let filePath = pathDirectives[metamodel.name],
-               let loadedPackage = try await loadMetamodel(
-                   name: metamodel.name,
-                   from: filePath,
-                   relativeTo: baseURL,
-                   searchPaths: searchPaths
-               )
-            {
-                sourceMetamodels[alias] = loadedPackage
+            if debug {
+                print("[ATL] Processing source metamodel '\(alias)' -> '\(metamodel.name)'")
+            }
+
+            if let filePath = pathDirectives[metamodel.name] {
+                if debug {
+                    print("[ATL]   Found path directive: '\(metamodel.name)' -> '\(filePath)'")
+                }
+
+                if let loadedPackage = try await loadMetamodel(
+                    name: metamodel.name,
+                    from: filePath,
+                    relativeTo: baseURL,
+                    searchPaths: searchPaths
+                ) {
+                    sourceMetamodels[alias] = loadedPackage
+                } else {
+                    if debug {
+                        print("[ATL] Warning: Failed to load source metamodel '\(metamodel.name)' from '\(filePath)'")
+                    }
+                }
+            } else {
+                if debug {
+                    print("[ATL] Warning: No path directive found for source metamodel '\(metamodel.name)'")
+                }
             }
         }
 
         // Load target metamodels
         for (alias, metamodel) in targetMetamodels {
-            if let filePath = pathDirectives[metamodel.name],
-               let loadedPackage = try await loadMetamodel(
-                   name: metamodel.name,
-                   from: filePath,
-                   relativeTo: baseURL,
-                   searchPaths: searchPaths
-               )
-            {
-                targetMetamodels[alias] = loadedPackage
+            if debug {
+                print("[ATL] Processing target metamodel '\(alias)' -> '\(metamodel.name)'")
+            }
+
+            if let filePath = pathDirectives[metamodel.name] {
+                if debug {
+                    print("[ATL]   Found path directive: '\(metamodel.name)' -> '\(filePath)'")
+                }
+
+                if let loadedPackage = try await loadMetamodel(
+                    name: metamodel.name,
+                    from: filePath,
+                    relativeTo: baseURL,
+                    searchPaths: searchPaths
+                ) {
+                    targetMetamodels[alias] = loadedPackage
+                } else {
+                    if debug {
+                        print("[ATL] Warning: Failed to load target metamodel '\(metamodel.name)' from '\(filePath)'")
+                    }
+                }
+            } else {
+                if debug {
+                    print("[ATL] Warning: No path directive found for target metamodel '\(metamodel.name)'")
+                }
             }
         }
 
@@ -168,12 +212,13 @@ public actor ATLParser {
     ///   - baseURL: The URL of the ATL file (for resolving relative paths)
     ///   - searchPaths: Array of directory paths to search for metamodel files
     /// - Returns: The loaded EPackage, or nil if loading fails
-    private func loadMetamodel(
-        name metamodelName: String,
-        from filePath: String,
-        relativeTo baseURL: URL,
-        searchPaths: [String]
-    ) async throws -> EPackage? {
+    private func loadMetamodel(name metamodelName: String, from filePath: String, relativeTo baseURL: URL, searchPaths: [String]) async throws -> EPackage? {
+        if debug {
+            print("[ATL] loadMetamodel: Loading '\(metamodelName)' from '\(filePath)'")
+            print("[ATL]   Base URL: \(baseURL)")
+            print("[ATL]   Search paths: \(searchPaths)")
+        }
+
         var candidateURLs: [URL] = []
 
         if filePath.hasPrefix("/") {
@@ -186,19 +231,41 @@ public actor ATLParser {
                 let candidate = URL(fileURLWithPath: searchPath)
                     .appendingPathComponent(relativePath)
                 candidateURLs.append(candidate)
+                if debug {
+                    print("[ATL]     Workspace-relative candidate: \(candidate.path)")
+                }
             }
         } else {
             // Regular relative path - resolve relative to ATL file
             let base = baseURL.deletingLastPathComponent()
-            candidateURLs.append(base.appendingPathComponent(filePath))
+            let candidate = base.appendingPathComponent(filePath)
+            candidateURLs.append(candidate)
+            if debug {
+                print("[ATL]     Relative candidate: \(candidate.path)")
+            }
         }
 
         // Try each candidate URL
+        if debug {
+            print("[ATL]   Trying \(candidateURLs.count) candidate URL(s)")
+        }
+
         for candidateURL in candidateURLs {
             let resolved = candidateURL.standardizedFileURL
 
+            if debug {
+                print("[ATL]     Checking: \(resolved.path)")
+            }
+
             guard FileManager.default.fileExists(atPath: resolved.path) else {
+                if debug {
+                    print("[ATL]       File not found")
+                }
                 continue
+            }
+
+            if debug {
+                print("[ATL]       File exists, attempting to load")
             }
 
             do {
@@ -230,6 +297,9 @@ public actor ATLParser {
         }
 
         // None of the candidates worked
+        if debug {
+            print("[ATL] loadMetamodel: No valid candidates found for '\(metamodelName)'")
+        }
         return nil
     }
 }
