@@ -206,8 +206,19 @@ public actor ATLParser {
                 let package = try await EPackage(url: resolved, enableDebugging: debug)
                 if debug {
                     print("[ATL] Loaded metamodel '\(metamodelName)' from: \(resolved.path)")
-                    print("[ATL]   Package name: '\(package.name)', nsURI: '\(package.nsURI)', nsPrefix: '\(package.nsPrefix)'")
+                    print("[ATL]   Package name: '\(package.name)', nsURI: '\(package.nsURI)', nsPrefix: '\(package.nsPrefix)')")
+                    print("[ATL]   Package has \(package.eClassifiers.count) classifiers")
                 }
+
+                // Validate that the package was loaded correctly
+                if debug && ( package.nsURI.isEmpty || package.nsURI == "http://\(package.name.lowercased())" ) {
+                    print("[ATL] Warning: Package nsURI appears to be fallback value, may indicate parsing failure")
+                }
+
+                if debug && package.eClassifiers.isEmpty {
+                    print("[ATL] Warning: Package has no classifiers, may indicate parsing failure")
+                }
+
                 return package
             } catch {
                 if debug {
