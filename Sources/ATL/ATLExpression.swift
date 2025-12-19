@@ -990,6 +990,13 @@ public struct ATLMethodCallExpression: ATLExpression, Sendable, Equatable, Hasha
         context: ATLExecutionContext
     ) async throws -> (any EcoreValue)? {
 
+        // Debug: Track method dispatch
+        if context.debug {
+            let receiverType = receiver.map { "\(type(of: $0))" } ?? "nil"
+            print("[ATL DEBUG] Dispatching method '\(methodName)' on receiver: \(receiverType)")
+            print("[ATL DEBUG] Arguments count: \(arguments.count)")
+        }
+
         // Method signature: methodName + argument count + argument types
         let signature = createMethodSignature(methodName: methodName, arguments: arguments)
 
@@ -1053,13 +1060,18 @@ public struct ATLMethodCallExpression: ATLExpression, Sendable, Equatable, Hasha
             // If not an OCL method, try to call as a context helper
             if let receiver = receiver {
                 // Check if this is a context helper
+                // Check if it's a helper function
                 if let helper = context.module.helpers[methodName] as? ATLHelperWrapper,
                    helper.contextType != nil {
 
                     // Context helper - bind receiver as 'self' and evaluate directly
+                    if context.debug {
+                        print("[ATL DEBUG] Using contextual helper path for '\(methodName)'")
+                    }
                     context.pushScope()
                     defer { context.popScope() }
 
+                    // Bind receiver as 'self'
                     context.setVariable("self", value: receiver)
 
                     // Bind parameters
@@ -1071,6 +1083,9 @@ public struct ATLMethodCallExpression: ATLExpression, Sendable, Equatable, Hasha
                     return try await helper.bodyExpression.evaluate(in: context)
                 } else {
                     // Try regular helper call with receiver bound as 'self'
+                    if context.debug {
+                        print("[ATL DEBUG] Using regular helper call path for '\(methodName)'")
+                    }
                     context.setVariable("self", value: receiver)
                     defer { context.setVariable("self", value: nil) }
 

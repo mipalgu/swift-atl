@@ -623,7 +623,9 @@ struct ATLInterpreterTests {
         let negativeResult = try await negativeCall.evaluate(in: context)
 
         // Then - should return false
-        #expect(negativeResult as? Bool == false, "isPositive() should return false for negative number")
+        #expect(
+            negativeResult as? Bool == false, "isPositive() should return false for negative number"
+        )
     }
 
     @Test("Context helper with complex logic")
@@ -743,5 +745,280 @@ struct ATLInterpreterTests {
 
         // Then
         #expect(result as? Bool == true, "oclIsUndefined() should return true for nil literal")
+    }
+
+    @Test("Variable scoping in rule guards with helper calls")
+    func testVariableScopingInRuleGuardsWithHelperCalls() async throws {
+        // Create Member EClass with familyMother reference (similar to real Families metamodel)
+        var memberClass = EClass(name: "Member")
+        let familyMotherRef = EReference(
+            name: "familyMother",
+            eType: EClass(name: "Family"),
+            lowerBound: 0,
+            upperBound: 1
+        )
+        memberClass.eStructuralFeatures.append(familyMotherRef)
+
+        // Create a Member instance without familyMother (nil)
+        let memberInstance = DynamicEObject(eClass: memberClass)
+
+        // Create an isFemale helper that references the source pattern variable 's'
+        // This simulates the real Families2Persons transformation
+        let isFemaleHelper = ATLHelperWrapper(
+            name: "isFemale",
+            contextType: "Families!Member",
+            returnType: "Boolean",
+            parameters: [],
+            body: ATLMethodCallExpression(
+                receiver: ATLNavigationExpression(
+                    source: ATLVariableExpression(name: "self"),
+                    property: "familyMother"
+                ),
+                methodName: "oclIsUndefined"
+            )
+        )
+
+        // Create a guard that calls the helper method on variable 's'
+        let guardExpression = ATLUnaryExpression(
+            operator: .not,
+            operand: ATLMethodCallExpression(
+                receiver: ATLVariableExpression(name: "s"),
+                methodName: "isFemale"
+            )
+        )
+
+        let sourcePattern = ATLSourcePattern(
+            variableName: "s",
+            type: "Families!Member",
+            guard: guardExpression
+        )
+
+        // Create a matched rule with the guard that references 's'
+        let targetPattern = ATLTargetPattern(variableName: "t", type: "Persons!Male")
+        let rule = ATLMatchedRule(
+            name: "Member2Male",
+            sourcePattern: sourcePattern,
+            targetPatterns: [targetPattern],
+            guard: sourcePattern.guard
+        )
+
+        // Create metamodels with proper classes
+        var familiesPackage = EPackage(name: "Families", nsURI: "http://test.families")
+        familiesPackage.eClassifiers.append(memberClass)
+
+        var personsPackage = EPackage(name: "Persons", nsURI: "http://test.persons")
+        let maleClass = EClass(name: "Male")
+        personsPackage.eClassifiers.append(maleClass)
+
+        // Create virtual machine with helper and rule
+        let module = ATLModule(
+            name: "TestVariableScopingWithHelpers",
+            sourceMetamodels: ["IN": familiesPackage],
+            targetMetamodels: ["OUT": personsPackage],
+            helpers: ["isFemale": isFemaleHelper],
+            matchedRules: [rule]
+        )
+        let vm = ATLVirtualMachine(module: module, enableDebugging: true)
+        await vm.enableDebugging()
+
+        // Create dummy source and target resources for execution
+        let sourceResource = Resource(uri: "test://source")
+        await sourceResource.add(memberInstance)
+        let targetResource = Resource(uri: "test://target")
+
+        // Variable scoping should now work correctly with helper calls
+        do {
+            try await vm.execute(
+                sources: ["IN": sourceResource],
+                targets: ["OUT": targetResource]
+            )
+            // Success expected - variable scoping is working correctly
+        } catch {
+            Issue.record("Unexpected error: \(error)")
+        }
+    }
+
+    @Test("Multiple rules with same variable name")
+    func testMultipleRulesWithSameVariableName() async throws {
+        // Create Member class with familyMother reference for helper
+        var memberClass = EClass(name: "Member")
+        let familyClass = EClass(name: "Family")
+        let familyMotherRef = EReference(
+            name: "familyMother", eType: familyClass, lowerBound: 0, upperBound: 1)
+        memberClass.eStructuralFeatures.append(familyMotherRef)
+
+        let familyDaughterRef = EReference(
+            name: "familyDaughter", eType: familyClass, lowerBound: 0, upperBound: 1)
+        memberClass.eStructuralFeatures.append(familyDaughterRef)
+
+        // Create helper: isFemale()
+        let isFemaleHelper = ATLHelperWrapper(
+            name: "isFemale",
+            contextType: "Families!Member",
+            returnType: "Boolean",
+            parameters: [],
+            body: ATLBinaryExpression(
+                left: ATLUnaryExpression(
+                    operator: .not,
+                    operand: ATLMethodCallExpression(
+                        receiver: ATLNavigationExpression(
+                            source: ATLVariableExpression(name: "self"),
+                            property: "familyMother"
+                        ),
+                        methodName: "oclIsUndefined"
+                    )
+                ),
+                operator: .or,
+                right: ATLUnaryExpression(
+                    operator: .not,
+                    operand: ATLMethodCallExpression(
+                        receiver: ATLNavigationExpression(
+                            source: ATLVariableExpression(name: "self"),
+                            property: "familyDaughter"
+                        ),
+                        methodName: "oclIsUndefined"
+                    )
+                )
+            )
+        )
+
+        // Create first rule: Member2Male with guard (not s.isFemale())
+        let maleGuardExpression = ATLUnaryExpression(
+            operator: .not,
+            operand: ATLMethodCallExpression(
+                receiver: ATLVariableExpression(name: "s"),
+                methodName: "isFemale"
+            )
+        )
+        let maleSourcePattern = ATLSourcePattern(
+            variableName: "s",
+            type: "Families!Member",
+            guard: maleGuardExpression
+        )
+        let maleTargetPattern = ATLTargetPattern(
+            variableName: "t",
+            type: "Persons!Male",
+            bindings: [
+                ATLPropertyBinding(
+                    property: "fullName",
+                    expression: ATLBinaryExpression(
+                        left: ATLBinaryExpression(
+                            left: ATLNavigationExpression(
+                                source: ATLVariableExpression(name: "s"),
+                                property: "firstName"
+                            ),
+                            operator: .plus,
+                            right: ATLLiteralExpression(value: " ")
+                        ),
+                        operator: .plus,
+                        right: ATLLiteralExpression(value: "TestName")
+                    )
+                )
+            ]
+        )
+        let maleRule = ATLMatchedRule(
+            name: "Member2Male",
+            sourcePattern: maleSourcePattern,
+            targetPatterns: [maleTargetPattern],
+            guard: maleGuardExpression
+        )
+
+        // Create second rule: Member2Female with guard s.isFemale()
+        let femaleGuardExpression = ATLMethodCallExpression(
+            receiver: ATLVariableExpression(name: "s"),
+            methodName: "isFemale"
+        )
+        let femaleSourcePattern = ATLSourcePattern(
+            variableName: "s",
+            type: "Families!Member",
+            guard: femaleGuardExpression
+        )
+        let femaleTargetPattern = ATLTargetPattern(
+            variableName: "t",
+            type: "Persons!Female",
+            bindings: [
+                ATLPropertyBinding(
+                    property: "fullName",
+                    expression: ATLBinaryExpression(
+                        left: ATLBinaryExpression(
+                            left: ATLNavigationExpression(
+                                source: ATLVariableExpression(name: "s"),
+                                property: "firstName"
+                            ),
+                            operator: .plus,
+                            right: ATLLiteralExpression(value: " ")
+                        ),
+                        operator: .plus,
+                        right: ATLLiteralExpression(value: "TestName")
+                    )
+                )
+            ]
+        )
+        let femaleRule = ATLMatchedRule(
+            name: "Member2Female",
+            sourcePattern: femaleSourcePattern,
+            targetPatterns: [femaleTargetPattern],
+            guard: femaleGuardExpression
+        )
+
+        // Add firstName attribute to Member
+        let firstNameAttr = EAttribute(name: "firstName", eType: EDataType(name: "EString"))
+        memberClass.eStructuralFeatures.append(firstNameAttr)
+
+        // Create metamodels
+        var familiesPackage = EPackage(name: "Families", nsURI: "http://test.families")
+        familiesPackage.eClassifiers.append(memberClass)
+        familiesPackage.eClassifiers.append(familyClass)
+
+        var personsPackage = EPackage(name: "Persons", nsURI: "http://test.persons")
+        var maleClass = EClass(name: "Male")
+        var femaleClass = EClass(name: "Female")
+        // Add fullName attribute to target classes
+        let fullNameAttr = EAttribute(name: "fullName", eType: EDataType(name: "EString"))
+        maleClass.eStructuralFeatures.append(fullNameAttr)
+        femaleClass.eStructuralFeatures.append(fullNameAttr)
+        personsPackage.eClassifiers.append(maleClass)
+        personsPackage.eClassifiers.append(femaleClass)
+
+        // Create test data - two members (property values will be set via storage for testing)
+        let maleInstance = DynamicEObject(eClass: memberClass)
+        let femaleInstance = DynamicEObject(eClass: memberClass)
+        // Leave family references as nil to simulate different isFemale() results
+
+        // Create virtual machine with helper and both rules
+        let module = ATLModule(
+            name: "TestMultipleRulesWithSameVariable",
+            sourceMetamodels: ["IN": familiesPackage],
+            targetMetamodels: ["OUT": personsPackage],
+            helpers: ["isFemale": isFemaleHelper],
+            matchedRules: [maleRule, femaleRule]
+        )
+        let vm = ATLVirtualMachine(module: module, enableDebugging: true)
+        await vm.enableDebugging()
+
+        // Create resources
+        let sourceResource = Resource(uri: "test://source")
+        await sourceResource.add(maleInstance)
+        await sourceResource.add(femaleInstance)
+        let targetResource = Resource(uri: "test://target")
+
+        // This should reproduce the "Variable 's' not found" error
+        // when property bindings evaluate helper calls that lose variable scope
+        do {
+            try await vm.execute(
+                sources: ["IN": sourceResource],
+                targets: ["OUT": targetResource]
+            )
+            print("Transformation completed successfully with multiple rules")
+        } catch let error as ATLExecutionError {
+            switch error {
+            case .variableNotFound(let name):
+                Issue.record("Variable '\(name)' not found - this reproduces the bug!")
+            default:
+                Issue.record("Unexpected ATL error: \(error)")
+            }
+        } catch {
+            Issue.record("Unexpected error: \(error)")
+        }
     }
 }

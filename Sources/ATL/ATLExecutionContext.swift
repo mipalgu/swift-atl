@@ -197,6 +197,8 @@ public final class ATLExecutionContext: Sendable {
 
     /// Navigate a property from a source object using the execution engine.
     ///
+    /// Navigate to a property on an object.
+    ///
     /// - Parameters:
     ///   - object: Source object
     ///   - property: Property name
@@ -210,7 +212,40 @@ public final class ATLExecutionContext: Sendable {
             throw ATLExecutionError.typeError("Source is not an EObject of type: \(objectType)")
         }
 
-        return try await executionEngine.navigate(from: eObject, property: property)
+        // First try ECore navigation for actual properties
+        do {
+            return try await executionEngine.navigate(from: eObject, property: property)
+        } catch {
+            // If ECore navigation fails, try contextual helper fallback
+            if let helper = module.helpers[property] as? ATLHelperWrapper,
+                helper.contextType != nil
+            {
+
+                if debug {
+                    print(
+                        "[ATL DEBUG] Property '\(property)' not found, trying contextual helper fallback"
+                    )
+                }
+
+                // Context helper - bind receiver as 'self' and evaluate directly
+                pushScope()
+                defer { popScope() }
+
+                // Bind receiver as 'self'
+                setVariable("self", value: object)
+
+                // Bind parameters (contextual helpers typically have no parameters)
+                for (parameter, _) in zip(helper.parameters, []) {
+                    setVariable(parameter.name, value: nil)
+                }
+
+                // Evaluate the helper body expression
+                return try await helper.bodyExpression.evaluate(in: self)
+            }
+
+            // Neither property nor helper found, rethrow original error
+            throw error
+        }
     }
 
     // MARK: - Helper Management
@@ -227,6 +262,13 @@ public final class ATLExecutionContext: Sendable {
     )? {
         guard let helper = helpers[name] else {
             throw ATLExecutionError.helperNotFound(name)
+        }
+
+        // Debug: Show current variables before pushing scope (if debug enabled)
+        if debug {
+            let currentVars = variables.keys.sorted()
+            print("[ATL DEBUG] Helper '\(name)' called - current variables: \(currentVars)")
+            print("[ATL DEBUG] Scope stack depth: \(scopeStack.count)")
         }
 
         // Push new scope for helper execution
@@ -247,6 +289,9 @@ public final class ATLExecutionContext: Sendable {
 
         let ecoreExpression = helperWrapper.bodyExpression.toECoreExpression()
         let context = try buildECoreContext()
+        if debug {
+            print("[ATL DEBUG] ECore context keys: \(context.keys.sorted())")
+        }
         let result = try await executionEngine.evaluate(ecoreExpression, context: context)
 
         return result
@@ -274,8 +319,13 @@ public final class ATLExecutionContext: Sendable {
         let actualMetamodelName = parsedMetamodel ?? metamodelName
 
         // Find the model alias that uses this metamodel
-        guard let modelAlias = module.targetMetamodels.first(where: { $0.value.name == actualMetamodelName })?.key else {
-            throw ATLExecutionError.invalidOperation("No target model found for metamodel '\(actualMetamodelName)'")
+        guard
+            let modelAlias = module.targetMetamodels.first(where: {
+                $0.value.name == actualMetamodelName
+            })?.key
+        else {
+            throw ATLExecutionError.invalidOperation(
+                "No target model found for metamodel '\(actualMetamodelName)'")
         }
 
         guard let targetResource = targets[modelAlias] else {
@@ -287,7 +337,8 @@ public final class ATLExecutionContext: Sendable {
 
         // Get the target metamodel for this model alias
         guard let targetMetamodel = module.targetMetamodels[modelAlias] else {
-            throw ATLExecutionError.invalidOperation("No target metamodel found for model '\(modelAlias)'")
+            throw ATLExecutionError.invalidOperation(
+                "No target metamodel found for model '\(modelAlias)'")
         }
 
         // Create the element using the factory
