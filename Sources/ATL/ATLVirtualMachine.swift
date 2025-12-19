@@ -102,7 +102,7 @@ public final class ATLVirtualMachine {
     /// for rule execution, helper evaluation, and transformation progress.
     ///
     /// - Parameter enabled: Whether to enable debug output
-    public func enableDebug(_ enabled: Bool = true) async {
+    public func enableDebugging(_ enabled: Bool = true) async {
         debug = enabled
         executionContext.debug = enabled
         await executionContext.executionEngine.enableDebugging(enabled)
