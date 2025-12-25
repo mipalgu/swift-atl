@@ -263,9 +263,7 @@ public final class ATLVirtualMachine {
         // Create new execution scope for rule
         executionContext.pushScope()
         defer {
-            Task {
-                executionContext.popScope()
-            }
+            executionContext.popScope()
         }
 
         // Bind source element to pattern variable
@@ -418,9 +416,7 @@ public final class ATLVirtualMachine {
         // Create new execution scope
         executionContext.pushScope()
         defer {
-            Task {
-                executionContext.popScope()
-            }
+            executionContext.popScope()
         }
 
         // Bind parameters
