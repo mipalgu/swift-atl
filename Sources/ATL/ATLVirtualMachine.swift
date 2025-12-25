@@ -139,10 +139,10 @@ public final class ATLVirtualMachine {
 
         // Configure execution context with models
         for (alias, resource) in sources {
-            executionContext.addSource(alias, resource: resource)
+            await executionContext.addSource(alias, resource: resource)
         }
         for (alias, resource) in targets {
-            executionContext.addTarget(alias, resource: resource)
+            await executionContext.addTarget(alias, resource: resource)
         }
 
         do {
@@ -351,6 +351,10 @@ public final class ATLVirtualMachine {
                 try setElementProperty(
                     targetElement, property: binding.property, value: propertyValue)
             } catch {
+                if debug {
+                    print("[ATL DEBUG] Binding evaluation failed for property '\(binding.property)': \(error)")
+                    print("[ATL DEBUG]   Creating lazy binding for later resolution")
+                }
                 // For forward references, create lazy binding
                 let lazyBinding = ATLLazyBinding(
                     targetElement: targetElement.id,
@@ -377,6 +381,12 @@ public final class ATLVirtualMachine {
         }
 
         guard let feature = eClass.getStructuralFeature(name: property) else {
+            if debug {
+                print("[ATL DEBUG] Failed to find property '\(property)' in class '\(eClass.name)'")
+                print("[ATL DEBUG]   Direct features: \(eClass.eStructuralFeatures.map { $0.name })")
+                print("[ATL DEBUG]   Super types: \(eClass.eSuperTypes.map { $0.name })")
+                print("[ATL DEBUG]   All features: \(eClass.allStructuralFeatures.map { $0.name })")
+            }
             throw ATLExecutionError.invalidOperation(
                 "Property '\(property)' not found in class '\(eClass.name)'"
             )

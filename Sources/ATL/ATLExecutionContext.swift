@@ -121,6 +121,9 @@ public final class ATLExecutionContext: Sendable {
     ///   - name: Variable name
     ///   - value: Variable value
     public func setVariable(_ name: String, value: (any EcoreValue)?) {
+        if debug {
+            print("[SCOPE DEBUG] Setting variable '\(name)' in current scope (depth: \(scopeStack.count))")
+        }
         variables[name] = value
     }
 
@@ -130,31 +133,53 @@ public final class ATLExecutionContext: Sendable {
     /// - Returns: Variable value if found
     /// - Throws: `ATLExecutionError` if variable not found
     public func getVariable(_ name: String) throws -> (any EcoreValue)? {
+        if debug {
+            print("[SCOPE DEBUG] Getting variable '\(name)' (depth: \(scopeStack.count), current vars: \(variables.keys.sorted()), stack vars: \(scopeStack.map { $0.keys.sorted() }))")
+        }
+
         // Check current scope first
         if let value = variables[name] {
+            if debug {
+                print("[SCOPE DEBUG]   Found '\(name)' in current scope")
+            }
             return value
         }
 
         // Check scope stack
-        for scope in scopeStack.reversed() {
+        for (index, scope) in scopeStack.reversed().enumerated() {
             if let value = scope[name] {
+                if debug {
+                    print("[SCOPE DEBUG]   Found '\(name)' in stack at depth \(scopeStack.count - index - 1)")
+                }
                 return value
             }
         }
 
+        if debug {
+            print("[SCOPE DEBUG]   Variable '\(name)' NOT FOUND")
+        }
         throw ATLExecutionError.variableNotFound(name)
     }
 
     /// Push a new variable scope onto the stack.
     public func pushScope() {
+        if debug {
+            print("[SCOPE DEBUG] Pushing scope (current vars: \(variables.keys.sorted())) -> depth will be \(scopeStack.count + 1)")
+        }
         scopeStack.append(variables)
         variables = [:]
     }
 
     /// Pop the current variable scope from the stack.
     public func popScope() {
+        if debug {
+            print("[SCOPE DEBUG] Popping scope (current vars: \(variables.keys.sorted())) depth \(scopeStack.count) -> \(scopeStack.count - 1)")
+        }
         guard !scopeStack.isEmpty else { return }
         variables = scopeStack.removeLast()
+        if debug {
+            print("[SCOPE DEBUG]   Restored vars: \(variables.keys.sorted())")
+        }
     }
 
     // MARK: - Model Management
@@ -164,8 +189,14 @@ public final class ATLExecutionContext: Sendable {
     /// - Parameters:
     ///   - alias: Model alias
     ///   - resource: Model resource
-    public func addSource(_ alias: String, resource: Resource) {
+    public func addSource(_ alias: String, resource: Resource) async {
         sources[alias] = resource
+
+        // Create IModel wrapper and register with execution engine
+        let referenceModel = module.sourceMetamodels[alias]!
+        let ecoreRefModel = EcoreReferenceModel(rootPackage: referenceModel, resource: Resource())
+        let model = EcoreModel(resource: resource, referenceModel: ecoreRefModel, isTarget: false)
+        await executionEngine.registerModel(model, alias: alias)
     }
 
     /// Add a target model to the context.
@@ -173,8 +204,14 @@ public final class ATLExecutionContext: Sendable {
     /// - Parameters:
     ///   - alias: Model alias
     ///   - resource: Model resource
-    public func addTarget(_ alias: String, resource: Resource) {
+    public func addTarget(_ alias: String, resource: Resource) async {
         targets[alias] = resource
+
+        // Create IModel wrapper and register with execution engine
+        let referenceModel = module.targetMetamodels[alias]!
+        let ecoreRefModel = EcoreReferenceModel(rootPackage: referenceModel, resource: Resource())
+        let model = EcoreModel(resource: resource, referenceModel: ecoreRefModel, isTarget: true)
+        await executionEngine.registerModel(model, alias: alias)
     }
 
     /// Get a source model by alias.
