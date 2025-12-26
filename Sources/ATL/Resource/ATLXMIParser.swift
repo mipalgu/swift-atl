@@ -10,6 +10,9 @@
 import ECore
 import EMFBase
 import Foundation
+#if canImport(FoundationXML)
+import FoundationXML
+#endif
 import OrderedCollections
 
 /// Parses Eclipse ATL XMI format into ATL modules.

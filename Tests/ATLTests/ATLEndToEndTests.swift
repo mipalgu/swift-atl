@@ -7,6 +7,9 @@
 //
 
 import Foundation
+#if canImport(CoreFoundation)
+import CoreFoundation
+#endif
 import Testing
 
 @testable import ATL

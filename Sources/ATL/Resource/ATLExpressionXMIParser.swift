@@ -8,6 +8,9 @@
 //  Parses ATL/OCL expressions from Eclipse ATL XMI format.
 //
 import Foundation
+#if canImport(FoundationXML)
+import FoundationXML
+#endif
 
 /// Parses ATL/OCL expressions from Eclipse ATL XMI format.
 ///
