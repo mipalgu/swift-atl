@@ -504,10 +504,23 @@ public final class ATLExecutionContext: Sendable {
         if let modelAlias = modelAlias {
             if let metamodel = module.targetMetamodels[modelAlias] {
                 if let eClass = metamodel.getClassifier(name) as? EClass {
+                    if debug {
+                        // DEBUG: Check eSuperTypes in found EClass
+                        print("[ATL EXECUTION DEBUG] Found EClass '\(eClass.name)' with \(eClass.eSuperTypes.count) eSuperTypes:")
+                        for superType in eClass.eSuperTypes {
+                            print("[ATL EXECUTION DEBUG]   - \(superType.name)")
+                        }
+                    }
                     return eClass
                 }
             } else if let metamodel = module.sourceMetamodels[modelAlias] {
                 if let eClass = metamodel.getClassifier(name) as? EClass {
+                    if debug {
+                        print("[ATL EXECUTION DEBUG] Found EClass '\(eClass.name)' with \(eClass.eSuperTypes.count) eSuperTypes:")
+                        for superType in eClass.eSuperTypes {
+                            print("[ATL EXECUTION DEBUG]   - \(superType.name)")
+                        }
+                    }
                     return eClass
                 }
             }
@@ -517,12 +530,24 @@ public final class ATLExecutionContext: Sendable {
         // Otherwise, search all target metamodels first, then source metamodels
         for metamodel in module.targetMetamodels.values {
             if let eClass = metamodel.getClassifier(name) as? EClass {
+                if debug {
+                    print("[ATL EXECUTION DEBUG] Found EClass '\(eClass.name)' with \(eClass.eSuperTypes.count) eSuperTypes:")
+                    for superType in eClass.eSuperTypes {
+                        print("[ATL EXECUTION DEBUG]   - \(superType.name)")
+                    }
+                }
                 return eClass
             }
         }
 
         for metamodel in module.sourceMetamodels.values {
             if let eClass = metamodel.getClassifier(name) as? EClass {
+                if debug {
+                    print("[ATL EXECUTION DEBUG] Found EClass '\(eClass.name)' with \(eClass.eSuperTypes.count) eSuperTypes:")
+                    for superType in eClass.eSuperTypes {
+                        print("[ATL EXECUTION DEBUG]   - \(superType.name)")
+                    }
+                }
                 return eClass
             }
         }
