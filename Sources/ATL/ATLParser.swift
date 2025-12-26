@@ -335,12 +335,9 @@ public actor ATLParser {
 
                 // DEBUG: Check eSuperTypes in loaded EPackage
                 if debug {
-                    print("[ATL METAMODEL DEBUG] Checking eSuperTypes in loaded EPackage '\(package.name)'")
                     for classifier in package.eClassifiers {
                         if let eClass = classifier as? EClass {
-                            print("[ATL METAMODEL DEBUG]   EClass '\(eClass.name)' has \(eClass.eSuperTypes.count) eSuperTypes:")
                             for superType in eClass.eSuperTypes {
-                                print("[ATL METAMODEL DEBUG]     - \(superType.name)")
                             }
                         }
                     }

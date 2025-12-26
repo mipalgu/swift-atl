@@ -216,8 +216,12 @@ public final class ATLVirtualMachine {
         }
 
         // Find the model alias that uses this metamodel
-        guard let modelAlias = module.sourceMetamodels.first(where: { $0.value.name == metamodelName })?.key else {
-            throw ATLExecutionError.invalidOperation("No source model found for metamodel '\(metamodelName)'")
+        guard
+            let modelAlias = module.sourceMetamodels.first(where: { $0.value.name == metamodelName }
+            )?.key
+        else {
+            throw ATLExecutionError.invalidOperation(
+                "No source model found for metamodel '\(metamodelName)'")
         }
 
         // Get source resource using the model alias
@@ -352,16 +356,17 @@ public final class ATLVirtualMachine {
                     targetElement, property: binding.property, value: propertyValue)
             } catch {
                 if debug {
-                    print("[ATL DEBUG] Binding evaluation failed for property '\(binding.property)': \(error)")
+                    print(
+                        "[ATL DEBUG] Binding evaluation failed for property '\(binding.property)': \(error)"
+                    )
                     print("[ATL DEBUG]   Creating lazy binding for later resolution")
                 }
-                // For forward references, create lazy binding
-                let lazyBinding = ATLLazyBinding(
+                // For forward references, create lazy binding with captured context
+                executionContext.addLazyBindingWithContext(
                     targetElement: targetElement.id,
                     property: binding.property,
                     expression: binding.expression
                 )
-                executionContext.addLazyBinding(lazyBinding)
             }
         }
     }
@@ -383,7 +388,8 @@ public final class ATLVirtualMachine {
         guard let feature = eClass.getStructuralFeature(name: property) else {
             if debug {
                 print("[ATL DEBUG] Failed to find property '\(property)' in class '\(eClass.name)'")
-                print("[ATL DEBUG]   Direct features: \(eClass.eStructuralFeatures.map { $0.name })")
+                print(
+                    "[ATL DEBUG]   Direct features: \(eClass.eStructuralFeatures.map { $0.name })")
                 print("[ATL DEBUG]   Super types: \(eClass.eSuperTypes.map { $0.name })")
                 print("[ATL DEBUG]   All features: \(eClass.allStructuralFeatures.map { $0.name })")
             }

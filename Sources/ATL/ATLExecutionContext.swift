@@ -122,7 +122,9 @@ public final class ATLExecutionContext: Sendable {
     ///   - value: Variable value
     public func setVariable(_ name: String, value: (any EcoreValue)?) {
         if debug {
-            print("[SCOPE DEBUG] Setting variable '\(name)' in current scope (depth: \(scopeStack.count))")
+            print(
+                "[SCOPE DEBUG] Setting variable '\(name)' in current scope (depth: \(scopeStack.count))"
+            )
         }
         variables[name] = value
     }
@@ -134,7 +136,9 @@ public final class ATLExecutionContext: Sendable {
     /// - Throws: `ATLExecutionError` if variable not found
     public func getVariable(_ name: String) throws -> (any EcoreValue)? {
         if debug {
-            print("[SCOPE DEBUG] Getting variable '\(name)' (depth: \(scopeStack.count), current vars: \(variables.keys.sorted()), stack vars: \(scopeStack.map { $0.keys.sorted() }))")
+            print(
+                "[SCOPE DEBUG] Getting variable '\(name)' (depth: \(scopeStack.count), current vars: \(variables.keys.sorted()), stack vars: \(scopeStack.map { $0.keys.sorted() }))"
+            )
         }
 
         // Check current scope first
@@ -149,7 +153,9 @@ public final class ATLExecutionContext: Sendable {
         for (index, scope) in scopeStack.reversed().enumerated() {
             if let value = scope[name] {
                 if debug {
-                    print("[SCOPE DEBUG]   Found '\(name)' in stack at depth \(scopeStack.count - index - 1)")
+                    print(
+                        "[SCOPE DEBUG]   Found '\(name)' in stack at depth \(scopeStack.count - index - 1)"
+                    )
                 }
                 return value
             }
@@ -164,7 +170,9 @@ public final class ATLExecutionContext: Sendable {
     /// Push a new variable scope onto the stack.
     public func pushScope() {
         if debug {
-            print("[SCOPE DEBUG] Pushing scope (current vars: \(variables.keys.sorted())) -> depth will be \(scopeStack.count + 1)")
+            print(
+                "[SCOPE DEBUG] Pushing scope (current vars: \(variables.keys.sorted())) -> depth will be \(scopeStack.count + 1)"
+            )
         }
         scopeStack.append(variables)
         variables = [:]
@@ -173,7 +181,9 @@ public final class ATLExecutionContext: Sendable {
     /// Pop the current variable scope from the stack.
     public func popScope() {
         if debug {
-            print("[SCOPE DEBUG] Popping scope (current vars: \(variables.keys.sorted())) depth \(scopeStack.count) -> \(scopeStack.count - 1)")
+            print(
+                "[SCOPE DEBUG] Popping scope (current vars: \(variables.keys.sorted())) depth \(scopeStack.count) -> \(scopeStack.count - 1)"
+            )
         }
         guard !scopeStack.isEmpty else { return }
         variables = scopeStack.removeLast()
@@ -435,6 +445,43 @@ public final class ATLExecutionContext: Sendable {
         lazyBindings.append(binding)
     }
 
+    /// Add a lazy binding with current variable context captured.
+    ///
+    /// - Parameters:
+    ///   - targetElement: Target element ID
+    ///   - property: Property name
+    ///   - expression: Expression to evaluate
+    public func addLazyBindingWithContext(
+        targetElement: EUUID,
+        property: String,
+        expression: any ATLExpression
+    ) {
+        // Capture current variables and scope stack variables
+        var capturedVars: [String: (any EcoreValue)?] = [:]
+
+        // Add current scope variables
+        for (name, value) in variables {
+            capturedVars[name] = value
+        }
+
+        // Add scope stack variables (in reverse order for proper precedence)
+        for scope in scopeStack.reversed() {
+            for (name, value) in scope {
+                if capturedVars[name] == nil {
+                    capturedVars[name] = value
+                }
+            }
+        }
+
+        let binding = ATLLazyBinding(
+            targetElement: targetElement,
+            property: property,
+            expression: expression,
+            capturedVariables: capturedVars
+        )
+        lazyBindings.append(binding)
+    }
+
     /// Resolve all pending lazy bindings.
     ///
     /// - Throws: `ATLExecutionError` if resolution fails
@@ -504,23 +551,10 @@ public final class ATLExecutionContext: Sendable {
         if let modelAlias = modelAlias {
             if let metamodel = module.targetMetamodels[modelAlias] {
                 if let eClass = metamodel.getClassifier(name) as? EClass {
-                    if debug {
-                        // DEBUG: Check eSuperTypes in found EClass
-                        print("[ATL EXECUTION DEBUG] Found EClass '\(eClass.name)' with \(eClass.eSuperTypes.count) eSuperTypes:")
-                        for superType in eClass.eSuperTypes {
-                            print("[ATL EXECUTION DEBUG]   - \(superType.name)")
-                        }
-                    }
                     return eClass
                 }
             } else if let metamodel = module.sourceMetamodels[modelAlias] {
                 if let eClass = metamodel.getClassifier(name) as? EClass {
-                    if debug {
-                        print("[ATL EXECUTION DEBUG] Found EClass '\(eClass.name)' with \(eClass.eSuperTypes.count) eSuperTypes:")
-                        for superType in eClass.eSuperTypes {
-                            print("[ATL EXECUTION DEBUG]   - \(superType.name)")
-                        }
-                    }
                     return eClass
                 }
             }
@@ -530,24 +564,12 @@ public final class ATLExecutionContext: Sendable {
         // Otherwise, search all target metamodels first, then source metamodels
         for metamodel in module.targetMetamodels.values {
             if let eClass = metamodel.getClassifier(name) as? EClass {
-                if debug {
-                    print("[ATL EXECUTION DEBUG] Found EClass '\(eClass.name)' with \(eClass.eSuperTypes.count) eSuperTypes:")
-                    for superType in eClass.eSuperTypes {
-                        print("[ATL EXECUTION DEBUG]   - \(superType.name)")
-                    }
-                }
                 return eClass
             }
         }
 
         for metamodel in module.sourceMetamodels.values {
             if let eClass = metamodel.getClassifier(name) as? EClass {
-                if debug {
-                    print("[ATL EXECUTION DEBUG] Found EClass '\(eClass.name)' with \(eClass.eSuperTypes.count) eSuperTypes:")
-                    for superType in eClass.eSuperTypes {
-                        print("[ATL EXECUTION DEBUG]   - \(superType.name)")
-                    }
-                }
                 return eClass
             }
         }
@@ -690,29 +712,46 @@ public struct ATLLazyBinding: Sendable {
     /// Expression to evaluate for the property value.
     public let expression: any ATLExpression
 
+    /// Captured variable context from when the binding was created.
+    public let capturedVariables: [String: (any EcoreValue)?]
+
     /// Creates a new lazy binding.
     ///
     /// - Parameters:
     ///   - targetElement: Target element ID
     ///   - property: Property name
     ///   - expression: Value expression
-    public init(targetElement: EUUID, property: String, expression: any ATLExpression) {
+    public init(
+        targetElement: EUUID, property: String, expression: any ATLExpression,
+        capturedVariables: [String: (any EcoreValue)?] = [:]
+    ) {
         self.targetElement = targetElement
         self.property = property
         self.expression = expression
+        self.capturedVariables = capturedVariables
     }
 
     /// Resolve the lazy binding by evaluating the expression and setting the property.
     ///
     /// - Parameter context: Execution context for evaluation
     /// - Throws: `ATLExecutionError` if resolution fails
+    @MainActor
     func resolve(in context: ATLExecutionContext) async throws {
         // Find the target element
         guard let targetObject = await findElement(targetElement, in: context) else {
             throw ATLExecutionError.runtimeError("Element with ID '\(targetElement)' not found")
         }
 
-        // Evaluate the expression
+        // Temporarily restore captured variables during expression evaluation
+        context.pushScope()
+        defer { context.popScope() }
+
+        // Restore captured variables
+        for (name, value) in capturedVariables {
+            context.setVariable(name, value: value)
+        }
+
+        // Evaluate the expression with restored scope
         let value = try await expression.evaluate(in: context)
 
         // Set the property using the execution engine

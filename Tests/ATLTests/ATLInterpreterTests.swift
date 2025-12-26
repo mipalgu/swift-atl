@@ -981,8 +981,13 @@ struct ATLInterpreterTests {
         personsPackage.eClassifiers.append(femaleClass)
 
         // Create test data - two members (property values will be set via storage for testing)
-        let maleInstance = DynamicEObject(eClass: memberClass)
-        let femaleInstance = DynamicEObject(eClass: memberClass)
+        var maleInstance = DynamicEObject(eClass: memberClass)
+        var femaleInstance = DynamicEObject(eClass: memberClass)
+
+        // Set firstName values to avoid nil concatenation errors
+        maleInstance.eSet("firstName", value: "John")
+        femaleInstance.eSet("firstName", value: "Jane")
+
         // Leave family references as nil to simulate different isFemale() results
 
         // Create virtual machine with helper and both rules
