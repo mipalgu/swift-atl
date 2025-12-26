@@ -309,8 +309,11 @@ public final class ATLVirtualMachine {
             // Bind target element to pattern variable
             executionContext.setVariable(targetPattern.variableName, value: targetElement)
 
-            // Apply property bindings
-            try await applyPropertyBindings(targetPattern, targetElement: targetElement)
+            // Apply property bindings and get the updated element
+            let updatedElement = try await applyPropertyBindings(targetPattern, targetElement: targetElement)
+
+            // Update the element in the variable scope (in case it's referenced later)
+            executionContext.setVariable(targetPattern.variableName, value: updatedElement)
         }
 
         // Record trace link
@@ -345,15 +348,18 @@ public final class ATLVirtualMachine {
     /// - Parameters:
     ///   - pattern: The target pattern containing property bindings
     ///   - targetElement: The target element to configure
+    /// - Returns: The updated target element
     /// - Throws: ATL execution errors for binding failures
     private func applyPropertyBindings(_ pattern: ATLTargetPattern, targetElement: any EObject)
-        async throws
+        async throws -> any EObject
     {
+        var currentElement = targetElement
+
         for binding in pattern.bindings {
             do {
                 let propertyValue = try await binding.expression.evaluate(in: executionContext)
-                try setElementProperty(
-                    targetElement, property: binding.property, value: propertyValue)
+                currentElement = try await setElementProperty(
+                    currentElement, property: binding.property, value: propertyValue, targetPattern: pattern)
             } catch {
                 if debug {
                     print(
@@ -363,12 +369,14 @@ public final class ATLVirtualMachine {
                 }
                 // For forward references, create lazy binding with captured context
                 executionContext.addLazyBindingWithContext(
-                    targetElement: targetElement.id,
+                    targetElement: currentElement.id,
                     property: binding.property,
                     expression: binding.expression
                 )
             }
         }
+
+        return currentElement
     }
 
     /// Sets a property value on a target element.
@@ -377,8 +385,10 @@ public final class ATLVirtualMachine {
     ///   - element: The target element to modify
     ///   - property: The property name to set
     ///   - value: The property value to assign
+    ///   - targetPattern: The target pattern to extract the target model alias
+    /// - Returns: The updated element
     /// - Throws: ATL execution errors for invalid property operations
-    private func setElementProperty(_ element: any EObject, property: String, value: Any?) throws {
+    private func setElementProperty(_ element: any EObject, property: String, value: Any?, targetPattern: ATLTargetPattern) async throws -> any EObject {
         guard let eClass = element.eClass as? EClass else {
             throw ATLExecutionError.typeError(
                 "Element eClass is not an EClass: \(type(of: element.eClass))"
@@ -398,8 +408,32 @@ public final class ATLVirtualMachine {
             )
         }
 
+        // Create a mutable copy and set the property
         var mutableElement = element
         mutableElement.eSet(feature, value as? (any EcoreValue))
+
+        // Extract target alias from pattern type (e.g., "Persons!Male" -> "Persons")
+        let typeComponents = targetPattern.type.split(separator: "!")
+        guard typeComponents.count == 2 else {
+            throw ATLExecutionError.typeError(
+                "Invalid target type specification: '\(targetPattern.type)'"
+            )
+        }
+        let targetAlias = String(typeComponents[0])
+
+        // Update the element in the resource
+        guard let targetResource = executionContext.getTarget(targetAlias) else {
+            throw ATLExecutionError.invalidOperation("Target model '\(targetAlias)' not found")
+        }
+
+        // Add updates the element in place (or adds if new) based on ID
+        await targetResource.add(mutableElement)
+
+        if debug {
+            print("[ATL DEBUG] Updated property '\(property)' = '\(String(describing: value))' on element in resource '\(targetAlias)'")
+        }
+
+        return mutableElement
     }
 
     // MARK: - Called Rule Execution
@@ -444,13 +478,16 @@ public final class ATLVirtualMachine {
         var createdElements: [any EObject] = []
         for targetPattern in rule.targetPatterns {
             let targetElement = try await createTargetElement(targetPattern)
-            createdElements.append(targetElement)
 
             // Bind target element variable
             executionContext.setVariable(targetPattern.variableName, value: targetElement)
 
-            // Apply property bindings
-            try await applyPropertyBindings(targetPattern, targetElement: targetElement)
+            // Apply property bindings and get the updated element
+            let updatedElement = try await applyPropertyBindings(targetPattern, targetElement: targetElement)
+            createdElements.append(updatedElement)
+
+            // Update the element in the variable scope (in case it's referenced later)
+            executionContext.setVariable(targetPattern.variableName, value: updatedElement)
         }
 
         // Execute rule body statements
