@@ -818,8 +818,7 @@ struct ATLInterpreterTests {
             helpers: ["isFemale": isFemaleHelper],
             matchedRules: [rule]
         )
-        let vm = ATLVirtualMachine(module: module, enableDebugging: true)
-        await vm.enableDebugging()
+        let vm = ATLVirtualMachine(module: module)
 
         // Create dummy source and target resources for execution
         let sourceResource = Resource(uri: "test://source")
@@ -998,8 +997,7 @@ struct ATLInterpreterTests {
             helpers: ["isFemale": isFemaleHelper],
             matchedRules: [maleRule, femaleRule]
         )
-        let vm = ATLVirtualMachine(module: module, enableDebugging: true)
-        await vm.enableDebugging()
+        let vm = ATLVirtualMachine(module: module)
 
         // Create resources
         let sourceResource = Resource(uri: "test://source")

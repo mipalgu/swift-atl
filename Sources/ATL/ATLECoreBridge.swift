@@ -445,21 +445,13 @@ extension ATLHelperCallExpression {
     func toECoreExpression() -> ECoreExpression {
         let argumentExpressions = arguments.map { $0.toECoreExpression() }
 
-        if false {  // TODO: Fix context handling when ATLHelperCallExpression has context support
-            // Context helper: context.helperName(args)
-            return .methodCall(
-                receiver: .variable(name: "context"),  // Placeholder for context
-                methodName: helperName,
-                arguments: argumentExpressions
-            )
-        } else {
-            // Context-free helper: treat as a variable reference to the helper
-            return .methodCall(
-                receiver: .variable(name: helperName),
-                methodName: "invoke",
-                arguments: argumentExpressions
-            )
-        }
+        // ATL helpers are invoked as context-free function calls
+        // The helper function is referenced by name and invoked with arguments
+        return .methodCall(
+            receiver: .variable(name: helperName),
+            methodName: "invoke",
+            arguments: argumentExpressions
+        )
     }
 }
 

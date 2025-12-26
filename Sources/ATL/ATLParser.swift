@@ -333,15 +333,6 @@ public actor ATLParser {
                     print("[ATL] Warning: Package has no classifiers, may indicate parsing failure")
                 }
 
-                // DEBUG: Check eSuperTypes in loaded EPackage
-                if debug {
-                    for classifier in package.eClassifiers {
-                        if let eClass = classifier as? EClass {
-                            for superType in eClass.eSuperTypes {
-                            }
-                        }
-                    }
-                }
                 return package
             } catch {
                 if debug {
