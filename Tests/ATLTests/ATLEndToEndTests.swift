@@ -6,10 +6,8 @@
 //  Copyright © 2025 Rene Hexel. All rights reserved.
 //
 
+import Dispatch
 import Foundation
-#if canImport(CoreFoundation)
-import CoreFoundation
-#endif
 import Testing
 
 @testable import ATL
@@ -353,12 +351,12 @@ struct ATLEndToEndTests {
         let parser = ATLParser()
 
         // When
-        let startTime = CFAbsoluteTimeGetCurrent()
+        let startTime = DispatchTime.now()
         let module = try await parser.parse(resourceURL)
-        let endTime = CFAbsoluteTimeGetCurrent()
+        let endTime = DispatchTime.now()
 
         // Then
-        let parseTime = endTime - startTime
+        let parseTime = Double(endTime.uptimeNanoseconds - startTime.uptimeNanoseconds) / 1_000_000_000
         #expect(parseTime < 1.0)  // Should parse in less than 1 second
         #expect(!module.name.isEmpty)
         #expect(module.helpers.count > 0)
@@ -678,11 +676,11 @@ struct ATLEndToEndTests {
         for filename in advancedFiles {
             let resourceURL = try getResourceURL(filename)
 
-            let startTime = CFAbsoluteTimeGetCurrent()
+            let startTime = DispatchTime.now()
             let module = try await parser.parse(resourceURL)
-            let endTime = CFAbsoluteTimeGetCurrent()
+            let endTime = DispatchTime.now()
 
-            let parseTime = endTime - startTime
+            let parseTime = Double(endTime.uptimeNanoseconds - startTime.uptimeNanoseconds) / 1_000_000_000
             #expect(
                 parseTime < 2.0,
                 "File \(filename) should parse in less than 2 seconds, took \(parseTime)")
