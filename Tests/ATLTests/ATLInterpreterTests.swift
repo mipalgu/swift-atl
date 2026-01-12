@@ -1012,7 +1012,6 @@ struct ATLInterpreterTests {
                 sources: ["IN": sourceResource],
                 targets: ["OUT": targetResource]
             )
-            print("Transformation completed successfully with multiple rules")
         } catch let error as ATLExecutionError {
             switch error {
             case .variableNotFound(let name):

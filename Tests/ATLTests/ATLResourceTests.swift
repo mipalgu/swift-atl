@@ -27,11 +27,23 @@ struct ATLResourceTests {
         return resourcesDir.appendingPathComponent(filename).path
     }
 
-    /// Returns a temporary file path for testing.
-    func temporaryFilePath(extension ext: String) -> String {
+    /// Returns a file:// URI string for a test resource file (cross-platform).
+    func testResourceURI(_ filename: String) -> String {
+        let currentFile = URL(fileURLWithPath: #filePath)
+        let resourcesDir = currentFile.deletingLastPathComponent().appendingPathComponent("Resources")
+        return resourcesDir.appendingPathComponent(filename).absoluteString
+    }
+
+    /// Returns a temporary file URL for testing (cross-platform).
+    func temporaryFileURL(extension ext: String) -> URL {
         let tmpDir = FileManager.default.temporaryDirectory
         let filename = UUID().uuidString + "." + ext
-        return tmpDir.appendingPathComponent(filename).path
+        return tmpDir.appendingPathComponent(filename)
+    }
+
+    /// Returns a temporary file path for testing.
+    func temporaryFilePath(extension ext: String) -> String {
+        return temporaryFileURL(extension: ext).path
     }
 
     // MARK: - ATLResource Loading Tests
@@ -84,8 +96,8 @@ struct ATLResourceTests {
     @Test("Save as XMI")
     func saveAsXMI() async throws {
         // Given: A loaded ATL module
-        let atlPath = testResourcePath("SimpleTransformation.atl")
-        let loadResource = ATLResource(uri: "file://\(atlPath)")
+        let atlURI = testResourceURI("SimpleTransformation.atl")
+        let loadResource = ATLResource(uri: atlURI)
         try await loadResource.load()
 
         guard let module = loadResource.module else {
@@ -94,21 +106,21 @@ struct ATLResourceTests {
         }
 
         // When: Saving to XMI format
-        let xmiPath = temporaryFilePath(extension: "xmi")
-        let saveResource = ATLResource(uri: "file://\(xmiPath)", module: module)
+        let xmiURL = temporaryFileURL(extension: "xmi")
+        let saveResource = ATLResource(uri: xmiURL.absoluteString, module: module)
         try await saveResource.save()
 
         // Then: XMI file should exist and be valid XML
-        #expect(FileManager.default.fileExists(atPath: xmiPath), "XMI file should be created")
+        #expect(FileManager.default.fileExists(atPath: xmiURL.path), "XMI file should be created")
 
         // Verify the content is valid XML
-        let xmiContent = try String(contentsOfFile: xmiPath, encoding: .utf8)
+        let xmiContent = try String(contentsOf: xmiURL, encoding: .utf8)
         #expect(xmiContent.contains("<?xml version=\"1.0\""), "Should have XML declaration")
         #expect(xmiContent.contains("<atl:Module"), "Should have ATL module element")
         #expect(xmiContent.contains("</atl:Module>"), "Should have closing module tag")
 
         // Clean up
-        try? FileManager.default.removeItem(atPath: xmiPath)
+        try? FileManager.default.removeItem(at: xmiURL)
     }
 
     @Test("Save as ATL throws error")
@@ -124,8 +136,8 @@ struct ATLResourceTests {
         )
 
         // When/Then: Saving to .atl format should throw error
-        let atlPath = temporaryFilePath(extension: "atl")
-        let resource = ATLResource(uri: "file://\(atlPath)", module: module)
+        let atlURL = temporaryFileURL(extension: "atl")
+        let resource = ATLResource(uri: atlURL.absoluteString, module: module)
 
         await #expect(throws: ATLResourceError.self) {
             try await resource.save()
@@ -350,8 +362,8 @@ struct ATLResourceTests {
     @Test("Round-trip save and load")
     func roundTripSaveAndLoad() async throws {
         // Given: A loaded ATL module
-        let atlPath = testResourcePath("SimpleTransformation.atl")
-        let loadResource = ATLResource(uri: "file://\(atlPath)")
+        let atlURI = testResourceURI("SimpleTransformation.atl")
+        let loadResource = ATLResource(uri: atlURI)
         try await loadResource.load()
 
         guard let originalModule = loadResource.module else {
@@ -360,16 +372,16 @@ struct ATLResourceTests {
         }
 
         // When: Saving as XMI and loading back
-        let xmiPath = temporaryFilePath(extension: "xmi")
-        let saveResource = ATLResource(uri: "file://\(xmiPath)", module: originalModule)
+        let xmiURL = temporaryFileURL(extension: "xmi")
+        let saveResource = ATLResource(uri: xmiURL.absoluteString, module: originalModule)
         try await saveResource.save()
 
-        let reloadResource = ATLResource(uri: "file://\(xmiPath)")
+        let reloadResource = ATLResource(uri: xmiURL.absoluteString)
         try await reloadResource.load()
 
         guard let reloadedModule = reloadResource.module else {
             Issue.record("Failed to reload module")
-            try? FileManager.default.removeItem(atPath: xmiPath)
+            try? FileManager.default.removeItem(at: xmiURL)
             return
         }
 
@@ -379,7 +391,7 @@ struct ATLResourceTests {
         #expect(reloadedModule.targetMetamodels.count == originalModule.targetMetamodels.count, "Target metamodels count should match")
 
         // Clean up
-        try? FileManager.default.removeItem(atPath: xmiPath)
+        try? FileManager.default.removeItem(at: xmiURL)
     }
 
     // MARK: - Error Handling Tests

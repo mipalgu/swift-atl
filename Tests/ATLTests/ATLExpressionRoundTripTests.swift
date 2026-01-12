@@ -412,11 +412,7 @@ struct ATLExpressionRoundTripTests {
 
         // When: Serialize to XMI and parse back
         let xmi = serializer.serialize(original)
-        print("=== Collection Select XMI ===")
-        print(wrapExpression(xmi))
-        print("=== End XMI ===")
         let parsed = try parser.parse(wrapExpression(xmi))
-        print("Parsed type: \(type(of: parsed))")
 
         // Then: Should be equivalent
         guard let parsedColl = parsed as? ATLCollectionExpression else {
@@ -623,18 +619,13 @@ struct ATLExpressionRoundTripTests {
 
         // When: Serialize to XMI and parse back
         let xmi = serializer.serialize(original)
-        print("=== Helper Call XMI ===")
-        print(wrapExpression(xmi))
-        print("=== End XMI ===")
         let parsed = try parser.parse(wrapExpression(xmi))
-        print("Parsed helper: \(type(of: parsed))")
 
         // Then: Should be equivalent
         guard let parsedCall = parsed as? ATLHelperCallExpression else {
             Issue.record("Parsed expression should be helper call")
             return
         }
-        print("Arguments count: \(parsedCall.arguments.count)")
         #expect(parsedCall.helperName == "myHelper")
         #expect(parsedCall.arguments.count == 2)
 

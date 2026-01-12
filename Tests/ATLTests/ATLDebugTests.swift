@@ -38,7 +38,6 @@ struct ATLDebugTests {
             #expect(module.name == "TestModule")
             #expect(module.helpers.count == 1)
         } catch {
-            print("❌ Simple helper parsing failed: \(error)")
             throw error
         }
     }
@@ -63,7 +62,6 @@ struct ATLDebugTests {
             #expect(helper?.name == "add")
             #expect(helper?.parameters.count == 2)
         } catch {
-            print("❌ Helper with parameters parsing failed: \(error)")
             throw error
         }
     }
@@ -88,7 +86,6 @@ struct ATLDebugTests {
             #expect(helper?.name == "isEmpty")
             #expect(helper?.contextType == "String")
         } catch {
-            print("❌ Context helper parsing failed: \(error)")
             throw error
         }
     }
@@ -113,7 +110,6 @@ struct ATLDebugTests {
             #expect(helper?.name == "getName")
             #expect(helper?.contextType == "Source!Person")
         } catch {
-            print("❌ Qualified type parsing failed: \(error)")
             throw error
         }
     }
@@ -138,7 +134,6 @@ struct ATLDebugTests {
             #expect(helper?.name == "getMembers")
             #expect(helper?.returnType == "Sequence(Person)")
         } catch {
-            print("❌ Generic type parsing failed: \(error)")
             throw error
         }
     }
@@ -163,7 +158,6 @@ struct ATLDebugTests {
             #expect(helper?.name == "getMembers")
             #expect(helper?.returnType == "Sequence(Families!Member)")
         } catch {
-            print("❌ Complex generic type parsing failed: \(error)")
             throw error
         }
     }
@@ -182,12 +176,6 @@ struct ATLDebugTests {
         // Then - check expected tokens
         #expect(tokens.count >= 8)  // helper, def, :, test, (, ), :, Integer, =, 42, ;
 
-        // Print tokens for debugging
-        print("🔍 Tokens for '\(atlContent)':")
-        for (index, token) in tokens.enumerated() {
-            print("  [\(index)] \(token.type) = '\(token.value)'")
-        }
-
         // Check specific tokens
         #expect(tokens[0].type == .keyword("helper"))
         #expect(tokens[1].type == .keyword("def"))
@@ -202,12 +190,6 @@ struct ATLDebugTests {
         // When - tokenise the content
         let lexer = TestATLLexer(content: atlContent)
         let tokens = try lexer.tokenize()
-
-        // Then - print tokens for debugging
-        print("🔍 Tokens for '\(atlContent)':")
-        for (index, token) in tokens.enumerated() {
-            print("  [\(index)] \(token.type) = '\(token.value)'")
-        }
 
         // Check key tokens
         #expect(
@@ -242,11 +224,6 @@ struct ATLDebugTests {
         let tokens = try lexer.tokenize()
 
         // Then - check tokens
-        print("🔍 Tokens for '\(atlContent)':")
-        for (index, token) in tokens.enumerated() {
-            print("  [\(index)] \(token.type) = '\(token.value)'")
-        }
-
         #expect(tokens.count >= 3)  // Source, !, Person
         #expect(tokens[0].type == .identifier("Source"))
         #expect(tokens[1].type == .operator("!"))
@@ -263,11 +240,6 @@ struct ATLDebugTests {
         let tokens = try lexer.tokenize()
 
         // Then - check tokens
-        print("🔍 Tokens for '\(atlContent)':")
-        for (index, token) in tokens.enumerated() {
-            print("  [\(index)] \(token.type) = '\(token.value)'")
-        }
-
         #expect(tokens.count >= 6)  // Sequence, (, Families, !, Member, )
         #expect(tokens[0].type == .identifier("Sequence"))
         #expect(tokens[1].type == .punctuation("("))
@@ -291,20 +263,9 @@ struct ATLDebugTests {
         let parser = ATLParser()
 
         // When & Then
-        do {
-            let module = try await parser.parseContent(atlContent, filename: "debug.atl")
-            print("✅ Successfully parsed helper functions excerpt")
-            print("   Module: \(module.name)")
-            print("   Helpers: \(module.helpers.count)")
-            for helper in module.helpers.values {
-                print(
-                    "   - \(helper.name): \(helper.parameters.count) parameters, returns \(helper.returnType)"
-                )
-            }
-        } catch {
-            print("❌ Failed to parse helper functions excerpt: \(error)")
-            throw error
-        }
+        let module = try await parser.parseContent(atlContent, filename: "debug.atl")
+        #expect(module.name == "HelperFunctions")
+        #expect(module.helpers.count == 1)
     }
 
     @Test("Debug parsing steps for Families2Persons.atl excerpt")
@@ -319,18 +280,9 @@ struct ATLDebugTests {
         let parser = ATLParser()
 
         // When & Then
-        do {
-            let module = try await parser.parseContent(atlContent, filename: "debug.atl")
-            print("✅ Successfully parsed Families2Persons excerpt")
-            print("   Module: \(module.name)")
-            print("   Helpers: \(module.helpers.count)")
-            for helper in module.helpers.values {
-                print("   - \(helper.name): returns \(helper.returnType)")
-            }
-        } catch {
-            print("❌ Failed to parse Families2Persons excerpt: \(error)")
-            throw error
-        }
+        let module = try await parser.parseContent(atlContent, filename: "debug.atl")
+        #expect(module.name == "Families2Persons")
+        #expect(module.helpers.count == 1)
     }
 
     @Test("Debug method call parsing")
@@ -344,15 +296,9 @@ struct ATLDebugTests {
         let parser = ATLParser()
 
         // When & Then
-        do {
-            let module = try await parser.parseContent(atlContent, filename: "debug.atl")
-            print("✅ Successfully parsed method call")
-            print("   Module: \(module.name)")
-            print("   Helpers: \(module.helpers.count)")
-        } catch {
-            print("❌ Failed to parse method call: \(error)")
-            throw error
-        }
+        let module = try await parser.parseContent(atlContent, filename: "debug.atl")
+        #expect(module.name == "TestModule")
+        #expect(module.helpers.count == 1)
     }
 
     @Test("Debug iterate expression parsing")
@@ -367,15 +313,9 @@ struct ATLDebugTests {
         let parser = ATLParser()
 
         // When & Then
-        do {
-            let module = try await parser.parseContent(atlContent, filename: "debug.atl")
-            print("✅ Successfully parsed iterate expression")
-            print("   Module: \(module.name)")
-            print("   Helpers: \(module.helpers.count)")
-        } catch {
-            print("❌ Failed to parse iterate expression: \(error)")
-            throw error
-        }
+        let module = try await parser.parseContent(atlContent, filename: "debug.atl")
+        #expect(module.name == "TestModule")
+        #expect(module.helpers.count == 1)
     }
 }
 
