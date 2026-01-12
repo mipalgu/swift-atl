@@ -357,7 +357,7 @@ public final class ATLExecutionContext: Sendable {
     ///
     /// - Parameters:
     ///   - type: Element type name
-    ///   - targetAlias: Target model alias
+    ///   - metamodelName: Target metamodel name
     /// - Returns: Created element
     /// - Throws: `ATLExecutionError` if creation fails
     public func createElement(type: String, in metamodelName: String) async throws -> any EObject {
@@ -721,6 +721,7 @@ public struct ATLLazyBinding: Sendable {
     ///   - targetElement: Target element ID
     ///   - property: Property name
     ///   - expression: Value expression
+    ///   - capturedVariables: Captured variable context from when the binding was created
     public init(
         targetElement: EUUID, property: String, expression: any ATLExpression,
         capturedVariables: [String: (any EcoreValue)?] = [:]

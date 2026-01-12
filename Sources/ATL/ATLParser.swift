@@ -75,11 +75,13 @@ public actor ATLParser {
         return try await parseContent(content, filename: url.path)
     }
 
-    /// Parse ATL content from a string
+    /// Parse ATL content from a string.
+    ///
     /// - Parameters:
     ///   - content: The ATL source content
     ///   - filename: Optional filename for error reporting
     ///   - searchPaths: Optional array of directory paths to search for metamodel files
+    ///   - continueAfterErrors: Whether to continue parsing after encountering errors
     /// - Returns: An ATLModule representing the parsed ATL content
     /// - Throws: ATLParseError if parsing fails
     public func parseContent(

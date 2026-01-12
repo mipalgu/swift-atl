@@ -79,7 +79,9 @@ public final class ATLVirtualMachine {
 
     /// Creates a new ATL virtual machine for the specified module.
     ///
-    /// - Parameter module: The ATL module to execute
+    /// - Parameters:
+    ///   - module: The ATL module to execute
+    ///   - enableDebugging: Whether to enable debug output for systematic tracing
     public init(module: ATLModule, enableDebugging: Bool = false) {
         self.module = module
 

@@ -1980,7 +1980,6 @@ public struct ATLLambdaExpression: ATLExpression, Sendable, Equatable, Hashable 
     /// - Parameters:
     ///   - parameterValue: The value to bind to the lambda parameter
     ///   - context: The execution context
-    /// - Parameter context: The execution context
     /// - Returns: The evaluation result
     /// - Throws: ATL execution errors
     @MainActor
