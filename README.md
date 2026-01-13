@@ -186,3 +186,12 @@ Swift ATL targets compatibility with:
 - **[Eclipse ATL](https://eclipse.dev/atl/)**: Syntax-compatible with Eclipse ATL transformations
 - **Eclipse ATL XMI**: Full round-trip compatibility with Eclipse ATL XMI format
 - **[swift-ecore](https://github.com/mipalgu/swift-ecore)**: Integrated with ECore metamodel framework
+
+## References
+
+This implementation is based on the following standards and technologies:
+
+- [Eclipse ATL (Atlas Transformation Language)](https://eclipse.dev/atl/) - The reference ATL implementation
+- [OMG QVT (Query/View/Transformation)](https://www.omg.org/spec/QVT/) - The model transformation standard
+- [OMG OCL (Object Constraint Language)](https://www.omg.org/spec/OCL/) - Expression language for guards and queries
+- [Eclipse Modeling Framework (EMF)](https://eclipse.dev/emf/) - The metamodelling foundation
