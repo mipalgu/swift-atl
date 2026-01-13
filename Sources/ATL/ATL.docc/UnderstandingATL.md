@@ -299,6 +299,6 @@ if cond then x else y endif       -- Conditionals
 
 ## See Also
 
-- [Eclipse ATL (Atlas Transformation Language)](https://eclipse.dev/atl/) - The reference ATL implementation
-- [OMG QVT (Query/View/Transformation)](https://www.omg.org/spec/QVT/) - The model transformation standard
-- [OMG OCL (Object Constraint Language)](https://www.omg.org/spec/OCL/) - Expression language for guards and queries
+- [Eclipse ATL (Atlas Transformation Language)](https://eclipse.dev/atl/)
+- [OMG QVT (Query/View/Transformation)](https://www.omg.org/spec/QVT/)
+- [OMG OCL (Object Constraint Language)](https://www.omg.org/spec/OCL/)
