@@ -8,8 +8,10 @@ Learn the fundamental concepts of the Atlas Transformation Language.
 language that allows you to declaratively specify how elements in a source model should
 be transformed into elements in a target model.
 
-ATL is related to the [OMG QVT (Query/View/Transformation)](https://www.omg.org/spec/QVT/)
-standard and uses [OCL (Object Constraint Language)](https://www.omg.org/spec/OCL/)
+ATL is related to the OMG QVT (Query/View/Transformation)
+([OMG QVT](https://www.omg.org/spec/QVT/))
+standard and uses OCL (Object Constraint Language)
+([OCL](https://www.omg.org/spec/OCL/))
 for expressions. This article explains the core concepts.
 
 ## Transformation Structure
