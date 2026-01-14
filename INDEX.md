@@ -1,6 +1,9 @@
 # Swift ATL
 
-A pure Swift implementation of the [Atlas Transformation Language (ATL)](https://eclipse.dev/atl/) for model-to-model transformations.
+The [swift-atl](https://github.com/mipalgu/swift-atl) package provides
+a pure Swift implementation of the
+[Atlas Transformation Language (ATL)](https://eclipse.dev/atl/) for
+model-to-model transformations.
 
 ## Installation
 
