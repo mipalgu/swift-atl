@@ -412,9 +412,27 @@ public final class ATLVirtualMachine {
             )
         }
 
+        // For multi-valued features, convert EcoreValueArray of EObjects to [EUUID]
+        // so the XMI serialiser can resolve and serialise the references correctly.
+        let featureIsMany =
+            (feature as? EReference)?.isMany ?? (feature as? EAttribute)?.isMany ?? false
+        let valueToSet: (any EcoreValue)?
+        if featureIsMany, let collection = value as? EcoreValueArray {
+            let ids = collection.values.compactMap { ($0 as? any EObject)?.id }
+            if !ids.isEmpty {
+                // [EUUID] conforms to EcoreValue; the XMI serialiser resolves IDs to objects
+                valueToSet = ids
+            } else {
+                // Primitive or empty collection — store as-is
+                valueToSet = collection
+            }
+        } else {
+            valueToSet = value as? (any EcoreValue)
+        }
+
         // Create a mutable copy and set the property
         var mutableElement = element
-        mutableElement.eSet(feature, value as? (any EcoreValue))
+        mutableElement.eSet(feature, valueToSet)
 
         // Extract metamodel name from pattern type (e.g., "rcalval!Report" -> "rcalval")
         // then map it to the model alias (e.g., "rcalval" -> "OUT")

@@ -742,6 +742,107 @@ struct ATLThisModuleTests {
         #expect(stats.rulesExecuted >= 1)
     }
 
+    // MARK: - Multi-valued EReference serialisation
+
+    /// Tests that setting a multi-valued EReference to an EcoreValueArray of EObjects
+    /// stores the result as [EUUID] so the XMI serialiser can resolve and serialise the
+    /// references correctly, instead of dumping an EcoreValueArray debug string.
+    @Test("Multi-valued EReference binding stores [EUUID], not EcoreValueArray")
+    func testMultiValuedReferenceBinding() async throws {
+        // Source metamodel: Container with no structural features
+        var srcPackage = EPackage(name: "src", nsURI: "http://test/src", nsPrefix: "s")
+        let containerClass = EClass(name: "Container")
+        let itemClass = EClass(name: "Item")
+        srcPackage.eClassifiers.append(containerClass)
+        srcPackage.eClassifiers.append(itemClass)
+
+        // Target metamodel: Report with multi-valued 'outputs' EReference -> Output
+        var tgtPackage = EPackage(name: "tgt", nsURI: "http://test/tgt", nsPrefix: "t")
+        let outputClass = EClass(name: "Output")
+        var reportClass = EClass(name: "Report")
+        let outputsRef = EReference(
+            name: "outputs", eType: outputClass, lowerBound: 0, upperBound: -1)
+        reportClass.eStructuralFeatures.append(outputsRef)
+        tgtPackage.eClassifiers.append(outputClass)
+        tgtPackage.eClassifiers.append(reportClass)
+
+        // Called rule: ItemToOutput() -> tgt!Output
+        let itemToOutput = ATLCalledRule(
+            name: "ItemToOutput",
+            parameters: [],
+            targetPatterns: [ATLTargetPattern(variableName: "o", type: "tgt!Output")]
+        )
+
+        // Matched rule: src!Container -> tgt!Report
+        // outputs <- src!Item.allInstances()->collect(i | thisModule.ItemToOutput())
+        let rule = ATLMatchedRule(
+            name: "Container2Report",
+            sourcePattern: ATLSourcePattern(variableName: "c", type: "src!Container"),
+            targetPatterns: [
+                ATLTargetPattern(
+                    variableName: "r",
+                    type: "tgt!Report",
+                    bindings: [
+                        ATLPropertyBinding(
+                            property: "outputs",
+                            expression: ATLMethodCallExpression(
+                                receiver: ATLMethodCallExpression(
+                                    receiver: ATLLiteralExpression(value: "src!Item"),
+                                    methodName: "allInstances"
+                                ),
+                                methodName: "collect",
+                                arguments: [
+                                    ATLLambdaExpression(
+                                        parameter: "i",
+                                        body: ATLMethodCallExpression(
+                                            receiver: ATLVariableExpression(name: "thisModule"),
+                                            methodName: "ItemToOutput"
+                                        )
+                                    )
+                                ]
+                            )
+                        )
+                    ]
+                )
+            ]
+        )
+
+        let module = ATLModule(
+            name: "MultiValuedRefTest",
+            sourceMetamodels: ["IN": srcPackage],
+            targetMetamodels: ["OUT": tgtPackage],
+            matchedRules: [rule],
+            calledRules: ["ItemToOutput": itemToOutput]
+        )
+        let vm = ATLVirtualMachine(module: module)
+
+        let sourceResource = Resource(uri: "test://source")
+        await sourceResource.add(DynamicEObject(eClass: containerClass))
+        // Add two Items so allInstances() returns two elements
+        await sourceResource.add(DynamicEObject(eClass: itemClass))
+        await sourceResource.add(DynamicEObject(eClass: itemClass))
+
+        let targetResource = Resource(uri: "test://target")
+
+        try await vm.execute(
+            sources: ["IN": sourceResource],
+            targets: ["OUT": targetResource]
+        )
+
+        let stats = vm.getStatistics()
+        #expect(stats.successful == true)
+
+        // Verify the Report element has 'outputs' stored as [EUUID], not as
+        // an EcoreValueArray string (which the XMI serialiser cannot handle).
+        let allObjects = await targetResource.getAllObjects()
+        let reportObjects = allObjects.filter { ($0.eClass as? EClass)?.name == "Report" }
+        let report = try #require(reportObjects.first as? DynamicEObject)
+        let outputsValue = report.eGet("outputs")
+        // Must be [EUUID], not EcoreValueArray or nil
+        let outputIds = try #require(outputsValue as? [EUUID])
+        #expect(outputIds.count == 2)
+    }
+
     // MARK: - Issue 7: Missing dispatch entries
 
     @Test("oclIsUndefined dispatches correctly for present and absent values")
