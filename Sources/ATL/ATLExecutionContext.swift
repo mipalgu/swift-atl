@@ -84,6 +84,9 @@ public final class ATLExecutionContext: Sendable {
     /// Debug mode flag for systematic tracing.
     public var debug: Bool = false
 
+    /// Back-reference to the owning virtual machine for called rule dispatch.
+    public weak var virtualMachine: ATLVirtualMachine?
+
     // MARK: - Initialisation
 
     /// Creates a new ATL execution context.
@@ -329,19 +332,12 @@ public final class ATLExecutionContext: Sendable {
             }
         }
 
-        // Evaluate helper expression using ECore bridge
+        // Evaluate helper body expression using ATL evaluator directly
         guard let helperWrapper = helper as? ATLHelperWrapper else {
             throw ATLExecutionError.runtimeError("Helper '\(name)' is not a supported helper type")
         }
 
-        let ecoreExpression = helperWrapper.bodyExpression.toECoreExpression()
-        let context = try buildECoreContext()
-        if debug {
-            print("[ATL DEBUG] ECore context keys: \(context.keys.sorted())")
-        }
-        let result = try await executionEngine.evaluate(ecoreExpression, context: context)
-
-        return result
+        return try await helperWrapper.bodyExpression.evaluate(in: self)
     }
 
     /// Register a helper function.
@@ -349,6 +345,45 @@ public final class ATLExecutionContext: Sendable {
     /// - Parameter helper: Helper to register
     public func registerHelper(_ helper: any ATLHelperType) {
         helpers[helper.name] = helper
+    }
+
+    /// Dispatch a `thisModule.method()` call.
+    ///
+    /// Tries called rules first (via the owning virtual machine), then module helpers.
+    ///
+    /// - Parameters:
+    ///   - name: Method name
+    ///   - arguments: Evaluated argument values
+    /// - Returns: The result of the dispatched call
+    /// - Throws: `ATLExecutionError` if dispatch fails
+    public func dispatchThisModuleMethod(_ name: String, arguments: [(any EcoreValue)?]) async throws -> (any EcoreValue)? {
+        // Try called rules first via the virtual machine
+        if module.calledRules[name] != nil, let vm = virtualMachine {
+            let elements = try await vm.executeCalledRule(name, arguments: arguments)
+            return elements.first.map { $0 as any EcoreValue }
+        }
+        // Fall back to helpers
+        return try await callHelper(name, arguments: arguments)
+    }
+
+    /// Dispatch a `thisModule.attribute` navigation to a context-free helper.
+    ///
+    /// Rejects contextual helpers (they require a receiver object). Calls the
+    /// matching context-free helper with no arguments.
+    ///
+    /// - Parameter name: Attribute name (maps to a helper name)
+    /// - Returns: The result of evaluating the helper
+    /// - Throws: `ATLExecutionError` if the helper is not found or is contextual
+    public func dispatchThisModuleAttribute(_ name: String) async throws -> (any EcoreValue)? {
+        guard let helper = helpers[name] as? ATLHelperWrapper else {
+            throw ATLExecutionError.helperNotFound(name)
+        }
+        guard helper.contextType == nil else {
+            throw ATLExecutionError.runtimeError(
+                "Contextual helper '\(name)' requires a receiver object and cannot be accessed as a thisModule attribute"
+            )
+        }
+        return try await callHelper(name, arguments: [])
     }
 
     // MARK: - Element Creation (Command-Based)

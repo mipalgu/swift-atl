@@ -34,6 +34,7 @@ let package = Package(
             dependencies: [
                 "ATL",
                 .product(name: "ECore", package: "swift-ecore"),
+                .product(name: "EMFBase", package: "swift-ecore"),
             ],
             resources: [
                 .copy("Resources")

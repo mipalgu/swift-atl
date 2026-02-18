@@ -94,6 +94,8 @@ public final class ATLVirtualMachine {
         )
         statistics = ATLExecutionStatistics()
         debug = enableDebugging
+        // Wire back-reference so helpers and expressions can invoke called rules
+        executionContext.virtualMachine = self
     }
 
     // MARK: - Debug Configuration
@@ -414,14 +416,22 @@ public final class ATLVirtualMachine {
         var mutableElement = element
         mutableElement.eSet(feature, value as? (any EcoreValue))
 
-        // Extract target alias from pattern type (e.g., "Persons!Male" -> "Persons")
+        // Extract metamodel name from pattern type (e.g., "rcalval!Report" -> "rcalval")
+        // then map it to the model alias (e.g., "rcalval" -> "OUT")
         let typeComponents = targetPattern.type.split(separator: "!")
         guard typeComponents.count == 2 else {
             throw ATLExecutionError.typeError(
                 "Invalid target type specification: '\(targetPattern.type)'"
             )
         }
-        let targetAlias = String(typeComponents[0])
+        let metamodelName = String(typeComponents[0])
+        guard let targetAlias = executionContext.module.targetMetamodels.first(where: {
+            $0.value.name == metamodelName
+        })?.key else {
+            throw ATLExecutionError.invalidOperation(
+                "No target model found for metamodel '\(metamodelName)'"
+            )
+        }
 
         // Update the element in the resource
         guard let targetResource = executionContext.getTarget(targetAlias) else {

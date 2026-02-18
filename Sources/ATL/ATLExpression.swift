@@ -203,6 +203,11 @@ public struct ATLNavigationExpression: ATLExpression, Sendable, Equatable, Hasha
 
     @MainActor
     public func evaluate(in context: ATLExecutionContext) async throws -> (any EcoreValue)? {
+        // Intercept thisModule.attribute as a context-free helper attribute
+        if let varExpr = source as? ATLVariableExpression, varExpr.name == "thisModule" {
+            return try await context.dispatchThisModuleAttribute(property)
+        }
+
         guard let sourceObject = try await source.evaluate(in: context) else {
             return nil
         }
@@ -913,6 +918,12 @@ public struct ATLMethodCallExpression: ATLExpression, Sendable, Equatable, Hasha
 
     @MainActor
     public func evaluate(in context: ATLExecutionContext) async throws -> (any EcoreValue)? {
+        // Intercept thisModule.method() before evaluating the receiver
+        if let varExpr = receiver as? ATLVariableExpression, varExpr.name == "thisModule" {
+            let argumentValues = try await evaluateArguments(in: context)
+            return try await context.dispatchThisModuleMethod(methodName, arguments: argumentValues)
+        }
+
         let receiverValue = try await receiver.evaluate(in: context)
 
         // For collection operations that need lambda expressions, pass them directly
@@ -1023,6 +1034,52 @@ public struct ATLMethodCallExpression: ATLExpression, Sendable, Equatable, Hasha
         case let sig where sig.starts(with: "sortedBy") && arguments.count == 1:
             return try await handleSortedBy(receiver, arguments[0], context)
 
+        // Collection query operations
+        case let sig where sig.starts(with: "size"):
+            return try handleSize(receiver)
+        case let sig where sig.starts(with: "isEmpty"):
+            return try handleIsEmpty(receiver)
+        case let sig where sig.starts(with: "notEmpty"):
+            return try handleNotEmpty(receiver)
+        case let sig where sig.starts(with: "first") && arguments.isEmpty:
+            return try handleFirst(receiver)
+        case let sig where sig.starts(with: "last") && arguments.isEmpty:
+            return try handleLast(receiver)
+        case let sig where sig.starts(with: "includes") && arguments.count == 1:
+            return try handleIncludes(receiver, arguments[0])
+        case let sig where sig.starts(with: "excludes") && arguments.count == 1:
+            return try handleExcludes(receiver, arguments[0])
+        case let sig where sig.starts(with: "union") && arguments.count == 1:
+            return try handleUnion(receiver, arguments[0])
+        case let sig where sig.starts(with: "intersection") && arguments.count == 1:
+            return try handleIntersection(receiver, arguments[0])
+        case let sig where sig.starts(with: "flatten"):
+            return try handleFlatten(receiver)
+        case let sig where sig.starts(with: "asSequence"):
+            return try handleAsSequence(receiver)
+        case let sig where sig.starts(with: "asSet"):
+            return try handleAsSet(receiver)
+        case let sig where sig.starts(with: "asBag"):
+            return try handleAsBag(receiver)
+        case let sig where sig.starts(with: "asOrderedSet"):
+            return try handleAsOrderedSet(receiver)
+
+        // OCL meta-operations
+        case let sig where sig.starts(with: "oclIsUndefined"):
+            return handleOclIsUndefined(receiver)
+        case let sig where sig.starts(with: "oclIsKindOf") && arguments.count == 1:
+            return try handleOclIsKindOf(receiver, arguments[0])
+
+        // Numeric operations
+        case let sig where sig.starts(with: "mod") && arguments.count == 1:
+            return try handleMod(receiver, arguments[0])
+        case let sig where sig.starts(with: "power") && arguments.count == 1:
+            return try handlePower(receiver, arguments[0])
+
+        // String operations
+        case let sig where sig.starts(with: "toUpperCase"):
+            return try handleToUpperCase(receiver)
+
         // ATL-specific operations not in OCL standard library
         case let sig where sig.starts(with: "isEven"):
             return try handleIsEven(receiver)
@@ -1115,6 +1172,7 @@ public struct ATLMethodCallExpression: ATLExpression, Sendable, Equatable, Hasha
             case is Int: return "Integer"
             case is Double: return "Real"
             case is Bool: return "Boolean"
+            case is EcoreValueArray: return "Collection"
             case is [Any]: return "Collection"
             default: return "OclAny"
             }
@@ -1168,29 +1226,22 @@ public struct ATLMethodCallExpression: ATLExpression, Sendable, Equatable, Hasha
         // Get all instances of this class from the source resource
         let instances = await sourceResource.getAllInstancesOf(eClass)
 
-        // Convert instances to a format suitable for ATL processing
-        // For now, return the count as an integer (placeholder implementation)
-        return instances.count
+        // Return an EcoreValueArray containing all instances
+        return EcoreValueArray(instances.map { $0 as any EcoreValue })
     }
 
     private func handleSize(_ receiverValue: (any EcoreValue)?) throws -> (any EcoreValue)? {
         if let stringValue = receiverValue as? String {
             return stringValue.count
-        } else if let arrayValue = receiverValue as? [Any] {
-            return arrayValue.count
-        } else {
-            return 0
         }
+        return toCollection(receiverValue).count
     }
 
     private func handleIsEmpty(_ receiverValue: (any EcoreValue)?) throws -> (any EcoreValue)? {
         if let stringValue = receiverValue as? String {
             return stringValue.isEmpty
-        } else if let arrayValue = receiverValue as? [Any] {
-            return arrayValue.isEmpty
-        } else {
-            return true
         }
+        return toCollection(receiverValue).isEmpty
     }
 
     private func handleMod(_ receiverValue: (any EcoreValue)?, _ argument: (any EcoreValue)?) throws
@@ -1262,18 +1313,50 @@ public struct ATLMethodCallExpression: ATLExpression, Sendable, Equatable, Hasha
         return intValue * intValue
     }
 
+    // MARK: - OCL Meta Operations
+
+    /// Handles `oclIsUndefined()` — returns `true` if the receiver is `nil`.
+    private func handleOclIsUndefined(_ receiverValue: (any EcoreValue)?) -> (any EcoreValue)? {
+        return receiverValue == nil
+    }
+
+    /// Handles `oclIsKindOf(typeName)` — returns `true` if the receiver's class matches
+    /// or is a subtype of the named class.
+    private func handleOclIsKindOf(_ receiverValue: (any EcoreValue)?, _ typeName: (any EcoreValue)?) throws -> (any EcoreValue)? {
+        guard let typeName = typeName as? String else {
+            throw ATLExecutionError.typeError("oclIsKindOf() requires String type name argument")
+        }
+        guard let eObject = receiverValue as? (any EObject),
+              let eClass = eObject.eClass as? EClass else {
+            return false
+        }
+        // Walk the class hierarchy
+        var current: EClass? = eClass
+        while let cls = current {
+            if cls.name == typeName { return true }
+            current = cls.eSuperTypes.first
+        }
+        return false
+    }
+
+    /// Handles `notEmpty()` — returns `true` when the collection or string is non-empty.
+    private func handleNotEmpty(_ receiverValue: (any EcoreValue)?) throws -> (any EcoreValue)? {
+        if let stringValue = receiverValue as? String {
+            return !stringValue.isEmpty
+        }
+        return !toCollection(receiverValue).isEmpty
+    }
+
     // MARK: - OCL Collection Operations
 
     /// Handles collection `includes` operation.
     private func handleIncludes(_ receiverValue: (any EcoreValue)?, _ element: (any EcoreValue)?)
         throws -> (any EcoreValue)?
     {
-        guard let collection = receiverValue as? [Any] else {
-            throw ATLExecutionError.typeError("includes() requires Collection receiver")
-        }
+        let collection = toCollection(receiverValue)
 
         return collection.contains { item in
-            return areValuesEqual(item as? (any EcoreValue), element)
+            return areValuesEqual(item, element)
         }
     }
 
@@ -1289,18 +1372,20 @@ public struct ATLMethodCallExpression: ATLExpression, Sendable, Equatable, Hasha
 
     /// Handles collection `first` operation.
     private func handleFirst(_ receiverValue: (any EcoreValue)?) throws -> (any EcoreValue)? {
-        guard let collection = receiverValue as? [Any], !collection.isEmpty else {
+        let collection = toCollection(receiverValue)
+        guard !collection.isEmpty else {
             throw ATLExecutionError.runtimeError("first() on empty collection")
         }
-        return collection.first as? (any EcoreValue)
+        return collection.first
     }
 
     /// Handles collection `last` operation.
     private func handleLast(_ receiverValue: (any EcoreValue)?) throws -> (any EcoreValue)? {
-        guard let collection = receiverValue as? [Any], !collection.isEmpty else {
+        let collection = toCollection(receiverValue)
+        guard !collection.isEmpty else {
             throw ATLExecutionError.runtimeError("last() on empty collection")
         }
-        return collection.last as? (any EcoreValue)
+        return collection.last
     }
 
     /// Handles collection `select` operation with lambda expression.
@@ -1309,15 +1394,12 @@ public struct ATLMethodCallExpression: ATLExpression, Sendable, Equatable, Hasha
         _ lambdaExpression: ATLLambdaExpression,
         _ context: ATLExecutionContext
     ) async throws -> (any EcoreValue)? {
-        guard let collection = receiverValue as? [Any] else {
-            throw ATLExecutionError.typeError("select() requires Collection receiver")
-        }
-
-        var results: [Any] = []
+        let collection = toCollection(receiverValue)
+        var results: [any EcoreValue] = []
 
         for item in collection {
             let result = try await lambdaExpression.evaluateWith(
-                parameterValue: item as? (any EcoreValue),
+                parameterValue: item,
                 in: context
             )
 
@@ -1326,7 +1408,7 @@ public struct ATLMethodCallExpression: ATLExpression, Sendable, Equatable, Hasha
             }
         }
 
-        return results as? (any EcoreValue)
+        return EcoreValueArray(results)
     }
 
     /// Handles collection `select` operation with fallback for non-lambda expressions.
@@ -1336,27 +1418,9 @@ public struct ATLMethodCallExpression: ATLExpression, Sendable, Equatable, Hasha
         _ predicate: (any EcoreValue)?,
         _ context: ATLExecutionContext
     ) async throws -> (any EcoreValue)? {
-        guard let collection = receiverValue as? [Any] else {
-            throw ATLExecutionError.typeError("select() requires Collection receiver")
-        }
-
-        var results: [Any] = []
-
-        // This is for fallback cases where we have an evaluated expression result
-        // In most cases, we should use handleSelectWithLambda instead
-        context.pushScope()
-        defer {
-            context.popScope()
-        }
-
-        for item in collection {
-            context.setVariable("self", value: item as? (any EcoreValue))
-            // For now, we can't re-evaluate a predicate result
-            // This would need a different approach
-            results.append(item)
-        }
-
-        return results as? (any EcoreValue)
+        let collection = toCollection(receiverValue)
+        // Fallback: without a re-evaluatable predicate, include all items
+        return EcoreValueArray(collection)
     }
 
     /// Handles collection `reject` operation with lambda expression.
@@ -1365,15 +1429,12 @@ public struct ATLMethodCallExpression: ATLExpression, Sendable, Equatable, Hasha
         _ lambdaExpression: ATLLambdaExpression,
         _ context: ATLExecutionContext
     ) async throws -> (any EcoreValue)? {
-        guard let collection = receiverValue as? [Any] else {
-            throw ATLExecutionError.typeError("reject() requires Collection receiver")
-        }
-
-        var results: [Any] = []
+        let collection = toCollection(receiverValue)
+        var results: [any EcoreValue] = []
 
         for item in collection {
             let result = try await lambdaExpression.evaluateWith(
-                parameterValue: item as? (any EcoreValue),
+                parameterValue: item,
                 in: context
             )
 
@@ -1382,7 +1443,7 @@ public struct ATLMethodCallExpression: ATLExpression, Sendable, Equatable, Hasha
             }
         }
 
-        return results as? (any EcoreValue)
+        return EcoreValueArray(results)
     }
 
     /// Handles collection `reject` operation with fallback for non-lambda expressions.
@@ -1392,24 +1453,8 @@ public struct ATLMethodCallExpression: ATLExpression, Sendable, Equatable, Hasha
         _ predicate: (any EcoreValue)?,
         _ context: ATLExecutionContext
     ) async throws -> (any EcoreValue)? {
-        guard let collection = receiverValue as? [Any] else {
-            throw ATLExecutionError.typeError("reject() requires Collection receiver")
-        }
-
-        var results: [Any] = []
-
-        // This is for fallback cases where we have an evaluated expression result
-        context.pushScope()
-        defer {
-            context.popScope()
-        }
-
-        for item in collection {
-            context.setVariable("self", value: item as? (any EcoreValue))
-            results.append(item)
-        }
-
-        return results as? (any EcoreValue)
+        // Fallback without re-evaluatable predicate: return full collection
+        return EcoreValueArray(toCollection(receiverValue))
     }
 
     /// Handles collection `collect` operation with fallback for non-lambda expressions.
@@ -1419,24 +1464,8 @@ public struct ATLMethodCallExpression: ATLExpression, Sendable, Equatable, Hasha
         _ transformer: (any EcoreValue)?,
         _ context: ATLExecutionContext
     ) async throws -> (any EcoreValue)? {
-        guard let collection = receiverValue as? [Any] else {
-            throw ATLExecutionError.typeError("collect() requires Collection receiver")
-        }
-
-        var results: [Any] = []
-
-        // This is for fallback cases where we have an evaluated expression result
-        context.pushScope()
-        defer {
-            context.popScope()
-        }
-
-        for item in collection {
-            context.setVariable("self", value: item as? (any EcoreValue))
-            results.append(item)
-        }
-
-        return results as? (any EcoreValue)
+        // Fallback without re-evaluatable transformer: return full collection
+        return EcoreValueArray(toCollection(receiverValue))
     }
 
     /// Handles collection `collect` operation with lambda expression.
@@ -1445,15 +1474,12 @@ public struct ATLMethodCallExpression: ATLExpression, Sendable, Equatable, Hasha
         _ lambdaExpression: ATLLambdaExpression,
         _ context: ATLExecutionContext
     ) async throws -> (any EcoreValue)? {
-        guard let collection = receiverValue as? [Any] else {
-            throw ATLExecutionError.typeError("collect() requires Collection receiver")
-        }
-
-        var results: [Any] = []
+        let collection = toCollection(receiverValue)
+        var results: [any EcoreValue] = []
 
         for item in collection {
             let result = try await lambdaExpression.evaluateWith(
-                parameterValue: item as? (any EcoreValue),
+                parameterValue: item,
                 in: context
             )
 
@@ -1462,7 +1488,7 @@ public struct ATLMethodCallExpression: ATLExpression, Sendable, Equatable, Hasha
             }
         }
 
-        return results as? (any EcoreValue)
+        return EcoreValueArray(results)
     }
 
     /// Handles collection `exists` operation with lambda expression.
@@ -1471,13 +1497,11 @@ public struct ATLMethodCallExpression: ATLExpression, Sendable, Equatable, Hasha
         _ lambdaExpression: ATLLambdaExpression,
         _ context: ATLExecutionContext
     ) async throws -> (any EcoreValue)? {
-        guard let collection = receiverValue as? [Any] else {
-            throw ATLExecutionError.typeError("exists() requires Collection receiver")
-        }
+        let collection = toCollection(receiverValue)
 
         for item in collection {
             let result = try await lambdaExpression.evaluateWith(
-                parameterValue: item as? (any EcoreValue),
+                parameterValue: item,
                 in: context
             )
 
@@ -1496,11 +1520,7 @@ public struct ATLMethodCallExpression: ATLExpression, Sendable, Equatable, Hasha
         _ predicate: (any EcoreValue)?,
         _ context: ATLExecutionContext
     ) async throws -> (any EcoreValue)? {
-        guard let collection = receiverValue as? [Any] else {
-            throw ATLExecutionError.typeError("exists() requires Collection receiver")
-        }
-
-        return !collection.isEmpty
+        return !toCollection(receiverValue).isEmpty
     }
 
     /// Handles collection `forAll` operation with lambda expression.
@@ -1509,13 +1529,11 @@ public struct ATLMethodCallExpression: ATLExpression, Sendable, Equatable, Hasha
         _ lambdaExpression: ATLLambdaExpression,
         _ context: ATLExecutionContext
     ) async throws -> (any EcoreValue)? {
-        guard let collection = receiverValue as? [Any] else {
-            throw ATLExecutionError.typeError("forAll() requires Collection receiver")
-        }
+        let collection = toCollection(receiverValue)
 
         for item in collection {
             let result = try await lambdaExpression.evaluateWith(
-                parameterValue: item as? (any EcoreValue),
+                parameterValue: item,
                 in: context
             )
 
@@ -1534,10 +1552,6 @@ public struct ATLMethodCallExpression: ATLExpression, Sendable, Equatable, Hasha
         _ predicate: (any EcoreValue)?,
         _ context: ATLExecutionContext
     ) async throws -> (any EcoreValue)? {
-        guard receiverValue as? [Any] != nil else {
-            throw ATLExecutionError.typeError("forAll() requires Collection receiver")
-        }
-
         return true  // Fallback assumes all pass
     }
 
@@ -1547,15 +1561,12 @@ public struct ATLMethodCallExpression: ATLExpression, Sendable, Equatable, Hasha
         _ lambdaExpression: ATLLambdaExpression,
         _ context: ATLExecutionContext
     ) async throws -> (any EcoreValue)? {
-        guard let collection = receiverValue as? [Any] else {
-            throw ATLExecutionError.typeError("one() requires Collection receiver")
-        }
-
+        let collection = toCollection(receiverValue)
         var matchCount = 0
 
         for item in collection {
             let result = try await lambdaExpression.evaluateWith(
-                parameterValue: item as? (any EcoreValue),
+                parameterValue: item,
                 in: context
             )
 
@@ -1577,11 +1588,7 @@ public struct ATLMethodCallExpression: ATLExpression, Sendable, Equatable, Hasha
         _ predicate: (any EcoreValue)?,
         _ context: ATLExecutionContext
     ) async throws -> (any EcoreValue)? {
-        guard let collection = receiverValue as? [Any] else {
-            throw ATLExecutionError.typeError("one() requires Collection receiver")
-        }
-
-        return collection.count == 1
+        return toCollection(receiverValue).count == 1
     }
 
     /// Handles collection `iterate` operation.
@@ -1592,9 +1599,7 @@ public struct ATLMethodCallExpression: ATLExpression, Sendable, Equatable, Hasha
         _ iterator: (any EcoreValue)?,
         _ context: ATLExecutionContext
     ) async throws -> (any EcoreValue)? {
-        guard let collection = receiverValue as? [Any] else {
-            throw ATLExecutionError.typeError("iterate() requires Collection receiver")
-        }
+        let collection = toCollection(receiverValue)
 
         guard let iteratorExpr = iterator as? any ATLExpression else {
             throw ATLExecutionError.typeError("iterate() requires expression argument")
@@ -1608,7 +1613,7 @@ public struct ATLMethodCallExpression: ATLExpression, Sendable, Equatable, Hasha
         }
 
         for item in collection {
-            context.setVariable("it", value: item as? (any EcoreValue))
+            context.setVariable("it", value: item)
             context.setVariable("acc", value: accValue)
             accValue = try await iteratorExpr.evaluate(in: context)
         }
@@ -1616,117 +1621,71 @@ public struct ATLMethodCallExpression: ATLExpression, Sendable, Equatable, Hasha
         return accValue
     }
 
-    /// Handles collection type conversion to Sequence.
+    /// Handles collection type conversion to Sequence (ordered, allows duplicates).
     private func handleAsSequence(_ receiverValue: (any EcoreValue)?) throws -> (any EcoreValue)? {
-        guard let collection = receiverValue as? [Any] else {
-            throw ATLExecutionError.typeError("asSequence() requires Collection receiver")
-        }
-        return collection.compactMap { $0 as? String }  // Convert to string array
+        return EcoreValueArray(toCollection(receiverValue))
     }
 
-    /// Handles collection type conversion to Set.
+    /// Handles collection type conversion to Set (unordered, no duplicates).
     private func handleAsSet(_ receiverValue: (any EcoreValue)?) throws -> (any EcoreValue)? {
-        guard let collection = receiverValue as? [Any] else {
-            throw ATLExecutionError.typeError("asSet() requires Collection receiver")
-        }
-
-        // Remove duplicates while preserving order
+        let collection = toCollection(receiverValue)
         var seen = Set<String>()
-        var uniqueItems: [Any] = []
-
+        var unique: [any EcoreValue] = []
         for item in collection {
             let key = String(describing: item)
-            if !seen.contains(key) {
-                seen.insert(key)
-                uniqueItems.append(item)
+            if seen.insert(key).inserted {
+                unique.append(item)
             }
         }
-
-        return uniqueItems.compactMap { $0 as? String }
+        return EcoreValueArray(unique)
     }
 
-    /// Handles collection type conversion to Bag.
+    /// Handles collection type conversion to Bag (unordered, allows duplicates).
     private func handleAsBag(_ receiverValue: (any EcoreValue)?) throws -> (any EcoreValue)? {
-        guard let collection = receiverValue as? [Any] else {
-            throw ATLExecutionError.typeError("asBag() requires Collection receiver")
-        }
-        return collection.compactMap { $0 as? String }  // Convert to string array
+        return EcoreValueArray(toCollection(receiverValue))
     }
 
-    /// Handles collection type conversion to OrderedSet.
+    /// Handles collection type conversion to OrderedSet (ordered, no duplicates).
     private func handleAsOrderedSet(_ receiverValue: (any EcoreValue)?) throws -> (any EcoreValue)? {
-        guard let collection = receiverValue as? [Any] else {
-            throw ATLExecutionError.typeError("asOrderedSet() requires Collection receiver")
-        }
-
-        // Remove duplicates while preserving order
-        var seen = Set<String>()
-        var uniqueItems: [Any] = []
-
-        for item in collection {
-            let key = String(describing: item)
-            if !seen.contains(key) {
-                seen.insert(key)
-                uniqueItems.append(item)
-            }
-        }
-
-        return uniqueItems.compactMap { $0 as? String }
+        return try handleAsSet(receiverValue)
     }
 
     /// Handles collection `union` operation.
     private func handleUnion(_ receiverValue: (any EcoreValue)?, _ other: (any EcoreValue)?)
         throws -> (any EcoreValue)?
     {
-        guard let collection1 = receiverValue as? [Any],
-            let collection2 = other as? [Any]
-        else {
-            throw ATLExecutionError.typeError("union() requires Collection operands")
-        }
-
-        return (collection1 + collection2).compactMap { $0 as? String }
+        let collection1 = toCollection(receiverValue)
+        let collection2 = toCollection(other)
+        return EcoreValueArray(collection1 + collection2)
     }
 
     /// Handles collection `intersection` operation.
     private func handleIntersection(_ receiverValue: (any EcoreValue)?, _ other: (any EcoreValue)?)
         throws -> (any EcoreValue)?
     {
-        guard let collection1 = receiverValue as? [Any],
-            let collection2 = other as? [Any]
-        else {
-            throw ATLExecutionError.typeError("intersection() requires Collection operands")
+        let collection1 = toCollection(receiverValue)
+        let collection2 = toCollection(other)
+
+        let result = collection1.filter { item in
+            collection2.contains { areValuesEqual($0, item) }
         }
-
-        var intersection: [Any] = []
-
-        for item in collection1 {
-            if collection2.contains(where: { otherItem in
-                areValuesEqual(item as? (any EcoreValue), otherItem as? (any EcoreValue))
-            }) {
-                intersection.append(item)
-            }
-        }
-
-        return intersection.compactMap { $0 as? String }
+        return EcoreValueArray(result)
     }
 
     /// Handles collection `flatten` operation.
     private func handleFlatten(_ receiverValue: (any EcoreValue)?) throws -> (any EcoreValue)? {
-        guard let collection = receiverValue as? [Any] else {
-            throw ATLExecutionError.typeError("flatten() requires Collection receiver")
-        }
-
-        var flattened: [Any] = []
-
+        let collection = toCollection(receiverValue)
+        var flattened: [any EcoreValue] = []
         for item in collection {
-            if let nestedCollection = item as? [Any] {
-                flattened.append(contentsOf: nestedCollection)
+            if let nested = item as? EcoreValueArray {
+                flattened.append(contentsOf: nested.values)
+            } else if let anyArray = item as? [Any] {
+                flattened.append(contentsOf: anyArray.compactMap { $0 as? (any EcoreValue) })
             } else {
                 flattened.append(item)
             }
         }
-
-        return flattened.compactMap { $0 as? String }
+        return EcoreValueArray(flattened)
     }
 
     /// Handles collection `sortedBy` operation.
@@ -1736,37 +1695,48 @@ public struct ATLMethodCallExpression: ATLExpression, Sendable, Equatable, Hasha
         _ keySelector: (any EcoreValue)?,
         _ context: ATLExecutionContext
     ) async throws -> (any EcoreValue)? {
-        guard let collection = receiverValue as? [Any] else {
-            throw ATLExecutionError.typeError("sortedBy() requires Collection receiver")
-        }
+        let collection = toCollection(receiverValue)
 
         guard let keySelectorExpr = keySelector as? any ATLExpression else {
             throw ATLExecutionError.typeError("sortedBy() requires expression argument")
         }
 
         context.pushScope()
-        defer {
-            context.popScope()
-        }
+        defer { context.popScope() }
 
-        // Evaluate sort keys for all items
-        var itemsWithKeys: [(item: Any, key: Any)] = []
+        var itemsWithKeys: [(item: any EcoreValue, key: Any)] = []
 
         for item in collection {
-            context.setVariable("it", value: item as? (any EcoreValue))
+            context.setVariable("it", value: item)
             let key = try await keySelectorExpr.evaluate(in: context)
             itemsWithKeys.append((item: item, key: key as Any))
         }
 
-        // Sort by computed keys
         let sortedItems = itemsWithKeys.sorted { lhs, rhs in
-            return compareAnyValues(lhs.key, rhs.key) < 0
+            compareAnyValues(lhs.key, rhs.key) < 0
         }
 
-        return sortedItems.compactMap { $0.item as? String }
+        return EcoreValueArray(sortedItems.map { $0.item })
     }
 
     // MARK: - Utility Methods
+
+    /// Converts a value to a flat `[any EcoreValue]` for collection operations.
+    ///
+    /// Handles both `EcoreValueArray` (returned by `allInstances()`) and typed arrays
+    /// (e.g. `[String]`) stored as `(any EcoreValue)?`. Returns an empty array for `nil`.
+    private func toCollection(_ value: (any EcoreValue)?) -> [any EcoreValue] {
+        if let array = value as? EcoreValueArray { return array.values }
+        if let anyArray = value as? [Any] {
+            return anyArray.compactMap { $0 as? (any EcoreValue) }
+        }
+        return []
+    }
+
+    /// Wraps a `[any EcoreValue]` as an `EcoreValueArray` result.
+    private func wrapCollection(_ values: [any EcoreValue]) -> (any EcoreValue)? {
+        return EcoreValueArray(values)
+    }
 
     /// Compares two values for equality, handling different types appropriately.
     private func areValuesEqual(_ left: (any EcoreValue)?, _ right: (any EcoreValue)?) -> Bool {

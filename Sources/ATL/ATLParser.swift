@@ -285,12 +285,21 @@ public actor ATLParser {
                 }
             }
         } else {
-            // Regular relative path - resolve relative to ATL file
+            // Regular relative path - resolve relative to ATL file first
             let base = baseURL.deletingLastPathComponent()
             let candidate = base.appendingPathComponent(filePath)
             candidateURLs.append(candidate)
             if debug {
                 print("[ATL]     Relative candidate: \(candidate.path)")
+            }
+            // Also try each search path as a fallback
+            for searchPath in searchPaths {
+                let fallbackCandidate = URL(fileURLWithPath: searchPath)
+                    .appendingPathComponent(filePath)
+                candidateURLs.append(fallbackCandidate)
+                if debug {
+                    print("[ATL]     Search path fallback candidate: \(fallbackCandidate.path)")
+                }
             }
         }
 
