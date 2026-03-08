@@ -302,14 +302,23 @@ public final class ATLExecutionContext: Sendable {
 
     /// Call a helper function with arguments.
     ///
+    /// This method resolves standard registered helpers and also handles ATL's
+    /// `resolveTemp` operation as a built-in dispatch path. The built-in branch
+    /// keeps trace-link resolution available even when the module does not expose
+    /// `resolveTemp` as an ordinary helper definition.
+    ///
     /// - Parameters:
-    ///   - name: Helper name
-    ///   - arguments: Helper arguments
-    /// - Returns: Helper result
-    /// - Throws: `ATLExecutionError` if helper call fails
+    ///   - name: The helper name to call.
+    ///   - arguments: The evaluated helper arguments.
+    /// - Returns: The helper result, if one is produced.
+    /// - Throws: `ATLExecutionError` if helper dispatch or evaluation fails.
     public func callHelper(_ name: String, arguments: [(any EcoreValue)?]) async throws -> (
         any EcoreValue
     )? {
+        if name == "resolveTemp" {
+            return try await resolveTemp(arguments)
+        }
+
         guard let helper = helpers[name] else {
             throw ATLExecutionError.helperNotFound(name)
         }
@@ -349,14 +358,21 @@ public final class ATLExecutionContext: Sendable {
 
     /// Dispatch a `thisModule.method()` call.
     ///
-    /// Tries called rules first (via the owning virtual machine), then module helpers.
+    /// Dispatch first checks built-in operations such as `resolveTemp`, then
+    /// tries called rules through the owning virtual machine, and finally falls
+    /// back to module helpers. This mirrors ATL's mixed dispatch model while
+    /// preserving the existing helper resolution path.
     ///
     /// - Parameters:
-    ///   - name: Method name
-    ///   - arguments: Evaluated argument values
-    /// - Returns: The result of the dispatched call
-    /// - Throws: `ATLExecutionError` if dispatch fails
+    ///   - name: The method name to dispatch.
+    ///   - arguments: The evaluated argument values.
+    /// - Returns: The result of the dispatched call, if any.
+    /// - Throws: `ATLExecutionError` if dispatch fails.
     public func dispatchThisModuleMethod(_ name: String, arguments: [(any EcoreValue)?]) async throws -> (any EcoreValue)? {
+        if name == "resolveTemp" {
+            return try await resolveTemp(arguments)
+        }
+
         // Try called rules first via the virtual machine
         if module.calledRules[name] != nil, let vm = virtualMachine {
             let elements = try await vm.executeCalledRule(name, arguments: arguments)
@@ -384,6 +400,37 @@ public final class ATLExecutionContext: Sendable {
             )
         }
         return try await callHelper(name, arguments: [])
+    }
+
+    /// Resolve the first target element traced from a source object.
+    ///
+    /// ATL's `resolveTemp` normally accepts a source object and a target pattern
+    /// variable name. The current runtime stores trace links without per-variable
+    /// labels, so this implementation resolves the first target linked to the
+    /// supplied source object. That is sufficient for the transformations used by
+    /// `swift-fsmlib`, where each relevant trace currently maps to a single
+    /// target object.
+    ///
+    /// - Parameter arguments: The evaluated ATL arguments, with the source object first.
+    /// - Returns: The resolved target object.
+    /// - Throws: `ATLExecutionError` if the arguments are invalid or no traced target can be found.
+    private func resolveTemp(_ arguments: [(any EcoreValue)?]) async throws -> (any EcoreValue)? {
+        guard let sourceObject = arguments.first as? (any EObject) else {
+            throw ATLExecutionError.typeError("resolveTemp() requires a source EObject as its first argument")
+        }
+
+        guard let traceLink = getTraceLinks(for: sourceObject.id).first,
+              let targetID = traceLink.targetElements.first else {
+            throw ATLExecutionError.runtimeError("resolveTemp() could not find a target element for source object \(sourceObject.id)")
+        }
+
+        for resource in targets.values {
+            if let targetObject = await resource.getObject(targetID) {
+                return targetObject
+            }
+        }
+
+        throw ATLExecutionError.runtimeError("resolveTemp() could not resolve target object \(targetID)")
     }
 
     // MARK: - Element Creation (Command-Based)

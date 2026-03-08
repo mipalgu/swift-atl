@@ -257,10 +257,15 @@ public final class ATLVirtualMachine {
 
     /// Executes a matched rule for a specific source element.
     ///
+    /// The rule is evaluated in its own scope with the source element bound to
+    /// the source pattern variable. Target elements are created and bound before
+    /// property bindings run so later bindings can refer to sibling target
+    /// variables within the same rule execution.
+    ///
     /// - Parameters:
-    ///   - rule: The matched rule to execute
-    ///   - sourceElement: The source element to transform
-    /// - Throws: ATL execution errors for rule execution failures
+    ///   - rule: The matched rule to execute.
+    ///   - sourceElement: The source element to transform.
+    /// - Throws: ATL execution errors for rule execution failures.
     private func executeRuleForElement(_ rule: ATLMatchedRule, sourceElement: any EObject)
         async throws
     {
@@ -303,20 +308,27 @@ public final class ATLVirtualMachine {
             }
         }
 
-        // Create target elements for each target pattern
+        // Create and bind all target elements first so sibling target variables
+        // are available during subsequent property binding.
         var createdElements: [EUUID] = []
+        var targetElementsByVariable: [String: any EObject] = [:]
 
         for targetPattern in rule.targetPatterns {
             let targetElement = try await createTargetElement(targetPattern)
             createdElements.append(targetElement.id)
-
-            // Bind target element to pattern variable
+            targetElementsByVariable[targetPattern.variableName] = targetElement
             executionContext.setVariable(targetPattern.variableName, value: targetElement)
+        }
 
-            // Apply property bindings and get the updated element
-            let updatedElement = try await applyPropertyBindings(targetPattern, targetElement: targetElement)
-
-            // Update the element in the variable scope (in case it's referenced later)
+        for targetPattern in rule.targetPatterns {
+            guard let targetElement = targetElementsByVariable[targetPattern.variableName] else {
+                continue
+            }
+            let updatedElement = try await applyPropertyBindings(
+                targetPattern,
+                targetElement: targetElement
+            )
+            targetElementsByVariable[targetPattern.variableName] = updatedElement
             executionContext.setVariable(targetPattern.variableName, value: updatedElement)
         }
 
@@ -472,13 +484,15 @@ public final class ATLVirtualMachine {
     ///
     /// Called rules provide imperative transformation capabilities within the
     /// otherwise declarative ATL framework. They are invoked explicitly with
-    /// parameters and can create multiple target elements.
+    /// parameters and can create multiple target elements. Target variables are
+    /// bound before property bindings are evaluated so references between sibling
+    /// target patterns resolve consistently during the same rule invocation.
     ///
     /// - Parameters:
-    ///   - ruleName: The name of the called rule to execute
-    ///   - arguments: The argument values to pass to the rule
-    /// - Returns: The created target elements
-    /// - Throws: ATL execution errors for rule execution failures
+    ///   - ruleName: The name of the called rule to execute.
+    ///   - arguments: The argument values to pass to the rule.
+    /// - Returns: The created target elements.
+    /// - Throws: ATL execution errors for rule execution failures.
     public func executeCalledRule(_ ruleName: String, arguments: [(any EcoreValue)?]) async throws
         -> [any EObject]
     {
@@ -504,19 +518,26 @@ public final class ATLVirtualMachine {
             executionContext.setVariable(parameter.name, value: argument)
         }
 
-        // Create target elements
-        var createdElements: [any EObject] = []
+        // Create and bind all target elements first so sibling target variables
+        // are available during subsequent property binding.
+        var createdElementsByVariable: [String: any EObject] = [:]
         for targetPattern in rule.targetPatterns {
             let targetElement = try await createTargetElement(targetPattern)
-
-            // Bind target element variable
+            createdElementsByVariable[targetPattern.variableName] = targetElement
             executionContext.setVariable(targetPattern.variableName, value: targetElement)
+        }
 
-            // Apply property bindings and get the updated element
-            let updatedElement = try await applyPropertyBindings(targetPattern, targetElement: targetElement)
+        var createdElements: [any EObject] = []
+        for targetPattern in rule.targetPatterns {
+            guard let targetElement = createdElementsByVariable[targetPattern.variableName] else {
+                continue
+            }
+            let updatedElement = try await applyPropertyBindings(
+                targetPattern,
+                targetElement: targetElement
+            )
+            createdElementsByVariable[targetPattern.variableName] = updatedElement
             createdElements.append(updatedElement)
-
-            // Update the element in the variable scope (in case it's referenced later)
             executionContext.setVariable(targetPattern.variableName, value: updatedElement)
         }
 
