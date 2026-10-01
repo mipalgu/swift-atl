@@ -15,26 +15,6 @@ import Testing
 
 // MARK: - Fixture
 
-/// A test expression evaluating the given expressions to a collection.
-struct ListExpression: ATLExpression {
-    let elements: [any ATLExpression]
-
-    @MainActor
-    func evaluate(in context: ATLExecutionContext) async throws -> (any EcoreValue)? {
-        var values: [any EcoreValue] = []
-        for element in elements {
-            if let value = try await element.evaluate(in: context) { values.append(value) }
-        }
-        return EcoreValueArray(values)
-    }
-
-    static func == (lhs: ListExpression, rhs: ListExpression) -> Bool {
-        lhs.elements.count == rhs.elements.count
-    }
-
-    func hash(into hasher: inout Hasher) { hasher.combine(elements.count) }
-}
-
 /// Hand-built source and target metamodels together with a source model.
 ///
 /// The source metamodel has `Node` (with the `Special` subclass), `Leaf` and
@@ -443,41 +423,20 @@ struct ATLResolveTempTests {
     func tupleSources() async throws {
         var fixture = SemanticsFixture()
         await fixture.populate()
-        let tuple = ListExpression(elements: [
-            ATLVariableExpression(name: "a"), ATLVariableExpression(name: "b"),
-        ])
-        let lookup = ATLMethodCallExpression(
-            receiver: ATLVariableExpression(name: "thisModule"),
-            methodName: "resolveTemp",
-            arguments: [tuple, ATLLiteralExpression(value: "t")]
-        )
-        let again = ATLMatchedRule(
-            name: "Again",
-            sourcePattern: ATLSourcePattern(variableName: "a", type: "Src!Node"),
-            targetPatterns: [
-                ATLTargetPattern(
-                    variableName: "u", type: "Tgt!TNode",
-                    bindings: [
-                        ATLPropertyBinding(
-                            property: "name", expression: ATLLiteralExpression(value: "again")),
-                        ATLPropertyBinding(property: "next", expression: lookup),
-                    ])
-            ],
-            guard: ATLBinaryExpression(
-                left: ATLNavigationExpression(
-                    source: ATLVariableExpression(name: "a"), property: "name"),
-                operator: .equals,
-                right: ATLNavigationExpression(
-                    source: ATLVariableExpression(name: "b"), property: "name")),
-            additionalSourcePatterns: [ATLSourcePattern(variableName: "b", type: "Src!Leaf")]
-        )
         try await fixture.run(
             """
             rule Pair {
                 from a : Src!Node, b : Src!Leaf (a.name = b.name)
                 to t : Tgt!TNode (name <- a.name + '/' + b.name)
             }
-            """, extraRules: [again])
+            rule Again {
+                from a : Src!Node, b : Src!Leaf (a.name = b.name)
+                to u : Tgt!TNode (
+                    name <- 'again',
+                    next <- thisModule.resolveTemp(Sequence{a, b}, 't')
+                )
+            }
+            """)
         let pair = try #require(await fixture.target("TNode", named: "alpha/alpha"))
         let results = await fixture.targets("TNode").filter { $0.eGet("name") as? String == "again" }
         #expect(results.count == 1)
