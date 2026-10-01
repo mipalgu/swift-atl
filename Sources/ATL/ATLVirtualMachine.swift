@@ -540,7 +540,8 @@ public final class ATLVirtualMachine {
     /// - Parameters:
     ///   - ruleName: The name of the called rule to execute.
     ///   - arguments: The argument values to pass to the rule.
-    /// - Returns: The created target elements, or none if a lazy rule's guard fails.
+    /// - Returns: The created target elements, or none if a lazy rule's guard fails or
+    ///   one of its arguments is undefined.
     /// - Throws: ATL execution errors for rule execution failures.
     public func executeCalledRule(_ ruleName: String, arguments: [(any EcoreValue)?]) async throws
         -> [any EObject]
@@ -554,6 +555,11 @@ public final class ATLVirtualMachine {
             throw ATLExecutionError.invalidOperation(
                 "Called rule '\(ruleName)' expects \(rule.parameters.count) arguments, got \(arguments.count)"
             )
+        }
+
+        // A lazy rule transforms source elements, so an undefined argument yields nothing
+        if rule.isLazy, arguments.contains(where: { $0 == nil }) {
+            return []
         }
 
         let uniqueKey = ATLUniqueRuleKey(ruleName: ruleName, arguments: arguments)
