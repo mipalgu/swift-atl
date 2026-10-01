@@ -693,16 +693,8 @@ private class ATLSyntaxParser {
             if currentToken()?.type == .keyword("helper") {
                 let helper = try parseHelper()
                 helpers[helper.name] = helper
-            } else if currentToken()?.type == .keyword("lazy") {
-                // Parse lazy rule (same as called rule in ATL)
-                advance()  // consume 'lazy'
-                guard consumeKeyword("rule") else {
-                    throw ATLParseError.invalidSyntax("Expected 'rule' keyword after 'lazy'")
-                }
-                let rule = try parseLazyRule()
-                calledRules[rule.name] = rule
-            } else if currentToken()?.type == .keyword("rule") {
-                let rule = try parseRule()
+            } else if startsRuleDeclaration() {
+                let rule = try parseRuleDeclaration()
                 if let matchedRule = rule as? ATLMatchedRule {
                     matchedRules.append(matchedRule)
                 } else if let calledRule = rule as? ATLCalledRule {
@@ -1032,171 +1024,6 @@ private class ATLSyntaxParser {
                 "Expected type identifier, but found token: '\(typeToken.value)' of type \(typeToken.type)"
             )
         }
-    }
-
-    private func parseRule() throws -> any ATLRuleType {
-        guard consumeKeyword("rule") else {
-            throw ATLParseError.invalidSyntax("Expected 'rule' keyword")
-        }
-
-        guard let nameToken = currentToken(),
-            case .identifier(let ruleName) = nameToken.type
-        else {
-            throw ATLParseError.invalidSyntax("Expected rule name")
-        }
-        advance()
-
-        // Check if this is a called rule (has parameters)
-        if currentToken()?.type == .punctuation("(") {
-            return try parseCalledRule(name: ruleName)
-        } else {
-            return try parseMatchedRule(name: ruleName)
-        }
-    }
-
-    private func parseMatchedRule(name: String) throws -> ATLMatchedRule {
-        guard consumePunctuation("{") else {
-            throw ATLParseError.invalidSyntax("Expected '{' to start matched rule body")
-        }
-
-        // Parse 'from' clause
-        guard consumeKeyword("from") else {
-            throw ATLParseError.invalidSyntax("Expected 'from' clause in matched rule")
-        }
-        let sourcePattern = try parseSourcePattern()
-
-        // Parse 'to' clause
-        guard consumeKeyword("to") else {
-            throw ATLParseError.invalidSyntax("Expected 'to' clause in matched rule")
-        }
-        var targetPatterns: [ATLTargetPattern] = []
-
-        repeat {
-            targetPatterns.append(try parseTargetPattern())
-
-            if currentToken()?.type == .punctuation(",") {
-                advance()
-            } else {
-                break
-            }
-        } while !isAtEnd() && currentToken()?.type != .punctuation("}")
-            && currentToken()?.type != .keyword("do")
-
-        // Parse optional 'do' block (skip for now)
-        if currentToken()?.type == .keyword("do") {
-            try skipDoBlock()
-        }
-
-        guard consumePunctuation("}") else {
-            throw ATLParseError.invalidSyntax("Expected '}' to end matched rule")
-        }
-
-        return ATLMatchedRule(
-            name: name,
-            sourcePattern: sourcePattern,
-            targetPatterns: targetPatterns,
-            guard: sourcePattern.guard
-        )
-    }
-
-    private func parseCalledRule(name: String) throws -> ATLCalledRule {
-        advance()  // consume '('
-        let parameters = try parseParameterList()
-        guard consumePunctuation(")") else {
-            throw ATLParseError.invalidSyntax("Expected ')' after called rule parameters")
-        }
-
-        guard consumePunctuation("{") else {
-            throw ATLParseError.invalidSyntax("Expected '{' to start called rule body")
-        }
-
-        // Parse 'to' clause
-        guard consumeKeyword("to") else {
-            throw ATLParseError.invalidSyntax("Expected 'to' clause in called rule")
-        }
-        var targetPatterns: [ATLTargetPattern] = []
-
-        repeat {
-            targetPatterns.append(try parseTargetPattern())
-
-            if currentToken()?.type == .punctuation(",") {
-                advance()
-            } else {
-                break
-            }
-        } while !isAtEnd() && currentToken()?.type != .punctuation("}")
-
-        guard consumePunctuation("}") else {
-            throw ATLParseError.invalidSyntax("Expected '}' to end called rule")
-        }
-
-        return ATLCalledRule(
-            name: name,
-            parameters: parameters,
-            targetPatterns: targetPatterns,
-            body: []  // Simplified for now
-        )
-    }
-
-    private func parseLazyRule() throws -> ATLCalledRule {
-        // Parse rule name
-        guard let nameToken = currentToken(),
-            case .identifier(let ruleName) = nameToken.type
-        else {
-            throw ATLParseError.invalidSyntax("Expected lazy rule name")
-        }
-        advance()
-
-        guard consumePunctuation("{") else {
-            throw ATLParseError.invalidSyntax("Expected '{' to start lazy rule body")
-        }
-
-        // Parse 'from' clause to extract parameter
-        guard consumeKeyword("from") else {
-            throw ATLParseError.invalidSyntax("Expected 'from' clause in lazy rule")
-        }
-
-        // Parse source pattern (which becomes the parameter)
-        guard let varToken = currentToken(),
-            case .identifier(let varName) = varToken.type
-        else {
-            throw ATLParseError.invalidSyntax("Expected source variable name")
-        }
-        advance()
-
-        guard consumeOperator(":") else {
-            throw ATLParseError.invalidSyntax("Expected ':' after source variable name")
-        }
-        let paramType = try parseTypeExpression()
-
-        let parameter = ATLParameter(name: varName, type: paramType)
-
-        // Parse 'to' clause
-        guard consumeKeyword("to") else {
-            throw ATLParseError.invalidSyntax("Expected 'to' clause in lazy rule")
-        }
-        var targetPatterns: [ATLTargetPattern] = []
-
-        repeat {
-            targetPatterns.append(try parseTargetPattern())
-
-            if currentToken()?.type == .punctuation(",") {
-                advance()
-            } else {
-                break
-            }
-        } while !isAtEnd() && currentToken()?.type != .punctuation("}")
-
-        guard consumePunctuation("}") else {
-            throw ATLParseError.invalidSyntax("Expected '}' to end lazy rule")
-        }
-
-        return ATLCalledRule(
-            name: ruleName,
-            parameters: [parameter],
-            targetPatterns: targetPatterns,
-            body: []  // Simplified for now
-        )
     }
 
     private func parseSourcePattern() throws -> ATLSourcePattern {
@@ -1732,29 +1559,6 @@ private class ATLSyntaxParser {
         }
     }
 
-    private func skipDoBlock() throws {
-        guard consumeKeyword("do") else {
-            throw ATLParseError.invalidSyntax("Expected 'do' keyword")
-        }
-        guard consumePunctuation("{") else {
-            throw ATLParseError.invalidSyntax("Expected '{' after 'do'")
-        }
-
-        var braceCount = 1
-        while !isAtEnd() && braceCount > 0 {
-            if currentToken()?.type == .punctuation("{") {
-                braceCount += 1
-            } else if currentToken()?.type == .punctuation("}") {
-                braceCount -= 1
-            }
-            advance()
-        }
-
-        if braceCount > 0 {
-            throw ATLParseError.invalidSyntax("Unclosed 'do' block")
-        }
-    }
-
     // MARK: - Helper Methods
 
     private func currentToken() -> ATLToken? {
@@ -1766,6 +1570,12 @@ private class ATLSyntaxParser {
         if position < tokens.count {
             position += 1
         }
+    }
+
+    fileprivate func peekToken(_ offset: Int) -> ATLToken? {
+        let index = position + offset
+        guard index >= 0, index < tokens.count else { return nil }
+        return tokens[index]
     }
 
     /// Parses an iterate expression with complex syntax.
@@ -2011,4 +1821,438 @@ private class ATLSyntaxParser {
         return true
     }
 
+}
+
+// MARK: - Rule Declarations
+
+/// The modifiers that can precede the `rule` keyword.
+private struct ATLRuleModifiers {
+
+    /// The rule is declared `abstract`.
+    var isAbstract = false
+
+    /// The rule is declared `unique`.
+    var isUnique = false
+
+    /// The rule is declared `lazy`.
+    var isLazy = false
+
+    /// The rule is declared `entrypoint`.
+    var isEntrypoint = false
+
+    /// The rule is declared `endpoint`.
+    var isEndpoint = false
+}
+
+extension ATLSyntaxParser {
+
+    /// Whether the current token starts a rule declaration.
+    ///
+    /// A declaration starts with the `rule` keyword or with rule modifiers that
+    /// are followed by it.
+    ///
+    /// - Returns: `true` if a rule declaration starts at the current token
+    fileprivate func startsRuleDeclaration() -> Bool {
+        var offset = 0
+        while let token = token(at: offset) {
+            if token.type == .keyword("rule") { return true }
+            guard isRuleModifier(token) else { return false }
+            offset += 1
+        }
+        return false
+    }
+
+    /// Whether a token is one of the rule modifiers.
+    ///
+    /// - Parameter token: The token to test
+    /// - Returns: `true` for `lazy`, `abstract`, `unique`, `entrypoint` and `endpoint`
+    private func isRuleModifier(_ token: ATLToken) -> Bool {
+        switch token.type {
+        case .keyword("lazy"):
+            return true
+        case .identifier(let name):
+            return [
+                ATLReservedNames.abstract, ATLReservedNames.unique,
+                ATLReservedNames.entrypoint, ATLReservedNames.endpoint,
+            ].contains(name)
+        default:
+            return false
+        }
+    }
+
+    /// Consumes the modifiers in front of the `rule` keyword.
+    ///
+    /// - Returns: The modifiers that were present
+    private func parseRuleModifiers() -> ATLRuleModifiers {
+        var modifiers = ATLRuleModifiers()
+        while let token = currentToken(), isRuleModifier(token) {
+            switch token.value {
+            case "lazy": modifiers.isLazy = true
+            case ATLReservedNames.abstract: modifiers.isAbstract = true
+            case ATLReservedNames.unique: modifiers.isUnique = true
+            case ATLReservedNames.entrypoint: modifiers.isEntrypoint = true
+            default: modifiers.isEndpoint = true
+            }
+            advance()
+        }
+        return modifiers
+    }
+
+    /// Consumes an identifier with the given text, if it is the current token.
+    ///
+    /// - Parameter text: The identifier text
+    /// - Returns: `true` if the identifier was consumed
+    private func consumeIdentifier(_ text: String) -> Bool {
+        guard let token = currentToken(), case .identifier(let name) = token.type, name == text
+        else { return false }
+        advance()
+        return true
+    }
+
+    /// Parses a matched, called or lazy rule including its modifiers.
+    ///
+    /// The body consists of the optional sections `from`, `using`, `to` and `do`
+    /// in that order. A rule with a parameter list is a called rule, a lazy rule
+    /// takes its parameters from its `from` section, and any other rule is a
+    /// matched rule.
+    ///
+    /// - Returns: The parsed ``ATLMatchedRule`` or ``ATLCalledRule``
+    /// - Throws: ``ATLParseError`` for malformed rule declarations
+    fileprivate func parseRuleDeclaration() throws -> any ATLRuleType {
+        let modifiers = parseRuleModifiers()
+        guard consumeKeyword("rule") else {
+            throw ATLParseError.invalidSyntax("Expected 'rule' keyword")
+        }
+        guard let nameToken = currentToken(), case .identifier(let name) = nameToken.type else {
+            throw ATLParseError.invalidSyntax("Expected rule name")
+        }
+        advance()
+
+        var parameters: [ATLParameter]?
+        if consumePunctuation("(") {
+            parameters = try parseParameterList()
+            guard consumePunctuation(")") else {
+                throw ATLParseError.invalidSyntax("Expected ')' after called rule parameters")
+            }
+        }
+
+        var superRuleName: String?
+        if consumeIdentifier(ATLReservedNames.extends) {
+            guard let superToken = currentToken(), case .identifier(let superName) = superToken.type
+            else {
+                throw ATLParseError.invalidSyntax("Expected rule name after 'extends'")
+            }
+            advance()
+            superRuleName = superName
+        }
+
+        guard consumePunctuation("{") else {
+            throw ATLParseError.invalidSyntax(
+                "Expected '{' to start \(parameters != nil ? "called" : modifiers.isLazy ? "lazy" : "matched") rule body"
+            )
+        }
+
+        var sourcePatterns: [ATLSourcePattern] = []
+        if consumeKeyword("from") {
+            sourcePatterns = try parseSourcePatternList()
+        }
+        let localVariables = try parseUsingSection()
+        var targetPatterns: [ATLTargetPattern] = []
+        if consumeKeyword("to") {
+            targetPatterns = try parseTargetPatternList()
+        }
+        var statements: [any ATLStatement] = []
+        if currentToken()?.type == .keyword("do") {
+            statements = try parseDoBlock()
+        }
+        guard consumePunctuation("}") else {
+            throw ATLParseError.invalidSyntax(
+                "Expected '}' to end \(parameters != nil ? "called" : modifiers.isLazy ? "lazy" : "matched") rule"
+            )
+        }
+
+        if modifiers.isLazy {
+            guard !sourcePatterns.isEmpty else {
+                throw ATLParseError.invalidSyntax("Expected 'from' clause in lazy rule")
+            }
+            guard !targetPatterns.isEmpty else {
+                throw ATLParseError.invalidSyntax("Expected 'to' clause in lazy rule")
+            }
+            guard superRuleName == nil else {
+                throw ATLParseError.invalidSyntax(
+                    "'extends' is only supported for matched rules, not lazy rule '\(name)'")
+            }
+            return ATLCalledRule(
+                name: name,
+                parameters: sourcePatterns.map { ATLParameter(name: $0.variableName, type: $0.type) },
+                targetPatterns: targetPatterns,
+                body: statements,
+                localVariables: localVariables,
+                isLazy: true,
+                isUnique: modifiers.isUnique,
+                guard: conjunction(of: sourcePatterns.compactMap(\.guard))
+            )
+        }
+
+        if let parameters {
+            guard superRuleName == nil else {
+                throw ATLParseError.invalidSyntax(
+                    "'extends' is only supported for matched rules, not called rule '\(name)'")
+            }
+            guard !targetPatterns.isEmpty || !statements.isEmpty else {
+                throw ATLParseError.invalidSyntax("Expected 'to' clause in called rule")
+            }
+            return ATLCalledRule(
+                name: name,
+                parameters: parameters,
+                targetPatterns: targetPatterns,
+                body: statements,
+                localVariables: localVariables,
+                isEntrypoint: modifiers.isEntrypoint,
+                isEndpoint: modifiers.isEndpoint
+            )
+        }
+
+        guard let primary = sourcePatterns.first else {
+            throw ATLParseError.invalidSyntax("Expected 'from' clause in matched rule")
+        }
+        guard !targetPatterns.isEmpty || modifiers.isAbstract || superRuleName != nil else {
+            throw ATLParseError.invalidSyntax("Expected 'to' clause in matched rule")
+        }
+        return ATLMatchedRule(
+            name: name,
+            sourcePattern: primary,
+            targetPatterns: targetPatterns,
+            guard: primary.guard,
+            additionalSourcePatterns: Array(sourcePatterns.dropFirst()),
+            localVariables: localVariables,
+            doStatements: statements,
+            superRuleName: superRuleName,
+            isAbstract: modifiers.isAbstract
+        )
+    }
+
+    /// Combines guard expressions with `and`.
+    ///
+    /// - Parameter guards: The guards to combine
+    /// - Returns: The conjunction, or `nil` without guards
+    private func conjunction(of guards: [any ATLExpression]) -> (any ATLExpression)? {
+        guard var combined = guards.first else { return nil }
+        for next in guards.dropFirst() {
+            combined = ATLBinaryExpression(left: combined, operator: .and, right: next)
+        }
+        return combined
+    }
+
+    /// Parses the comma-separated source patterns of a `from` section.
+    ///
+    /// - Returns: The source patterns in declaration order
+    /// - Throws: ``ATLParseError`` for malformed patterns
+    private func parseSourcePatternList() throws -> [ATLSourcePattern] {
+        var patterns = [try parseSourcePattern()]
+        while consumePunctuation(",") {
+            patterns.append(try parseSourcePattern())
+        }
+        return patterns
+    }
+
+    /// Parses the comma-separated target patterns of a `to` section.
+    ///
+    /// - Returns: The target patterns in declaration order
+    /// - Throws: ``ATLParseError`` for malformed patterns
+    private func parseTargetPatternList() throws -> [ATLTargetPattern] {
+        var patterns = [try parseTargetPattern()]
+        while consumePunctuation(",") {
+            patterns.append(try parseTargetPattern())
+        }
+        return patterns
+    }
+
+    /// Parses an optional `using { name : Type = expression; ... }` section.
+    ///
+    /// - Returns: The declared local variables, empty if there is no section
+    /// - Throws: ``ATLParseError`` for malformed declarations
+    private func parseUsingSection() throws -> [ATLLocalVariable] {
+        guard consumeIdentifier(ATLReservedNames.using) else { return [] }
+        guard consumePunctuation("{") else {
+            throw ATLParseError.invalidSyntax("Expected '{' after 'using'")
+        }
+        var variables: [ATLLocalVariable] = []
+        while !isAtEnd() && currentToken()?.type != .punctuation("}") {
+            guard let nameToken = currentToken(), case .identifier(let name) = nameToken.type else {
+                throw ATLParseError.invalidSyntax("Expected variable name in 'using' section")
+            }
+            advance()
+            var type: String?
+            if consumeOperator(":") {
+                type = try parseTypeExpression()
+            }
+            guard consumeOperator("=") else {
+                throw ATLParseError.invalidSyntax(
+                    "Expected '=' after variable '\(name)' in 'using' section")
+            }
+            variables.append(
+                ATLLocalVariable(name: name, type: type, expression: try parseExpression()))
+            consumePunctuation(";")
+        }
+        guard consumePunctuation("}") else {
+            throw ATLParseError.invalidSyntax("Expected '}' to end 'using' section")
+        }
+        return variables
+    }
+
+    // MARK: - Imperative Statements
+
+    /// Parses an imperative `do { ... }` block.
+    ///
+    /// - Returns: The statements of the block
+    /// - Throws: ``ATLParseError`` for malformed statements
+    private func parseDoBlock() throws -> [any ATLStatement] {
+        guard consumeKeyword("do") else {
+            throw ATLParseError.invalidSyntax("Expected 'do' keyword")
+        }
+        return try parseStatementBlock()
+    }
+
+    /// Parses a brace-delimited sequence of statements.
+    ///
+    /// - Returns: The statements of the block
+    /// - Throws: ``ATLParseError`` for a missing brace or a malformed statement
+    private func parseStatementBlock() throws -> [any ATLStatement] {
+        guard consumePunctuation("{") else {
+            throw ATLParseError.invalidSyntax("Expected '{' to start a block of statements")
+        }
+        var statements: [any ATLStatement] = []
+        while !isAtEnd() && currentToken()?.type != .punctuation("}") {
+            statements.append(try parseStatement())
+        }
+        guard consumePunctuation("}") else {
+            throw ATLParseError.invalidSyntax("Unclosed block of statements")
+        }
+        return statements
+    }
+
+    /// Parses one imperative statement.
+    ///
+    /// Statements are conditionals (`if (c) { } else { }`), loops
+    /// (`for (x in c) { }`), declarations (`x : T = e;`), assignments to
+    /// variables or target features (`x <- e;`, `t.f <- e;`, `x := e;`) and
+    /// expression statements.
+    ///
+    /// - Returns: The parsed statement
+    /// - Throws: ``ATLParseError`` for malformed statements
+    private func parseStatement() throws -> any ATLStatement {
+        if consumeKeyword("if") {
+            return try parseConditionalStatement()
+        }
+        if case .identifier(ATLReservedNames.forLoop)? = currentToken()?.type,
+            token(at: 1)?.type == .punctuation("(")
+        {
+            return try parseForStatement()
+        }
+        if let declaration = try parseDeclarationOrVariableAssignment() {
+            return declaration
+        }
+
+        let expression = try parseExpression()
+        let statement: any ATLStatement
+        if consumeOperator("<-") {
+            let value = try parseExpression()
+            switch expression {
+            case let variable as ATLVariableExpression:
+                statement = ATLAssignmentStatement(target: .variable(variable.name), value: value)
+            case let navigation as ATLNavigationExpression:
+                statement = ATLAssignmentStatement(
+                    target: .feature(owner: navigation.source, name: navigation.property),
+                    value: value)
+            default:
+                throw ATLParseError.invalidSyntax(
+                    "Expected a variable or a feature on the left of '<-'")
+            }
+        } else {
+            statement = ATLExpressionStatement(expression: expression)
+        }
+        consumePunctuation(";")
+        return statement
+    }
+
+    /// Parses a variable declaration or a `:=` assignment, if one starts here.
+    ///
+    /// - Returns: The statement, or `nil` if the statement is of another kind
+    /// - Throws: ``ATLParseError`` for malformed declarations
+    private func parseDeclarationOrVariableAssignment() throws -> (any ATLStatement)? {
+        guard case .identifier(let name)? = currentToken()?.type,
+            token(at: 1)?.type == .operator(":")
+        else { return nil }
+
+        if token(at: 2)?.type == .operator("=") {
+            advance()
+            advance()
+            advance()
+            let value = try parseExpression()
+            consumePunctuation(";")
+            return ATLAssignmentStatement(target: .variable(name), value: value)
+        }
+
+        advance()
+        advance()
+        let type = try parseTypeExpression()
+        var initialiser: (any ATLExpression)?
+        if consumeOperator("=") || consumeOperator("<-") {
+            initialiser = try parseExpression()
+        }
+        consumePunctuation(";")
+        return ATLVariableDeclarationStatement(name: name, type: type, initialiser: initialiser)
+    }
+
+    /// Parses the remainder of an `if` statement after the `if` keyword.
+    ///
+    /// - Returns: The conditional statement
+    /// - Throws: ``ATLParseError`` for a malformed condition or block
+    private func parseConditionalStatement() throws -> any ATLStatement {
+        let condition = try parseExpression()
+        let thenStatements = try parseStatementBlock()
+        var elseStatements: [any ATLStatement] = []
+        if consumeKeyword("else") {
+            if consumeKeyword("if") {
+                elseStatements = [try parseConditionalStatement()]
+            } else {
+                elseStatements = try parseStatementBlock()
+            }
+        }
+        consumePunctuation(";")
+        return ATLConditionalStatement(
+            condition: condition, thenStatements: thenStatements, elseStatements: elseStatements)
+    }
+
+    /// Parses a `for (variable in collection) { ... }` statement.
+    ///
+    /// - Returns: The for statement
+    /// - Throws: ``ATLParseError`` for a malformed header or block
+    private func parseForStatement() throws -> any ATLStatement {
+        advance()  // 'for'
+        advance()  // '('
+        guard case .identifier(let variable)? = currentToken()?.type else {
+            throw ATLParseError.invalidSyntax("Expected loop variable name after 'for ('")
+        }
+        advance()
+        guard consumeKeyword("in") else {
+            throw ATLParseError.invalidSyntax("Expected 'in' after loop variable '\(variable)'")
+        }
+        let collection = try parseExpression()
+        guard consumePunctuation(")") else {
+            throw ATLParseError.invalidSyntax("Expected ')' after the loop collection")
+        }
+        let body = try parseStatementBlock()
+        consumePunctuation(";")
+        return ATLForStatement(variable: variable, collection: collection, body: body)
+    }
+
+    /// Returns the token at an offset from the current position.
+    ///
+    /// - Parameter offset: The distance from the current token
+    /// - Returns: The token, or `nil` beyond the end of input
+    fileprivate func token(at offset: Int) -> ATLToken? {
+        return peekToken(offset)
+    }
 }
