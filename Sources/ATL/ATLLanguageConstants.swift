@@ -52,6 +52,9 @@ enum ATLLanguage {
     /// The name of the pseudo-variable that gives access to module-level members.
     static let thisModule = "thisModule"
 
+    /// The name of the feature that names a model element.
+    static let namePropertyName = "name"
+
     /// The name of the implicit receiver variable in contextual helpers.
     static let selfVariable = "self"
 
@@ -83,6 +86,10 @@ enum ATLLanguage {
         /// The name of the tuple type.
         static let tuple = "TupleType"
     }
+
+    /// The names of types that take a type argument, as in `Sequence(Integer)`.
+    static let genericTypeNames: Set<String> =
+        Set(ATLCollectionKind.allCases.map(\.rawValue)).union([SpecialType.collection])
 
     /// The escape sequences recognised inside string literals.
     enum StringEscape {

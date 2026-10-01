@@ -1774,6 +1774,11 @@ private class ATLSyntaxParser {
             // Parse tuple expression: Tuple{field1 : Type1 = expr1, field2 : Type2 = expr2, ...}
             return try parseTupleExpression()
 
+        case .identifier(let name)
+        where ATLLanguage.genericTypeNames.contains(name) && isNextPunctuation("("):
+            // A generic type used as a value, as in `oclIsKindOf(Sequence(Integer))`
+            return ATLTypeLiteralExpression(typeName: try parseTypeExpression())
+
         case .identifier(let collectionType)
         where ATLCollectionKind(rawValue: collectionType) != nil:
             // Handle collection literals like Sequence{}, Set{1, 2, 3}, etc.
@@ -2132,6 +2137,15 @@ private class ATLSyntaxParser {
         }
 
         return ATLTupleExpression(fields: fields)
+    }
+
+    /// Whether the token after the current one is the given punctuation.
+    ///
+    /// - Parameter punctuation: The punctuation to look for.
+    /// - Returns: `true` if the following token is that punctuation.
+    private func isNextPunctuation(_ punctuation: String) -> Bool {
+        guard position + 1 < tokens.count else { return false }
+        return tokens[position + 1].type == .punctuation(punctuation)
     }
 
     /// Consumes an infix keyword (`implies`, `xor`, `div`, `mod`), which the lexer reads as an identifier.

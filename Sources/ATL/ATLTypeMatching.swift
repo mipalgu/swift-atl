@@ -27,11 +27,11 @@ enum ATLTypeMatching {
     /// - Returns: The base name, such as `Class` or `Sequence`.
     static func baseName(_ typeName: String) -> String {
         var name = Substring(typeName)
-        if let separator = name.lastIndex(of: ATLLanguage.metamodelSeparator) {
-            name = name[name.index(after: separator)...]
-        }
         if let parenthesis = name.firstIndex(of: "(") {
             name = name[..<parenthesis]
+        }
+        if let separator = name.lastIndex(of: ATLLanguage.metamodelSeparator) {
+            name = name[name.index(after: separator)...]
         }
         return name.trimmingCharacters(in: .whitespaces)
     }

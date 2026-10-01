@@ -677,6 +677,8 @@ enum ATLTypeOperations {
         switch expression {
         case let literal as ATLTypeLiteralExpression:
             return literal.typeName
+        case let literal as ATLLiteralExpression where literal.value == nil:
+            return ATLLanguage.SpecialType.undefined
         case let variable as ATLVariableExpression:
             if let bound = (try? context.getVariable(variable.name)) as? String { return bound }
             return variable.name

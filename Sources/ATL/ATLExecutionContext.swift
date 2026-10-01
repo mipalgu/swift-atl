@@ -294,6 +294,11 @@ public final class ATLExecutionContext: Sendable {
                 return try await invokeContextHelper(helper, receiver: eObject, arguments: [])
             }
 
+            // Native metamodel elements answer their name without a reflective metamodel
+            if property == ATLLanguage.namePropertyName, let named = eObject as? any ENamedElement {
+                return named.name
+            }
+
             // Neither property nor helper found, rethrow original error
             throw error
         }
