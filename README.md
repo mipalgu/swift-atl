@@ -155,6 +155,11 @@ To use the CLI tool, install the [swift-modelling](https://github.com/mipalgu/sw
 - [ ] **OCL Expression Evaluation**: Full expression evaluation engine
 - [ ] **Model Loading**: XMI/JSON source model loading
 - [ ] **Model Saving**: Target model serialisation
+- [x] **Two-phase Execution**: All matched rules create their targets before any binding is applied
+- [x] **Implicit Trace Resolution**: Source elements bound to references become the target elements they were transformed into; `resolveTemp(source, 'pattern')` returns a named target pattern element
+- [x] **Cross-model References**: References to elements that were not transformed are stored as `ResourceProxy` values (URI of the source resource plus an XPath-style fragment) so that they serialise as cross-document `href`s
+- [x] **Rule Variants**: `abstract` rules, `extends` inheritance, `unique lazy` memoisation, `entrypoint` and `endpoint` rules, `using` variables and several source patterns in `from`
+- [x] **Imperative Blocks**: `do { }` sections with `target.feature <- value;`, variable declarations and assignments, `if`/`else`, `for` and expression statements
 
 
 ## Architecture

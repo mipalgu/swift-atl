@@ -1,0 +1,49 @@
+-- @path Families=Families.ecore
+-- @path Persons=Persons.ecore
+
+module Families2Persons;
+create OUT : Persons from IN : Families;
+
+rule Register2Register {
+	from
+		r : Families!Register
+	to
+		t : Persons!Register (
+			persons <- Families!Member.allInstances()
+		)
+}
+
+abstract rule Member2Person {
+	from
+		s : Families!Member
+	using {
+		fullName : String = s.firstName + ' ' + s.family.lastName;
+	}
+	to
+		t : Persons!Person (
+			fullName <- fullName,
+			age <- s.age,
+			partner <- s.spouse,
+			family <- s.family
+		)
+}
+
+rule Member2Male extends Member2Person {
+	from
+		s : Families!Member (not s.isFemale)
+	to
+		t : Persons!Male
+	do {
+		t.label <- 'male';
+	}
+}
+
+rule Member2Female extends Member2Person {
+	from
+		s : Families!Member (s.isFemale)
+	to
+		t : Persons!Female
+	do {
+		t.label <- 'female';
+	}
+}

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<families:Register xmi:version="2.0" xmlns:xmi="http://www.omg.org/XMI" xmlns:families="http://swift-atl.test/families">
+  <families lastName="March">
+    <members firstName="Jim" age="45" isFemale="false" spouse="//@families.0/@members.1"/>
+    <members firstName="Cindy" age="43" isFemale="true" spouse="//@families.0/@members.0"/>
+  </families>
+  <families lastName="Sailor">
+    <members firstName="Peter" age="30" isFemale="false"/>
+  </families>
+</families:Register>

@@ -150,11 +150,24 @@ public final class ATLVirtualMachine {
         }
 
         do {
-            // Execute matched rules for all applicable source elements
-            try await executeMatchedRules()
+            executionContext.resetTransformationState()
+
+            // Phase 1: match all rules and create every target element, so that
+            // bindings can resolve any source element regardless of rule order
+            let rules = try effectiveMatchedRules()
+            let matches = try await matchRules(rules)
+
+            try await executeCalledRules { $0.isEntrypoint }
+
+            // Phase 2: apply bindings and imperative blocks
+            for match in matches {
+                try await apply(match)
+            }
 
             // Resolve lazy bindings for forward references
             try await executionContext.resolveLazyBindings()
+
+            try await executeCalledRules { $0.isEndpoint }
 
             // Update execution statistics
             statistics.executionTime = Date().timeIntervalSince(startTime)
@@ -181,45 +194,68 @@ public final class ATLVirtualMachine {
 
     // MARK: - Matched Rule Execution
 
-    /// Executes all matched rules for applicable source elements.
+    /// A matched rule whose target elements have been created and await their bindings.
+    private struct PendingMatch {
+
+        /// The rule that matched.
+        let rule: ATLEffectiveMatchedRule
+
+        /// The source and `using` variables in scope when the bindings are evaluated.
+        let variables: [(name: String, value: (any EcoreValue)?)]
+
+        /// The identifiers of the created target elements, parallel to the rule's target patterns.
+        let targetIDs: [EUUID]
+    }
+
+    /// A tuple of source elements that satisfies a rule's source patterns and guards.
+    private struct MatchCandidate {
+
+        /// The rule the elements satisfy.
+        let rule: ATLEffectiveMatchedRule
+
+        /// The matched source elements, in source pattern order.
+        let sources: [any EObject]
+
+        /// The identifiers of the matched source elements.
+        var sourceIDs: [EUUID] { sources.map(\.id) }
+    }
+
+    /// Computes the effective matched rules of the module.
     ///
-    /// Matched rule execution involves iterating through all source model elements,
-    /// testing rule applicability, and executing transformation logic for matching elements.
-    ///
-    /// - Throws: ATL execution errors for rule execution failures
-    private func executeMatchedRules() async throws {
-        for rule in module.matchedRules {
-            try await executeMatchedRule(rule)
+    /// - Returns: The non-abstract matched rules with their inheritance resolved
+    /// - Throws: ATL execution errors for invalid `extends` relationships
+    private func effectiveMatchedRules() throws -> [ATLEffectiveMatchedRule] {
+        return try ATLRuleInheritance.effectiveRules(for: module.matchedRules) { sub, base in
+            let subClass = try self.sourceClass(forType: sub.type).eClass
+            let baseClass = try self.sourceClass(forType: base.type).eClass
+            return Self.conforms(subClass, to: baseClass)
         }
     }
 
-    /// Executes a specific matched rule for all applicable source elements.
+    /// Decides whether a class is the same as, or a subtype of, another class.
     ///
-    /// - Parameter rule: The matched rule to execute
-    /// - Throws: ATL execution errors for rule execution failures
-    private func executeMatchedRule(_ rule: ATLMatchedRule) async throws {
-        if debug {
-            print("[ATL] Executing rule: \(rule.name)")
-        }
+    /// - Parameters:
+    ///   - candidate: The potential subtype
+    ///   - base: The potential supertype
+    /// - Returns: `true` if `candidate` conforms to `base`
+    private static func conforms(_ candidate: EClass, to base: EClass) -> Bool {
+        if candidate.name == base.name { return true }
+        return candidate.eSuperTypes.contains { conforms($0, to: base) }
+    }
 
-        statistics.rulesExecuted += 1
-
-        // Parse source pattern to determine element type and namespace
-        let typeComponents = rule.sourcePattern.type.split(separator: "!")
+    /// Looks up the class and source model named by a qualified source type.
+    ///
+    /// - Parameter type: The qualified type, such as `Families!Member`
+    /// - Returns: The model alias and class
+    /// - Throws: ATL execution errors for malformed or unknown types
+    private func sourceClass(forType type: String) throws -> (alias: String, eClass: EClass) {
+        let typeComponents = type.split(separator: "!")
         guard typeComponents.count == 2 else {
-            throw ATLExecutionError.typeError(
-                "Invalid source type specification: '\(rule.sourcePattern.type)'"
-            )
+            throw ATLExecutionError.typeError("Invalid source type specification: '\(type)'")
         }
-
         let metamodelName = String(typeComponents[0])
         let sourceClassName = String(typeComponents[1])
 
-        if debug {
-            print("[ATL]   Source type: \(metamodelName)!\(sourceClassName)")
-        }
-
-        // Find the model alias that uses this metamodel
         guard
             let modelAlias = module.sourceMetamodels.first(where: { $0.value.name == metamodelName }
             )?.key
@@ -227,258 +263,265 @@ public final class ATLVirtualMachine {
             throw ATLExecutionError.invalidOperation(
                 "No source model found for metamodel '\(metamodelName)'")
         }
-
-        // Get source resource using the model alias
-        guard let sourceResource = executionContext.getSource(modelAlias) else {
-            throw ATLExecutionError.invalidOperation("Source model '\(modelAlias)' not found")
-        }
-
-        // Get source metamodel using the model alias
         guard let sourceMetamodel = module.sourceMetamodels[modelAlias] else {
             throw ATLExecutionError.invalidOperation("Source metamodel '\(modelAlias)' not found")
         }
-
-        // Find source class
-        guard let sourceClass = sourceMetamodel.getClassifier(sourceClassName) as? EClass else {
+        guard let eClass = sourceMetamodel.getClassifier(sourceClassName) as? EClass else {
             throw ATLExecutionError.typeError(
                 "Class '\(sourceClassName)' not found in metamodel '\(metamodelName)'"
             )
         }
-
-        // Get all elements of the specified type
-        let sourceElements = await sourceResource.getAllInstancesOf(sourceClass)
-
-        // Execute rule for each matching element
-        for sourceElement in sourceElements {
-            try await executeRuleForElement(rule, sourceElement: sourceElement)
-            statistics.elementsProcessed += 1
-        }
+        return (modelAlias, eClass)
     }
 
-    /// Executes a matched rule for a specific source element.
+    /// Matches all rules against the source models and creates their target elements.
     ///
-    /// The rule is evaluated in its own scope with the source element bound to
-    /// the source pattern variable. Target elements are created and bound before
-    /// property bindings run so later bindings can refer to sibling target
-    /// variables within the same rule execution.
+    /// A source element matched by both a rule and a rule extending it is
+    /// transformed by the extending rule only.
+    ///
+    /// - Parameter rules: The effective matched rules
+    /// - Returns: The matches, in rule and source element order
+    /// - Throws: ATL execution errors for rule execution failures
+    private func matchRules(_ rules: [ATLEffectiveMatchedRule]) async throws -> [PendingMatch] {
+        var candidates: [MatchCandidate] = []
+        for rule in rules {
+            if debug {
+                print("[ATL] Matching rule: \(rule.rule.name)")
+            }
+            statistics.rulesExecuted += 1
+            candidates.append(contentsOf: try await matchingCandidates(for: rule))
+        }
+
+        var matches: [PendingMatch] = []
+        for candidate in candidates {
+            let isHidden = candidates.contains { other in
+                other.sourceIDs == candidate.sourceIDs
+                    && other.rule.rule.name != candidate.rule.rule.name
+                    && other.rule.chainNames.contains(candidate.rule.rule.name)
+            }
+            if !isHidden {
+                matches.append(try await createTargets(for: candidate))
+            }
+        }
+        return matches
+    }
+
+    /// Finds the source element tuples that satisfy a rule's source patterns and guards.
+    ///
+    /// - Parameter rule: The rule to match
+    /// - Returns: The candidates, in source element order
+    /// - Throws: ATL execution errors for rule execution failures
+    private func matchingCandidates(for rule: ATLEffectiveMatchedRule) async throws -> [MatchCandidate] {
+        var instanceLists: [[any EObject]] = []
+        for pattern in rule.rule.sourcePatterns {
+            let (alias, eClass) = try sourceClass(forType: pattern.type)
+            guard let resource = executionContext.getSource(alias) else {
+                throw ATLExecutionError.invalidOperation("Source model '\(alias)' not found")
+            }
+            instanceLists.append(await resource.getAllInstancesOf(eClass))
+        }
+
+        var tuples: [[any EObject]] = [[]]
+        for instances in instanceLists {
+            tuples = tuples.flatMap { prefix in instances.map { prefix + [$0] } }
+        }
+
+        var result: [MatchCandidate] = []
+        for tuple in tuples {
+            statistics.elementsProcessed += 1
+            if try await satisfiesGuards(rule, sources: tuple) {
+                result.append(MatchCandidate(rule: rule, sources: tuple))
+            }
+        }
+        return result
+    }
+
+    /// Evaluates the guards of a rule and the rules it extends for a source element tuple.
     ///
     /// - Parameters:
-    ///   - rule: The matched rule to execute.
-    ///   - sourceElement: The source element to transform.
-    /// - Throws: ATL execution errors for rule execution failures.
-    private func executeRuleForElement(_ rule: ATLMatchedRule, sourceElement: any EObject)
-        async throws
+    ///   - rule: The rule whose guards are evaluated
+    ///   - sources: The source elements bound to the source patterns
+    /// - Returns: `true` if every guard holds
+    /// - Throws: Errors raised while evaluating a guard
+    private func satisfiesGuards(_ rule: ATLEffectiveMatchedRule, sources: [any EObject])
+        async throws -> Bool
     {
-        if debug {
-            print("[ATL]   Checking rule '\(rule.name)' for element: \(sourceElement.eClass.name)")
-        }
-
-        // Create new execution scope for rule
         executionContext.pushScope()
-        defer {
-            executionContext.popScope()
-        }
+        defer { executionContext.popScope() }
+        bindSourceVariables(of: rule, sources: sources)
 
-        // Bind source element to pattern variable
-        executionContext.setVariable(rule.sourcePattern.variableName, value: sourceElement)
-
-        // Evaluate guard condition if present
-        if let guardExpression = rule.`guard` {
-            if debug {
-                print("[ATL]     Evaluating guard...")
-            }
-
-            do {
-                let guardResult = try await guardExpression.evaluate(in: executionContext)
-                guard let guardBool = guardResult as? Bool, guardBool else {
+        for member in rule.chain {
+            var guards: [any ATLExpression] = []
+            if let guardExpression = member.`guard` { guards.append(guardExpression) }
+            guards.append(contentsOf: member.additionalSourcePatterns.compactMap(\.guard))
+            for guardExpression in guards {
+                let outcome = try await guardExpression.evaluate(in: executionContext)
+                guard let holds = outcome as? Bool, holds else {
                     if debug {
-                        print("[ATL]     Guard failed - skipping element")
+                        print("[ATL]     Guard of '\(member.name)' failed - skipping element")
                     }
-                    return  // Guard failed, skip rule execution
+                    return false
                 }
-
-                if debug {
-                    print("[ATL]     Guard passed")
-                }
-            } catch {
-                if debug {
-                    print("[ATL]     Guard evaluation error: \(error)")
-                }
-                throw error
             }
         }
-
-        // Create and bind all target elements first so sibling target variables
-        // are available during subsequent property binding.
-        var createdElements: [EUUID] = []
-        var targetElementsByVariable: [String: any EObject] = [:]
-
-        for targetPattern in rule.targetPatterns {
-            let targetElement = try await createTargetElement(targetPattern)
-            createdElements.append(targetElement.id)
-            targetElementsByVariable[targetPattern.variableName] = targetElement
-            executionContext.setVariable(targetPattern.variableName, value: targetElement)
-        }
-
-        for targetPattern in rule.targetPatterns {
-            guard let targetElement = targetElementsByVariable[targetPattern.variableName] else {
-                continue
-            }
-            let updatedElement = try await applyPropertyBindings(
-                targetPattern,
-                targetElement: targetElement
-            )
-            targetElementsByVariable[targetPattern.variableName] = updatedElement
-            executionContext.setVariable(targetPattern.variableName, value: updatedElement)
-        }
-
-        // Record trace link
-        executionContext.addTraceLink(
-            ruleName: rule.name,
-            sourceElement: sourceElement.id,
-            targetElements: createdElements
-        )
+        return true
     }
 
-    /// Creates a target element according to the target pattern specification.
+    /// Binds the source pattern variables of a rule and the rules it extends.
     ///
-    /// - Parameter pattern: The target pattern defining element creation
+    /// - Parameters:
+    ///   - rule: The rule whose variables are bound
+    ///   - sources: The source elements, in source pattern order
+    private func bindSourceVariables(of rule: ATLEffectiveMatchedRule, sources: [any EObject]) {
+        for member in rule.chain {
+            for (pattern, element) in zip(member.sourcePatterns, sources) {
+                executionContext.setVariable(pattern.variableName, value: element)
+            }
+        }
+    }
+
+    /// Creates the target elements of a matched rule and records the trace link.
+    ///
+    /// The `using` variables are evaluated first, so that they are available
+    /// to the bindings applied later.
+    ///
+    /// - Parameter candidate: The matched rule and source elements
+    /// - Returns: The pending match awaiting its bindings
+    /// - Throws: ATL execution errors for rule execution failures
+    private func createTargets(for candidate: MatchCandidate) async throws -> PendingMatch {
+        let rule = candidate.rule
+        executionContext.pushScope()
+        defer { executionContext.popScope() }
+
+        bindSourceVariables(of: rule, sources: candidate.sources)
+        var variables: [(name: String, value: (any EcoreValue)?)] = []
+        for member in rule.chain {
+            for (pattern, element) in zip(member.sourcePatterns, candidate.sources) {
+                variables.append((pattern.variableName, element))
+            }
+        }
+        for local in rule.localVariables {
+            let value = try await local.expression.evaluate(in: executionContext)
+            executionContext.setVariable(local.name, value: value)
+            variables.append((local.name, value))
+        }
+
+        var targetIDs: [EUUID] = []
+        for pattern in rule.targetPatterns {
+            targetIDs.append(try await createTargetElement(type: pattern.type).id)
+        }
+
+        let ids = candidate.sourceIDs
+        executionContext.addTraceLink(
+            ATLTraceLink(
+                ruleName: rule.rule.name,
+                sourceElement: ids[0],
+                targetElements: targetIDs,
+                additionalSourceElements: Array(ids.dropFirst()),
+                targetNames: rule.targetPatterns.map(\.variableName),
+                kind: .matched
+            ))
+        statistics.traceLinksCreated += 1
+
+        return PendingMatch(rule: rule, variables: variables, targetIDs: targetIDs)
+    }
+
+    /// Applies the bindings and imperative block of a matched rule.
+    ///
+    /// - Parameter match: The pending match whose target elements exist
+    /// - Throws: ATL execution errors for rule execution failures
+    private func apply(_ match: PendingMatch) async throws {
+        executionContext.pushScope()
+        defer { executionContext.popScope() }
+
+        for (name, value) in match.variables {
+            executionContext.setVariable(name, value: value)
+        }
+        try await applyTargetPatterns(match.rule.targetPatterns, targetIDs: match.targetIDs)
+        for statement in match.rule.doStatements {
+            try await statement.execute(in: executionContext)
+        }
+    }
+
+    /// Creates a target element of the given qualified type.
+    ///
+    /// - Parameter type: The qualified type, such as `Persons!Male`
     /// - Returns: The created target element
     /// - Throws: ATL execution errors for element creation failures
-    private func createTargetElement(_ pattern: ATLTargetPattern) async throws -> any EObject {
-        // Parse target type specification
-        let typeComponents = pattern.type.split(separator: "!")
+    private func createTargetElement(type: String) async throws -> any EObject {
+        let typeComponents = type.split(separator: "!")
         guard typeComponents.count == 2 else {
-            throw ATLExecutionError.typeError(
-                "Invalid target type specification: '\(pattern.type)'"
-            )
+            throw ATLExecutionError.typeError("Invalid target type specification: '\(type)'")
         }
-
-        let targetAlias = String(typeComponents[0])
-
-        return try await executionContext.createElement(type: pattern.type, in: targetAlias)
+        let element = try await executionContext.createElement(
+            type: type, in: String(typeComponents[0]))
+        statistics.elementsCreated += 1
+        return element
     }
 
-    /// Applies property bindings to a target element.
+    /// Binds the target pattern variables and applies the bindings of each pattern.
     ///
     /// - Parameters:
-    ///   - pattern: The target pattern containing property bindings
-    ///   - targetElement: The target element to configure
-    /// - Returns: The updated target element
+    ///   - patterns: The target patterns
+    ///   - targetIDs: The identifiers of the elements created for the patterns
     /// - Throws: ATL execution errors for binding failures
-    private func applyPropertyBindings(_ pattern: ATLTargetPattern, targetElement: any EObject)
-        async throws -> any EObject
+    private func applyTargetPatterns(_ patterns: [ATLEffectiveTargetPattern], targetIDs: [EUUID])
+        async throws
     {
-        var currentElement = targetElement
-
-        for binding in pattern.bindings {
-            do {
-                let propertyValue = try await binding.expression.evaluate(in: executionContext)
-                currentElement = try await setElementProperty(
-                    currentElement, property: binding.property, value: propertyValue, targetPattern: pattern)
-            } catch {
-                if debug {
-                    print(
-                        "[ATL DEBUG] Binding evaluation failed for property '\(binding.property)': \(error)"
-                    )
-                    print("[ATL DEBUG]   Creating lazy binding for later resolution")
-                }
-                // For forward references, create lazy binding with captured context
-                executionContext.addLazyBindingWithContext(
-                    targetElement: currentElement.id,
-                    property: binding.property,
-                    expression: binding.expression
-                )
+        var elements: [any EObject] = []
+        for (pattern, id) in zip(patterns, targetIDs) {
+            guard let element = await executionContext.findTargetObject(id) else {
+                throw ATLExecutionError.runtimeError("Target element \(id) not found")
+            }
+            elements.append(element)
+            executionContext.setVariable(pattern.variableName, value: element)
+        }
+        for (pattern, element) in zip(patterns, elements) {
+            for binding in pattern.bindings {
+                await applyBinding(binding, to: element)
             }
         }
-
-        return currentElement
     }
 
-    /// Sets a property value on a target element.
+    /// Evaluates a property binding and assigns its value to a target element.
+    ///
+    /// A binding that cannot be evaluated yet is retried once all rules have
+    /// been applied.
     ///
     /// - Parameters:
-    ///   - element: The target element to modify
-    ///   - property: The property name to set
-    ///   - value: The property value to assign
-    ///   - targetPattern: The target pattern to extract the target model alias
-    /// - Returns: The updated element
-    /// - Throws: ATL execution errors for invalid property operations
-    private func setElementProperty(_ element: any EObject, property: String, value: Any?, targetPattern: ATLTargetPattern) async throws -> any EObject {
-        guard let eClass = element.eClass as? EClass else {
-            throw ATLExecutionError.typeError(
-                "Element eClass is not an EClass: \(type(of: element.eClass))"
-            )
-        }
-
-        guard let feature = eClass.getStructuralFeature(name: property) else {
+    ///   - binding: The binding to apply
+    ///   - element: The target element to configure
+    private func applyBinding(_ binding: ATLPropertyBinding, to element: any EObject) async {
+        do {
+            let value = try await binding.expression.evaluate(in: executionContext)
+            try await executionContext.assignFeature(
+                on: element, feature: binding.property, value: value)
+        } catch {
             if debug {
-                print("[ATL DEBUG] Failed to find property '\(property)' in class '\(eClass.name)'")
                 print(
-                    "[ATL DEBUG]   Direct features: \(eClass.eStructuralFeatures.map { $0.name })")
-                print("[ATL DEBUG]   Super types: \(eClass.eSuperTypes.map { $0.name })")
-                print("[ATL DEBUG]   All features: \(eClass.allStructuralFeatures.map { $0.name })")
+                    "[ATL DEBUG] Binding evaluation failed for property '\(binding.property)': \(error)"
+                )
+                print("[ATL DEBUG]   Creating lazy binding for later resolution")
             }
-            throw ATLExecutionError.invalidOperation(
-                "Property '\(property)' not found in class '\(eClass.name)'"
+            executionContext.addLazyBindingWithContext(
+                targetElement: element.id,
+                property: binding.property,
+                expression: binding.expression
             )
         }
-
-        // For multi-valued features, convert EcoreValueArray of EObjects to [EUUID]
-        // so the XMI serialiser can resolve and serialise the references correctly.
-        let featureIsMany =
-            (feature as? EReference)?.isMany ?? (feature as? EAttribute)?.isMany ?? false
-        let valueToSet: (any EcoreValue)?
-        if featureIsMany, let collection = value as? EcoreValueArray {
-            let ids = collection.values.compactMap { ($0 as? any EObject)?.id }
-            if !ids.isEmpty {
-                // [EUUID] conforms to EcoreValue; the XMI serialiser resolves IDs to objects
-                valueToSet = ids
-            } else {
-                // Primitive or empty collection — store as-is
-                valueToSet = collection
-            }
-        } else {
-            valueToSet = value as? (any EcoreValue)
-        }
-
-        // Create a mutable copy and set the property
-        var mutableElement = element
-        mutableElement.eSet(feature, valueToSet)
-
-        // Extract metamodel name from pattern type (e.g., "rcalval!Report" -> "rcalval")
-        // then map it to the model alias (e.g., "rcalval" -> "OUT")
-        let typeComponents = targetPattern.type.split(separator: "!")
-        guard typeComponents.count == 2 else {
-            throw ATLExecutionError.typeError(
-                "Invalid target type specification: '\(targetPattern.type)'"
-            )
-        }
-        let metamodelName = String(typeComponents[0])
-        guard let targetAlias = executionContext.module.targetMetamodels.first(where: {
-            $0.value.name == metamodelName
-        })?.key else {
-            throw ATLExecutionError.invalidOperation(
-                "No target model found for metamodel '\(metamodelName)'"
-            )
-        }
-
-        // Update the element in the resource
-        guard let targetResource = executionContext.getTarget(targetAlias) else {
-            throw ATLExecutionError.invalidOperation("Target model '\(targetAlias)' not found")
-        }
-
-        // Add updates the element in place (or adds if new) based on ID
-        await targetResource.add(mutableElement)
-
-        if debug {
-            print("[ATL DEBUG] Updated property '\(property)' = '\(String(describing: value))' on element in resource '\(targetAlias)'")
-        }
-
-        return mutableElement
     }
 
     // MARK: - Called Rule Execution
+
+    /// Executes every parameterless called rule selected by a predicate.
+    ///
+    /// - Parameter selection: Decides which called rules run
+    /// - Throws: ATL execution errors for rule execution failures
+    private func executeCalledRules(_ selection: (ATLCalledRule) -> Bool) async throws {
+        for rule in module.calledRules.values where selection(rule) {
+            _ = try await executeCalledRule(rule.name, arguments: [])
+        }
+    }
 
     /// Executes a called rule with the specified parameters.
     ///
@@ -488,10 +531,17 @@ public final class ATLVirtualMachine {
     /// bound before property bindings are evaluated so references between sibling
     /// target patterns resolve consistently during the same rule invocation.
     ///
+    /// A unique rule returns the elements created by its first invocation for an
+    /// argument tuple on every later invocation with the same tuple. Lazy and unique
+    /// rules record trace links for their source arguments, so that
+    /// `resolveTemp` finds their results. When the rule has a `do` section it runs
+    /// after the bindings, with the target pattern variables in scope.
+    ///
     /// - Parameters:
     ///   - ruleName: The name of the called rule to execute.
     ///   - arguments: The argument values to pass to the rule.
-    /// - Returns: The created target elements.
+    /// - Returns: The created target elements, or none if a lazy rule's guard fails or
+    ///   one of its arguments is undefined.
     /// - Throws: ATL execution errors for rule execution failures.
     public func executeCalledRule(_ ruleName: String, arguments: [(any EcoreValue)?]) async throws
         -> [any EObject]
@@ -507,6 +557,16 @@ public final class ATLVirtualMachine {
             )
         }
 
+        // A lazy rule transforms source elements, so an undefined argument yields nothing
+        if rule.isLazy, arguments.contains(where: { $0 == nil }) {
+            return []
+        }
+
+        let uniqueKey = ATLUniqueRuleKey(ruleName: ruleName, arguments: arguments)
+        if rule.isUnique, let existing = executionContext.uniqueRuleResult(for: uniqueKey) {
+            return await existing.asyncCompactMap { await executionContext.findTargetObject($0) }
+        }
+
         // Create new execution scope
         executionContext.pushScope()
         defer {
@@ -518,28 +578,49 @@ public final class ATLVirtualMachine {
             executionContext.setVariable(parameter.name, value: argument)
         }
 
-        // Create and bind all target elements first so sibling target variables
-        // are available during subsequent property binding.
-        var createdElementsByVariable: [String: any EObject] = [:]
-        for targetPattern in rule.targetPatterns {
-            let targetElement = try await createTargetElement(targetPattern)
-            createdElementsByVariable[targetPattern.variableName] = targetElement
-            executionContext.setVariable(targetPattern.variableName, value: targetElement)
+        if let guardExpression = rule.`guard`,
+            try await guardExpression.evaluate(in: executionContext) as? Bool != true
+        {
+            return []
         }
 
-        var createdElements: [any EObject] = []
-        for targetPattern in rule.targetPatterns {
-            guard let targetElement = createdElementsByVariable[targetPattern.variableName] else {
-                continue
-            }
-            let updatedElement = try await applyPropertyBindings(
-                targetPattern,
-                targetElement: targetElement
-            )
-            createdElementsByVariable[targetPattern.variableName] = updatedElement
-            createdElements.append(updatedElement)
-            executionContext.setVariable(targetPattern.variableName, value: updatedElement)
+        for local in rule.localVariables {
+            let value = try await local.expression.evaluate(in: executionContext)
+            executionContext.setVariable(local.name, value: value)
         }
+
+        // Create all target elements first so sibling target variables
+        // are available during subsequent property binding.
+        var targetIDs: [EUUID] = []
+        for targetPattern in rule.targetPatterns {
+            targetIDs.append(try await createTargetElement(type: targetPattern.type).id)
+        }
+
+        let sourceIDs = arguments.compactMap { ($0 as? (any EObject))?.id }
+        if rule.isLazy || rule.isUnique, let first = sourceIDs.first {
+            executionContext.addTraceLink(
+                ATLTraceLink(
+                    ruleName: rule.name,
+                    sourceElement: first,
+                    targetElements: targetIDs,
+                    additionalSourceElements: Array(sourceIDs.dropFirst()),
+                    targetNames: rule.targetPatterns.map(\.variableName),
+                    kind: .lazy
+                ))
+            statistics.traceLinksCreated += 1
+        }
+        // Recorded before the bindings run, so that cyclic invocations find the elements
+        if rule.isUnique {
+            executionContext.storeUniqueRuleResult(targetIDs, for: uniqueKey)
+        }
+
+        try await applyTargetPatterns(
+            rule.targetPatterns.map {
+                ATLEffectiveTargetPattern(
+                    variableName: $0.variableName, type: $0.type, bindings: $0.bindings)
+            },
+            targetIDs: targetIDs
+        )
 
         // Execute rule body statements
         for statement in rule.body {
@@ -547,7 +628,7 @@ public final class ATLVirtualMachine {
         }
 
         statistics.calledRulesExecuted += 1
-        return createdElements
+        return await targetIDs.asyncCompactMap { await executionContext.findTargetObject($0) }
     }
 
     // MARK: - Validation
@@ -1077,5 +1158,25 @@ public struct ATLPerformanceMetrics: Sendable {
             let peakMB = String(format: "%.2f", Double(peakUsage) / (1024 * 1024))
             return "Total: \(totalMB)MB, Peak: \(peakMB)MB"
         }
+    }
+}
+
+// MARK: - Asynchronous Sequence Helpers
+
+extension Sequence {
+
+    /// Maps each element asynchronously and keeps the non-`nil` results in order.
+    ///
+    /// - Parameter transform: The asynchronous transformation
+    /// - Returns: The non-`nil` transformed values
+    @MainActor
+    fileprivate func asyncCompactMap<T>(_ transform: @MainActor (Element) async -> T?) async -> [T] {
+        var result: [T] = []
+        for element in self {
+            if let value = await transform(element) {
+                result.append(value)
+            }
+        }
+        return result
     }
 }
