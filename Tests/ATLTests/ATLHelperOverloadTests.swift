@@ -162,6 +162,12 @@ struct ATLHelperOverloadTests {
         #expect(try await evaluate("Sequence{1, 2, 3}.total()", declarations: declarations) as? Int == 6)
     }
 
+    @Test("An attribute helper on a collection type is evaluated each time it is called")
+    func collectionAttributeHelper() async throws {
+        let declarations = "helper context Sequence(Integer) def : total : Integer = self->sum();"
+        #expect(try await evaluate("Sequence{1, 2}.total()", declarations: declarations) as? Int == 3)
+    }
+
     @Test("Context-free helpers are unaffected by contextual helpers of the same name")
     func globalHelperCoexists() async throws {
         let declarations = """
@@ -175,6 +181,35 @@ struct ATLHelperOverloadTests {
         let contextual = try await evaluate(
             "obj.label()", declarations: declarations, objects: ["obj": object], fixture: fixture)
         #expect(contextual as? String == "contextual")
+    }
+
+    @Test("A context-free helper can be called with the receiver bound to self")
+    func globalHelperWithReceiver() async throws {
+        let declarations = "helper def : doubleIt() : Integer = self * 2;"
+        #expect(try await evaluate("5.doubleIt()", declarations: declarations) as? Int == 10)
+    }
+
+    @Test("Errors raised by a context-free helper called on a receiver propagate")
+    func globalHelperWithReceiverFails() async throws {
+        let declarations = "helper def : broken() : Integer = 1 div 0;"
+        let harness = try await LanguageHarness.make(
+            declarations: declarations, expression: "5.broken()")
+        harness.context.debug = true
+        await #expect(throws: ATLExecutionError.self) {
+            _ = try await harness.context.callHelper(LanguageHarness.probeName, arguments: [])
+        }
+    }
+
+    @Test("Contextual helper selection is traced when debugging")
+    func debugTrace() async throws {
+        let fixture = ShapeFixture()
+        let harness = try await LanguageHarness.make(
+            declarations: "helper context Shapes!Square def : area : Real = 1.0;",
+            expression: "obj.area", fixture: fixture)
+        harness.context.debug = true
+        harness.context.setVariable("obj", value: fixture.make(fixture.square))
+        let result = try await harness.context.callHelper(LanguageHarness.probeName, arguments: [])
+        #expect(result as? Double == 1.0)
     }
 
     @Test("Contextual helpers cannot be read as module attributes")

@@ -138,6 +138,8 @@ public struct ATLExpressionXMIParser {
             return try parseBoolean(element)
         } else if type.contains("OclUndefinedExp") {
             return parseUndefined()
+        } else if type.contains("EnumLiteralExp") {
+            return ATLEnumLiteralExpression(name: try requiredAttribute("name", from: element))
         } else if type.contains("TypeExp") {
             return try parseTypeLiteral(element)
         } else if type.contains("NavigationOrAttributeCallExp") {
@@ -429,9 +431,11 @@ public struct ATLExpressionXMIParser {
     }
 
     private func parseLambda(_ element: XMLElement) throws -> ATLLambdaExpression {
-        // Parse parameter
-        guard let parameterElement = child("parameter", in: element),
-              let paramName = attribute("name", from: parameterElement) else {
+        // Parse the iterator variables
+        let parameterNames = element.elements(forName: "parameter").compactMap {
+            attribute("name", from: $0)
+        }
+        guard !parameterNames.isEmpty else {
             throw ExpressionParseError.missingAttribute("Missing parameter in LambdaExp")
         }
 
@@ -441,7 +445,7 @@ public struct ATLExpressionXMIParser {
         }
         let body = try parseExpression(bodyElement)
 
-        return ATLLambdaExpression(parameter: paramName, body: body)
+        return ATLLambdaExpression(parameters: parameterNames, body: body)
     }
 
     private func parseTuple(_ element: XMLElement) throws -> ATLTupleExpression {

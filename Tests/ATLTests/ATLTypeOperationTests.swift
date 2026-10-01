@@ -56,16 +56,12 @@ struct ATLTypeOperationTests {
             module: module, executionEngine: ECoreExecutionEngine(models: [:]))
         let object = DynamicEObject(eClass: both)
 
+        context.setVariable("o", value: object)
         for typeName in ["Multi!First", "Multi!Second", "Multi!Both"] {
-            let call = ATLMethodCallExpression(
-                receiver: ATLLiteralExpression(value: nil), methodName: "oclIsKindOf",
-                arguments: [ATLTypeLiteralExpression(typeName: typeName)])
-            context.setVariable("o", value: object)
             let expression = ATLMethodCallExpression(
                 receiver: ATLVariableExpression(name: "o"), methodName: "oclIsKindOf",
                 arguments: [ATLTypeLiteralExpression(typeName: typeName)])
             #expect(try await expression.evaluate(in: context) as? Bool == true)
-            _ = call
         }
     }
 
@@ -244,6 +240,21 @@ struct ATLTypeOperationTests {
         }
     }
 
+    @Test("allInstancesFrom requires a string model name and oclIsKindOf a type")
+    func argumentTypeErrors() async {
+        await #expect(throws: ATLExecutionError.self) {
+            _ = try await LanguageHarness.evaluate("Shapes!Square.allInstancesFrom(3)")
+        }
+        await #expect(throws: ATLExecutionError.self) {
+            _ = try await LanguageHarness.evaluate("1.oclIsKindOf(1 + 1)")
+        }
+    }
+
+    @Test("A type argument may be an expression that evaluates to a type name")
+    func computedTypeName() async throws {
+        #expect(try await LanguageHarness.evaluate("1.oclIsKindOf('Integer')") as? Bool == true)
+    }
+
     @Test("allInstances rejects unknown metamodels and classes")
     func allInstancesUnknown() async {
         await #expect(throws: ATLExecutionError.self) {
@@ -257,10 +268,8 @@ struct ATLTypeOperationTests {
     @Test("allInstances of a target-only metamodel searches the target model")
     func allInstancesTarget() async throws {
         let fixture = ShapeFixture()
-        let targetPackage = EPackage(name: "Targets", nsURI: "http://example.org/targets")
         let item = EClass(name: "Item")
         let package = EPackage(name: "Targets", nsURI: "http://example.org/targets", eClassifiers: [item])
-        _ = targetPackage
         let module = ATLModule(
             name: "T", sourceMetamodels: ["IN": fixture.package], targetMetamodels: ["OUT": package])
         let target = Resource(uri: "test://target")

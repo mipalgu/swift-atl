@@ -90,6 +90,62 @@ let xmiResource = ATLResource(uri: "file:///path/to/output.xmi", module: module)
 try await xmiResource.save()
 ```
 
+## Language Support
+
+### Literals and operators
+
+- Strings support the escapes `\'`, `\"`, `\\`, `\n`, `\r`, `\t`, `\b`, `\f`, `\uXXXX` and octal escapes. Any other backslash sequence is kept as written, so regular expressions such as `'\s+'` need no doubling.
+- Real literals (`3.14`, `1e-3`), enumeration literals (`#Editable`), `OclUndefined` (and `null`) are supported. An enumeration literal evaluates to the literal name, which is how enumeration-typed attributes of dynamic objects are stored. Binding it to an attribute checks that the enumeration declares the literal.
+- `Sequence{}`, `OrderedSet{}`, `Set{}` and `Bag{}` literals keep their elements, not descriptions of them. Sets and ordered sets remain duplicate-free through `union`, `including`, `append` and friends.
+- Infix `implies`, `xor`, `div` and `mod` follow OCL precedence: `implies` binds weakest, then `or` and `xor`, then `and`. Logical operators use three-valued logic with `OclUndefined`.
+
+### Built-in operations
+
+Collections: `any`, `count`, `sum`, `at`, `append`, `prepend`, `insertAt`, `subSequence`, `subOrderedSet`, `including`, `excluding`, `union`, `intersection`, `indexOf`, `lastIndexOf`, `includesAll`, `excludesAll`, `isUnique`, `one`, `exists` and `forAll` (with several iterator variables), `sortedBy`, `flatten`, `reverse`, `max`, `min`, and the conversions `asSet`, `asOrderedSet`, `asSequence` and `asBag`. `first()` and `last()` return `OclUndefined` on an empty collection. Single values behave as one-element collections.
+
+Strings: `concat`, `substring`, `toInteger`, `toReal`, `toUpper`, `toLower`, `toSequence`, `trim`, `startsWith`, `endsWith`, `indexOf`, `lastIndexOf`, `split`, `replaceAll` and `regexReplaceAll` (positions are 1-based).
+
+Types: `oclIsKindOf` and `oclIsTypeOf` (over the complete supertype closure), `oclAsType`, `oclType`, `oclIsUndefined`, `MM!Class.allInstances()` and `MM!Class.allInstancesFrom('IN')`.
+
+### Helpers
+
+Contextual helpers are keyed by context type and name. A call dispatches on the dynamic type of the receiver, and the most specific context type wins, so `helper context A def : f()` and `helper context B def : f()` coexist. Helpers declared without a parameter list (`def : name : Type = ...`) are attributes whose value is computed once per receiver.
+
+### Binding metamodels
+
+A metamodel named in the module header is bound, in order of precedence, by:
+
+1. `-- @nsURI Name=http://example.org/model`, resolved through an `ATLMetamodelRegistry` supplied to the parser,
+2. `-- @path Name=/path/to/Name.ecore`,
+3. a lookup of the name in the registry (letter case is ignored when the match is unique).
+
+```swift
+let registry = ATLMetamodelRegistry(packages: [ecorePackage, genModelPackage])
+let module = try await ATLParser().parse(url, metamodelRegistry: registry)
+```
+
+A registry can also be built from a table of namespace URIs, or given a resolver closure for URIs it does not hold. Type references such as `Ecore!EClass` use the name from the module header, which need not equal the name of the bound package.
+
+### Module parameters
+
+Header comments declare parameters of type `String`, `Integer`, `Boolean` or `Real`. A parameter without a default is required.
+
+```
+-- @param basePackage : String = 'org.example'
+-- @param generateTests : Boolean = false
+-- @param projectName : String
+```
+
+The caller supplies values when executing, and the transformation reads them as `thisModule.projectName`:
+
+```swift
+try await ATLVirtualMachine(module: module).execute(
+    sources: ["IN": input], targets: ["OUT": output],
+    parameters: ["projectName": "demo", "generateTests": true])
+```
+
+A missing required parameter, an undeclared parameter or a value of the wrong type is reported as an `ATLExecutionError`. `ATLModule.parameterValues(fromText:)` converts textual values, for example from a command line, to the declared types.
+
 ## CLI Tool
 
 The `swift-atl` command-line tool is available in the [swift-modelling](https://github.com/mipalgu/swift-modelling) package and provides comprehensive transformation functionality:

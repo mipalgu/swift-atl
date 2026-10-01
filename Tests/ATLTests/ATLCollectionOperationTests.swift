@@ -280,6 +280,42 @@ struct ATLCollectionOperationTests {
         }
     }
 
+    @Test("Operations called with unsupported argument counts are not silently accepted")
+    func unsupportedArity() async {
+        await #expect(throws: ATLExecutionError.self) {
+            _ = try await LanguageHarness.evaluate("Sequence{1, 2}->first(1)")
+        }
+    }
+
+    @Test("max and min reject non-numeric elements")
+    func extremeTypeError() async {
+        await #expect(throws: ATLExecutionError.self) {
+            _ = try await LanguageHarness.evaluate("Sequence{'a', 'b'}->max()")
+        }
+    }
+
+    @Test("collect drops undefined results")
+    func collectDropsUndefined() async throws {
+        let result = try await LanguageHarness.evaluate(
+            "Sequence{1, 2, 3}->collect(e | if e = 2 then OclUndefined else e endif)")
+        #expect(result.integers == [1, 3])
+    }
+
+    @Test("Collect on sets and bags yields bags, on ordered collections sequences")
+    func collectKinds() async throws {
+        #expect(try await LanguageHarness.evaluate("Set{1, 2}->collect(e | 7)").integers == [7, 7])
+        #expect(try await LanguageHarness.evaluate("OrderedSet{1, 2}->collect(e | 7)").integers == [7, 7])
+    }
+
+    @Test("Model objects never equal plain values")
+    func objectsDifferFromValues() async throws {
+        let fixture = ShapeFixture()
+        let harness = try await LanguageHarness.make(expression: "obj = 1 or 1 = obj", fixture: fixture)
+        harness.context.setVariable("obj", value: fixture.make(fixture.circle))
+        let result = try await harness.context.callHelper(LanguageHarness.probeName, arguments: [])
+        #expect(result as? Bool == false)
+    }
+
     // MARK: - Iterate and the legacy fallbacks
 
     @Test("iterate sums the integer elements of a literal")
