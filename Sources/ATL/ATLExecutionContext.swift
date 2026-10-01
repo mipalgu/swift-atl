@@ -66,6 +66,12 @@ public final class ATLExecutionContext: Sendable {
     /// Trace links between source and target elements.
     private var traceLinks: [ATLTraceLink] = []
 
+    /// Positions in ``traceLinks`` indexed by the first source element of each link.
+    private var traceLinkIndex: [EUUID: [Int]] = [:]
+
+    /// Elements created by unique lazy rules, keyed by rule and argument tuple.
+    private var uniqueRuleResults: [ATLUniqueRuleKey: [EUUID]] = [:]
+
     /// Lazy bindings waiting for resolution.
     private var lazyBindings: [ATLLazyBinding] = []
 
@@ -257,9 +263,14 @@ public final class ATLExecutionContext: Sendable {
     public func navigate(from object: (any EcoreValue)?, property: String) async throws -> (
         any EcoreValue
     )? {
-        guard let eObject = object as? (any EObject) else {
+        guard var eObject = object as? (any EObject) else {
             let objectType = object != nil ? String(reflecting: type(of: object!)) : "nil"
             throw ATLExecutionError.typeError("Source is not an EObject of type: \(objectType)")
+        }
+
+        // Target elements change while a transformation runs, so navigate their current state
+        if let current = await findTargetObject(eObject.id) {
+            eObject = current
         }
 
         // First try ECore navigation for actual properties
@@ -315,7 +326,7 @@ public final class ATLExecutionContext: Sendable {
     public func callHelper(_ name: String, arguments: [(any EcoreValue)?]) async throws -> (
         any EcoreValue
     )? {
-        if name == "resolveTemp" {
+        if name == ATLReservedNames.resolveTemp {
             return try await resolveTemp(arguments)
         }
 
@@ -369,7 +380,7 @@ public final class ATLExecutionContext: Sendable {
     /// - Returns: The result of the dispatched call, if any.
     /// - Throws: `ATLExecutionError` if dispatch fails.
     public func dispatchThisModuleMethod(_ name: String, arguments: [(any EcoreValue)?]) async throws -> (any EcoreValue)? {
-        if name == "resolveTemp" {
+        if name == ATLReservedNames.resolveTemp {
             return try await resolveTemp(arguments)
         }
 
@@ -402,35 +413,160 @@ public final class ATLExecutionContext: Sendable {
         return try await callHelper(name, arguments: [])
     }
 
-    /// Resolve the first target element traced from a source object.
+    /// Resolve a named target element traced from a source object.
     ///
-    /// ATL's `resolveTemp` normally accepts a source object and a target pattern
-    /// variable name. The current runtime stores trace links without per-variable
-    /// labels, so this implementation resolves the first target linked to the
-    /// supplied source object. That is sufficient for the transformations used by
-    /// `swift-fsmlib`, where each relevant trace currently maps to a single
-    /// target object.
+    /// `resolveTemp(source, 'name')` returns the target element that the rule
+    /// transforming `source` created for the target pattern called `name`.
+    /// When `source` is a collection, it identifies a rule with several source
+    /// elements by their tuple. Without a name, the default (first) target
+    /// element is returned. Lazy rule results are found as well as matched rule
+    /// results.
     ///
-    /// - Parameter arguments: The evaluated ATL arguments, with the source object first.
+    /// - Parameter arguments: The evaluated ATL arguments: the source object (or a
+    ///   collection of source objects) followed by the optional target pattern name.
     /// - Returns: The resolved target object.
     /// - Throws: `ATLExecutionError` if the arguments are invalid or no traced target can be found.
     private func resolveTemp(_ arguments: [(any EcoreValue)?]) async throws -> (any EcoreValue)? {
-        guard let sourceObject = arguments.first as? (any EObject) else {
-            throw ATLExecutionError.typeError("resolveTemp() requires a source EObject as its first argument")
+        let sourceIDs: [EUUID]
+        if let sourceObject = arguments.first as? (any EObject) {
+            sourceIDs = [sourceObject.id]
+        } else if let collection = arguments.first.flatMap({ $0 }) as? EcoreValueArray,
+            case let objects = collection.values.compactMap({ $0 as? (any EObject) }),
+            !objects.isEmpty, objects.count == collection.values.count
+        {
+            sourceIDs = objects.map(\.id)
+        } else {
+            throw ATLExecutionError.typeError(
+                "resolveTemp() requires a source EObject as its first argument")
         }
+        let patternName = arguments.count > 1 ? arguments[1] as? String : nil
 
-        guard let traceLink = getTraceLinks(for: sourceObject.id).first,
-              let targetID = traceLink.targetElements.first else {
-            throw ATLExecutionError.runtimeError("resolveTemp() could not find a target element for source object \(sourceObject.id)")
-        }
-
-        for resource in targets.values {
-            if let targetObject = await resource.getObject(targetID) {
+        let links = getTraceLinks(forSources: sourceIDs)
+        for link in links {
+            let targetID: EUUID?
+            if let patternName {
+                targetID = link.targetID(named: patternName)
+            } else {
+                targetID = link.targetElements.first
+            }
+            if let targetID, let targetObject = await findTargetObject(targetID) {
                 return targetObject
             }
         }
 
-        throw ATLExecutionError.runtimeError("resolveTemp() could not resolve target object \(targetID)")
+        if let patternName {
+            throw ATLExecutionError.runtimeError(
+                "resolveTemp() could not find target element '\(patternName)' for source object \(sourceIDs[0])"
+            )
+        }
+        throw ATLExecutionError.runtimeError(
+            "resolveTemp() could not find a target element for source object \(sourceIDs[0])")
+    }
+
+    // MARK: - Target Model Access
+
+    /// Looks up an element in the target models.
+    ///
+    /// - Parameter id: The identifier of the element
+    /// - Returns: The current state of the element, or `nil` if no target model holds it
+    public func findTargetObject(_ id: EUUID) async -> (any EObject)? {
+        for resource in targets.values {
+            if let object = await resource.getObject(id) {
+                return object
+            }
+        }
+        return nil
+    }
+
+    /// Finds the source or target model that holds an element.
+    ///
+    /// - Parameter id: The identifier of the element
+    /// - Returns: The resource containing the element, or `nil` if none does
+    public func resourceContaining(_ id: EUUID) async -> Resource? {
+        for resource in targets.values where await resource.contains(id: id) {
+            return resource
+        }
+        for resource in sources.values where await resource.contains(id: id) {
+            return resource
+        }
+        return nil
+    }
+
+    /// Assigns a value to a feature of a target element.
+    ///
+    /// For reference features, model elements in the value are converted to the
+    /// form stored in the target model: a source element transformed by a
+    /// matched rule is replaced by that rule's default target element, an
+    /// element of the same target model is stored by identifier, and any other
+    /// element is stored as a cross-resource proxy. See ``ATLReferenceStorage``.
+    ///
+    /// - Parameters:
+    ///   - element: The target element to modify
+    ///   - name: The name of the feature to set
+    ///   - value: The evaluated value to assign
+    /// - Throws: ``ATLExecutionError`` if the element is not part of a target model or
+    ///   has no feature of that name
+    public func assignFeature(on element: any EObject, feature name: String, value: (any EcoreValue)?)
+        async throws
+    {
+        guard let eClass = element.eClass as? EClass else {
+            throw ATLExecutionError.typeError(
+                "Element eClass is not an EClass: \(type(of: element.eClass))"
+            )
+        }
+        guard let feature = eClass.getStructuralFeature(name: name) else {
+            if debug {
+                print("[ATL DEBUG] Failed to find property '\(name)' in class '\(eClass.name)'")
+                print("[ATL DEBUG]   All features: \(eClass.allStructuralFeatures.map { $0.name })")
+            }
+            throw ATLExecutionError.invalidOperation(
+                "Property '\(name)' not found in class '\(eClass.name)'"
+            )
+        }
+        guard let resource = await targetResource(containing: element.id) else {
+            throw ATLExecutionError.invalidOperation(
+                "Cannot assign '\(name)': element of class '\(eClass.name)' is not part of a target model"
+            )
+        }
+
+        let stored = await ATLReferenceStorage.storedValue(
+            for: value, feature: feature, in: resource, context: self)
+        guard await resource.eSet(objectId: element.id, feature: name, value: stored) else {
+            throw ATLExecutionError.runtimeError(
+                "Could not set property '\(name)' of class '\(eClass.name)'")
+        }
+        if debug {
+            print("[ATL DEBUG] Updated property '\(name)' = '\(String(describing: value))'")
+        }
+    }
+
+    /// Finds the target model that holds an element.
+    ///
+    /// - Parameter id: The identifier of the element
+    /// - Returns: The target resource containing the element, or `nil`
+    private func targetResource(containing id: EUUID) async -> Resource? {
+        for resource in targets.values where await resource.contains(id: id) {
+            return resource
+        }
+        return nil
+    }
+
+    /// Rebinds a variable that is already declared in an enclosing scope.
+    ///
+    /// - Parameters:
+    ///   - name: The variable name
+    ///   - value: The new value
+    /// - Throws: ``ATLExecutionError/variableNotFound(_:)`` if no scope declares the variable
+    public func assignVariable(_ name: String, value: (any EcoreValue)?) throws {
+        if variables.index(forKey: name) != nil {
+            variables[name] = value
+            return
+        }
+        for index in scopeStack.indices.reversed() where scopeStack[index].index(forKey: name) != nil {
+            scopeStack[index][name] = value
+            return
+        }
+        throw ATLExecutionError.variableNotFound(name)
     }
 
     // MARK: - Element Creation (Command-Based)
@@ -497,17 +633,27 @@ public final class ATLExecutionContext: Sendable {
 
     /// Add a trace link between source and target elements.
     ///
+    /// The link is recorded as the result of a matched rule with unnamed target elements.
+    ///
     /// - Parameters:
     ///   - ruleName: Name of the rule creating the link
     ///   - sourceElement: Source element ID
     ///   - targetElements: Target element IDs
     public func addTraceLink(ruleName: String, sourceElement: EUUID, targetElements: [EUUID]) {
-        let traceLink = ATLTraceLink(
-            ruleName: ruleName,
-            sourceElement: sourceElement,
-            targetElements: targetElements
-        )
-        traceLinks.append(traceLink)
+        addTraceLink(
+            ATLTraceLink(
+                ruleName: ruleName,
+                sourceElement: sourceElement,
+                targetElements: targetElements
+            ))
+    }
+
+    /// Add a fully specified trace link.
+    ///
+    /// - Parameter link: The link to record
+    public func addTraceLink(_ link: ATLTraceLink) {
+        traceLinkIndex[link.sourceElement, default: []].append(traceLinks.count)
+        traceLinks.append(link)
     }
 
     /// Get trace links for a source element.
@@ -515,7 +661,58 @@ public final class ATLExecutionContext: Sendable {
     /// - Parameter sourceElement: Source element ID
     /// - Returns: Array of matching trace links
     public func getTraceLinks(for sourceElement: EUUID) -> [ATLTraceLink] {
-        return traceLinks.filter { $0.sourceElement == sourceElement }
+        return (traceLinkIndex[sourceElement] ?? []).map { traceLinks[$0] }
+    }
+
+    /// Get the trace links recorded for a tuple of source elements.
+    ///
+    /// - Parameter sourceElements: The identifiers of the source elements, in pattern order
+    /// - Returns: The links whose source elements are exactly the given tuple
+    public func getTraceLinks(forSources sourceElements: [EUUID]) -> [ATLTraceLink] {
+        guard let first = sourceElements.first else { return [] }
+        return getTraceLinks(for: first).filter { $0.allSourceElements == sourceElements }
+    }
+
+    /// The identifier of the default target element of a transformed source element.
+    ///
+    /// The default target element is the first target element created by the
+    /// matched rule that transformed the source element. Lazy and called rules
+    /// do not contribute to the default resolution of bindings.
+    ///
+    /// - Parameter sourceElement: The source element ID
+    /// - Returns: The target element ID, or `nil` if no matched rule transformed the element
+    public func defaultTargetID(for sourceElement: EUUID) -> EUUID? {
+        return getTraceLinks(for: sourceElement)
+            .first(where: { $0.kind == .matched && $0.additionalSourceElements.isEmpty })?
+            .targetElements.first
+    }
+
+    /// Discards all state accumulated by a previous transformation run.
+    ///
+    /// Trace links, pending lazy bindings and the results of unique lazy rules
+    /// are cleared; variables, models and helpers are retained.
+    public func resetTransformationState() {
+        traceLinks.removeAll()
+        traceLinkIndex.removeAll()
+        lazyBindings.removeAll()
+        uniqueRuleResults.removeAll()
+    }
+
+    /// The elements an unique rule created for an argument tuple, if it has run for it.
+    ///
+    /// - Parameter key: The rule and argument tuple
+    /// - Returns: The identifiers of the created elements, or `nil`
+    func uniqueRuleResult(for key: ATLUniqueRuleKey) -> [EUUID]? {
+        return uniqueRuleResults[key]
+    }
+
+    /// Remembers the elements an unique rule created for an argument tuple.
+    ///
+    /// - Parameters:
+    ///   - elements: The identifiers of the created elements
+    ///   - key: The rule and argument tuple
+    func storeUniqueRuleResult(_ elements: [EUUID], for key: ATLUniqueRuleKey) {
+        uniqueRuleResults[key] = elements
     }
 
     // MARK: - Lazy Binding Management
@@ -757,14 +954,36 @@ public struct ATLErrorContext: Sendable, Equatable {
 /// Trace links provide bidirectional mapping between elements transformed
 /// by ATL rules, enabling impact analysis and transformation debugging.
 public struct ATLTraceLink: Sendable, Equatable, Hashable {
+
+    /// The kind of rule that created a trace link.
+    public enum Kind: Sendable, Equatable, Hashable {
+        /// A matched rule applied to a source element.
+        case matched
+        /// A lazy rule invoked with source elements.
+        case lazy
+    }
+
     /// Name of the ATL rule that created this trace link.
     public let ruleName: String
 
     /// Unique identifier of the source element.
+    ///
+    /// For rules matching several source elements this is the first of them.
     public let sourceElement: EUUID
+
+    /// Unique identifiers of the source elements after the first, in pattern order.
+    public let additionalSourceElements: [EUUID]
 
     /// Unique identifiers of the target elements created from the source.
     public let targetElements: [EUUID]
+
+    /// The target pattern names of ``targetElements``, in the same order.
+    ///
+    /// Empty when the link was recorded without pattern names.
+    public let targetNames: [String]
+
+    /// The kind of rule that created the link.
+    public let kind: Kind
 
     /// Creates a new trace link.
     ///
@@ -772,10 +991,67 @@ public struct ATLTraceLink: Sendable, Equatable, Hashable {
     ///   - ruleName: Name of the creating rule
     ///   - sourceElement: Source element ID
     ///   - targetElements: Target element IDs
-    public init(ruleName: String, sourceElement: EUUID, targetElements: [EUUID]) {
+    ///   - additionalSourceElements: Source element IDs after the first
+    ///   - targetNames: The target pattern names, parallel to `targetElements`
+    ///   - kind: The kind of rule that created the link
+    public init(
+        ruleName: String,
+        sourceElement: EUUID,
+        targetElements: [EUUID],
+        additionalSourceElements: [EUUID] = [],
+        targetNames: [String] = [],
+        kind: Kind = .matched
+    ) {
         self.ruleName = ruleName
         self.sourceElement = sourceElement
+        self.additionalSourceElements = additionalSourceElements
         self.targetElements = targetElements
+        self.targetNames = targetNames
+        self.kind = kind
+    }
+
+    /// All source element identifiers in pattern order.
+    public var allSourceElements: [EUUID] {
+        [sourceElement] + additionalSourceElements
+    }
+
+    /// The identifier of the target element created for a named target pattern.
+    ///
+    /// - Parameter name: The target pattern name
+    /// - Returns: The identifier, or `nil` if the rule has no pattern of that name
+    public func targetID(named name: String) -> EUUID? {
+        guard let index = targetNames.firstIndex(of: name), index < targetElements.count else {
+            return nil
+        }
+        return targetElements[index]
+    }
+}
+
+/// Identifies an invocation of a unique lazy rule by rule name and argument tuple.
+struct ATLUniqueRuleKey: Hashable {
+
+    /// The name of the rule.
+    let ruleName: String
+
+    /// The arguments identifying the invocation; model elements by identifier.
+    let arguments: [AnyHashable]
+
+    /// Creates a key for an invocation.
+    ///
+    /// - Parameters:
+    ///   - ruleName: The name of the rule
+    ///   - arguments: The evaluated arguments of the invocation
+    init(ruleName: String, arguments: [(any EcoreValue)?]) {
+        self.ruleName = ruleName
+        self.arguments = arguments.map { argument in
+            if let object = argument as? (any EObject) {
+                return AnyHashable(object.id)
+            }
+            if let argument {
+                return AnyHashable(argument)
+            }
+            return AnyHashable(Optional<Int>.none)
+        }
     }
 }
 
@@ -837,9 +1113,7 @@ public struct ATLLazyBinding: Sendable {
         // Evaluate the expression with restored scope
         let value = try await expression.evaluate(in: context)
 
-        // Set the property using the execution engine
-        try await context.executionEngine.setProperty(
-            targetObject, property: property, value: value)
+        try await context.assignFeature(on: targetObject, feature: property, value: value)
     }
 
     /// Find an element by ID in the context.

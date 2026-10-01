@@ -78,6 +78,38 @@ public struct ATLMatchedRule: Sendable, Equatable, Hashable {
     /// trigger rule execution. `nil` indicates unconditional execution.
     public let `guard`: (any ATLExpression)?
 
+    /// Further source patterns of a rule that matches several source elements.
+    ///
+    /// A rule such as `from a : MM!A, b : MM!B (guard)` matches every
+    /// combination of an instance of each pattern type for which the guard
+    /// holds. The primary pattern is ``sourcePattern``; these patterns follow
+    /// it in declaration order. Their own guards are evaluated once all source
+    /// variables are bound.
+    public let additionalSourcePatterns: [ATLSourcePattern]
+
+    /// Local variables declared in the rule's `using` section.
+    ///
+    /// The variables are evaluated in declaration order once the rule has
+    /// matched, and are visible to the target pattern bindings and to the
+    /// imperative ``doStatements``. They are not visible to the guard.
+    public let localVariables: [ATLLocalVariable]
+
+    /// The imperative `do` block executed after the bindings have been applied.
+    public let doStatements: [any ATLStatement]
+
+    /// The name of the rule this rule extends, if any.
+    ///
+    /// A sub-rule inherits the target patterns and bindings of its super rule
+    /// and may override them. When a source element matches both a rule and one
+    /// of its sub-rules, only the sub-rule is applied.
+    public let superRuleName: String?
+
+    /// Whether the rule is abstract.
+    ///
+    /// Abstract rules never match source elements on their own; they only
+    /// contribute target patterns and bindings to the rules that extend them.
+    public let isAbstract: Bool
+
     // MARK: - Initialisation
 
     /// Creates a new ATL matched rule.
@@ -87,22 +119,45 @@ public struct ATLMatchedRule: Sendable, Equatable, Hashable {
     ///   - sourcePattern: The input pattern specification
     ///   - targetPatterns: The output pattern specifications
     ///   - guard: Optional boolean expression for conditional execution
+    ///   - additionalSourcePatterns: Further source patterns for multi-element matching
+    ///   - localVariables: The variables declared in the `using` section
+    ///   - doStatements: The imperative statements of the `do` block
+    ///   - superRuleName: The name of the extended rule, if any
+    ///   - isAbstract: Whether the rule is abstract
     ///
     /// - Precondition: The rule name must be a non-empty string
-    /// - Precondition: At least one target pattern must be specified
+    /// - Precondition: At least one target pattern must be specified unless the
+    ///   rule is abstract or extends another rule
     public init(
         name: String,
         sourcePattern: ATLSourcePattern,
         targetPatterns: [ATLTargetPattern],
-        `guard`: (any ATLExpression)? = nil
+        `guard`: (any ATLExpression)? = nil,
+        additionalSourcePatterns: [ATLSourcePattern] = [],
+        localVariables: [ATLLocalVariable] = [],
+        doStatements: [any ATLStatement] = [],
+        superRuleName: String? = nil,
+        isAbstract: Bool = false
     ) {
         precondition(!name.isEmpty, "Rule name must not be empty")
-        precondition(!targetPatterns.isEmpty, "At least one target pattern must be specified")
+        precondition(
+            !targetPatterns.isEmpty || isAbstract || superRuleName != nil,
+            "At least one target pattern must be specified")
 
         self.name = name
         self.sourcePattern = sourcePattern
         self.targetPatterns = targetPatterns
         self.`guard` = `guard`
+        self.additionalSourcePatterns = additionalSourcePatterns
+        self.localVariables = localVariables
+        self.doStatements = doStatements
+        self.superRuleName = superRuleName
+        self.isAbstract = isAbstract
+    }
+
+    /// All source patterns of the rule in declaration order.
+    public var sourcePatterns: [ATLSourcePattern] {
+        [sourcePattern] + additionalSourcePatterns
     }
 
     // MARK: - Equatable
@@ -112,6 +167,10 @@ public struct ATLMatchedRule: Sendable, Equatable, Hashable {
         guard
             lhs.name == rhs.name && lhs.sourcePattern == rhs.sourcePattern
                 && lhs.targetPatterns == rhs.targetPatterns
+                && lhs.additionalSourcePatterns == rhs.additionalSourcePatterns
+                && lhs.localVariables == rhs.localVariables
+                && lhs.doStatements.count == rhs.doStatements.count
+                && lhs.superRuleName == rhs.superRuleName && lhs.isAbstract == rhs.isAbstract
         else {
             return false
         }
@@ -134,6 +193,9 @@ public struct ATLMatchedRule: Sendable, Equatable, Hashable {
         hasher.combine(name)
         hasher.combine(sourcePattern)
         hasher.combine(targetPatterns)
+        hasher.combine(additionalSourcePatterns)
+        hasher.combine(superRuleName)
+        hasher.combine(isAbstract)
         if let guardExpression = `guard` {
             hashATLExpression(guardExpression, into: &hasher)
         }
@@ -208,6 +270,43 @@ public struct ATLCalledRule: Sendable, Equatable, Hashable {
     /// and control flow operations.
     public let body: [any ATLStatement]
 
+    /// Local variables declared in the rule's `using` section.
+    ///
+    /// The variables are evaluated in declaration order after the parameters
+    /// are bound and before the target elements are created.
+    public let localVariables: [ATLLocalVariable]
+
+    /// Whether the rule is a lazy rule.
+    ///
+    /// Lazy rules take source elements as parameters, are never triggered
+    /// automatically, and record trace links for the elements they create.
+    public let isLazy: Bool
+
+    /// Whether the rule is a unique lazy rule.
+    ///
+    /// A unique rule creates its target elements once per distinct tuple of
+    /// argument values and returns the same elements for repeated invocations.
+    public let isUnique: Bool
+
+    /// Whether the rule is an entry point.
+    ///
+    /// Entry point rules take no parameters and run once, after matching has
+    /// created the matched rules' target elements and before their bindings are
+    /// applied.
+    public let isEntrypoint: Bool
+
+    /// Whether the rule is an end point.
+    ///
+    /// End point rules take no parameters and run once after all matched rules
+    /// have been applied.
+    public let isEndpoint: Bool
+
+    /// The optional guard of a lazy rule's source patterns.
+    ///
+    /// When the guard does not hold for the arguments of an invocation, the
+    /// rule creates nothing and the invocation yields no element.
+    public let `guard`: (any ATLExpression)?
+
     // MARK: - Initialisation
 
     /// Creates a new ATL called rule.
@@ -217,13 +316,25 @@ public struct ATLCalledRule: Sendable, Equatable, Hashable {
     ///   - parameters: The parameter specifications
     ///   - targetPatterns: The output pattern specifications
     ///   - body: The imperative statements to execute
+    ///   - localVariables: The variables declared in the `using` section
+    ///   - isLazy: Whether the rule is a lazy rule
+    ///   - isUnique: Whether the rule is a unique lazy rule
+    ///   - isEntrypoint: Whether the rule is an entry point
+    ///   - isEndpoint: Whether the rule is an end point
+    ///   - guard: The guard of a lazy rule's source patterns
     ///
     /// - Precondition: The rule name must be a non-empty string
     public init(
         name: String,
         parameters: [ATLParameter] = [],
         targetPatterns: [ATLTargetPattern] = [],
-        body: [any ATLStatement] = []
+        body: [any ATLStatement] = [],
+        localVariables: [ATLLocalVariable] = [],
+        isLazy: Bool = false,
+        isUnique: Bool = false,
+        isEntrypoint: Bool = false,
+        isEndpoint: Bool = false,
+        `guard`: (any ATLExpression)? = nil
     ) {
         precondition(!name.isEmpty, "Rule name must not be empty")
 
@@ -231,6 +342,12 @@ public struct ATLCalledRule: Sendable, Equatable, Hashable {
         self.parameters = parameters
         self.targetPatterns = targetPatterns
         self.body = body
+        self.localVariables = localVariables
+        self.isLazy = isLazy
+        self.isUnique = isUnique
+        self.isEntrypoint = isEntrypoint
+        self.isEndpoint = isEndpoint
+        self.`guard` = `guard`
     }
 
     // MARK: - Equatable
@@ -239,6 +356,9 @@ public struct ATLCalledRule: Sendable, Equatable, Hashable {
         return lhs.name == rhs.name && lhs.parameters == rhs.parameters
             && lhs.targetPatterns.count == rhs.targetPatterns.count
             && lhs.body.count == rhs.body.count
+            && lhs.localVariables == rhs.localVariables
+            && lhs.isLazy == rhs.isLazy && lhs.isUnique == rhs.isUnique
+            && lhs.isEntrypoint == rhs.isEntrypoint && lhs.isEndpoint == rhs.isEndpoint
     }
 
     public func hash(into hasher: inout Hasher) {
@@ -246,6 +366,8 @@ public struct ATLCalledRule: Sendable, Equatable, Hashable {
         hasher.combine(parameters)
         hasher.combine(targetPatterns.count)
         hasher.combine(body.count)
+        hasher.combine(isLazy)
+        hasher.combine(isUnique)
     }
 }
 
@@ -508,6 +630,60 @@ public struct ATLPropertyBinding: Sendable, Equatable, Hashable {
     }
 }
 
+// MARK: - ATL Local Variable
+
+/// A local variable declared in the `using` section of a rule.
+///
+/// Local variables hold intermediate values that the target pattern bindings
+/// and the imperative `do` block of a rule can share.
+///
+/// ## Example Usage
+///
+/// ```swift
+/// let fullName = ATLLocalVariable(
+///     name: "fullName",
+///     type: "String",
+///     expression: ATLVariableExpression(name: "s")
+/// )
+/// ```
+public struct ATLLocalVariable: Sendable, Equatable, Hashable {
+
+    /// The variable name.
+    public let name: String
+
+    /// The declared type, if one was given.
+    public let type: String?
+
+    /// The expression that computes the initial value.
+    public let expression: any ATLExpression
+
+    /// Creates a new local variable declaration.
+    ///
+    /// - Parameters:
+    ///   - name: The variable name
+    ///   - type: The declared type, if any
+    ///   - expression: The initialising expression
+    ///
+    /// - Precondition: The variable name must be a non-empty string
+    public init(name: String, type: String? = nil, expression: any ATLExpression) {
+        precondition(!name.isEmpty, "Variable name must not be empty")
+        self.name = name
+        self.type = type
+        self.expression = expression
+    }
+
+    public static func == (lhs: ATLLocalVariable, rhs: ATLLocalVariable) -> Bool {
+        return lhs.name == rhs.name && lhs.type == rhs.type
+            && AnyHashable(lhs.expression) == AnyHashable(rhs.expression)
+    }
+
+    public func hash(into hasher: inout Hasher) {
+        hasher.combine(name)
+        hasher.combine(type)
+        hasher.combine(AnyHashable(expression))
+    }
+}
+
 // MARK: - ATL Rule Type Protocol
 
 /// Protocol for ATL rule types (matched and called rules).
@@ -545,6 +721,7 @@ public protocol ATLStatement: Sendable {
     ///
     /// - Parameter context: The execution context providing variable bindings and model access
     /// - Throws: ATL execution errors if statement execution failures
+    @MainActor
     func execute(in context: ATLExecutionContext) async throws
 }
 
