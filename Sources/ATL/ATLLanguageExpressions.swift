@@ -157,10 +157,13 @@ enum ATLValueConversion {
     /// Prepares a value for storing into a structural feature.
     ///
     /// Set and ordered set values become plain arrays, because models store
-    /// collections as arrays. For attributes typed by an enumeration, the value
-    /// must name one of the enumeration's literals (an integer is mapped to the
-    /// literal with that value); the literal name is stored. Integers assigned to
-    /// real attributes become reals.
+    /// collections as arrays. Values of many-valued attributes are stored as
+    /// typed arrays (`[String]`, `[Int]`, `[Double]` or `[Bool]`), and a single
+    /// value becomes a one-element array. For attributes typed by an
+    /// enumeration, the value must name one of the enumeration's literals, by
+    /// name or by literal text (an integer is mapped to the literal with that
+    /// value); the literal name is stored. Integers assigned to real attributes
+    /// become reals.
     ///
     /// - Parameters:
     ///   - value: The evaluated value.
@@ -177,13 +180,24 @@ enum ATLValueConversion {
         }
         guard let attribute = feature as? EAttribute else { return prepared }
 
-        if let enumeration = attribute.eType as? EEnum {
-            if let array = prepared as? EcoreValueArray {
-                return EcoreValueArray(try array.values.map { try literal($0, in: enumeration) })
+        let enumeration = attribute.eType as? EEnum
+        if attribute.isMany {
+            if let enumeration {
+                return EcoreValueArray(
+                    try (prepared as? EcoreValueArray)?.values.map {
+                        try literal($0, in: enumeration)
+                    } ?? [literal(prepared, in: enumeration)])
             }
-            return try literal(prepared, in: enumeration)
+            let elements = (prepared as? EcoreValueArray)?.values ?? [prepared]
+            return try manyValued(
+                elements.map { try convert($0, for: attribute, enumeration: enumeration) },
+                of: attribute)
         }
-        return coerceNumber(prepared, to: attribute.eType.name)
+        if let array = prepared as? EcoreValueArray, enumeration != nil {
+            return EcoreValueArray(
+                try array.values.map { try convert($0, for: attribute, enumeration: enumeration) })
+        }
+        return try convert(prepared, for: attribute, enumeration: enumeration)
     }
 
     /// Prepares a value for storing into a named feature of an object.
@@ -205,11 +219,56 @@ enum ATLValueConversion {
         return try prepare(value, for: feature)
     }
 
+    private static func convert(
+        _ value: any EcoreValue, for attribute: EAttribute, enumeration: EEnum?
+    ) throws -> any EcoreValue {
+        if let enumeration {
+            return try literal(value, in: enumeration)
+        }
+        return coerceNumber(value, to: attribute.eType.name)
+    }
+
+    /// Chooses the stored form of the values of a many-valued attribute.
+    ///
+    /// Values of one primitive type are stored as a typed array (`[String]`,
+    /// `[Int]`, `[Double]` or `[Bool]`), which is the form a loaded model uses.
+    /// An empty list takes the type of the attribute. Other values, and the
+    /// literal names of enumeration-typed attributes, are stored as an
+    /// `EcoreValueArray`.
+    private static func manyValued(_ values: [any EcoreValue], of attribute: EAttribute)
+        -> any EcoreValue
+    {
+        if let strings = values as? [String], !values.isEmpty { return strings }
+        if let integers = values as? [Int], !values.isEmpty { return integers }
+        if let reals = values as? [Double], !values.isEmpty { return reals }
+        if let booleans = values as? [Bool], !values.isEmpty { return booleans }
+        guard values.isEmpty else { return EcoreValueArray(values) }
+        switch attribute.eType.name {
+        case EcoreDataType.eInt.rawValue, EcoreDataType.eIntegerObject.rawValue,
+            EcoreDataType.eLong.rawValue, EcoreDataType.eLongObject.rawValue:
+            return [Int]()
+        case EcoreDataType.eDouble.rawValue, EcoreDataType.eDoubleObject.rawValue,
+            EcoreDataType.eFloat.rawValue, EcoreDataType.eFloatObject.rawValue:
+            return [Double]()
+        case EcoreDataType.eBoolean.rawValue, EcoreDataType.eBooleanObject.rawValue:
+            return [Bool]()
+        default: return [String]()
+        }
+    }
+
+    /// Finds the literal of an enumeration that a value denotes.
+    ///
+    /// A string denotes a literal by its name or, failing that, by its literal
+    /// text; an integer denotes the literal with that value. The literal name
+    /// is returned.
     private static func literal(_ value: any EcoreValue, in enumeration: EEnum) throws
         -> any EcoreValue
     {
-        if let name = value as? String, enumeration.getLiteral(name: name) != nil {
-            return name
+        if let name = value as? String {
+            if enumeration.getLiteral(name: name) != nil { return name }
+            if let match = enumeration.literals.first(where: { $0.literal == name }) {
+                return match.name
+            }
         }
         if let number = value as? Int, let literal = enumeration.getLiteral(value: number) {
             return literal.name

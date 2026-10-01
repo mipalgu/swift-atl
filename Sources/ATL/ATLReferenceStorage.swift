@@ -50,8 +50,10 @@ enum ATLReservedNames {
 /// Converts values bound to reference features into the form stored in a model.
 ///
 /// References between elements of one resource are stored as element
-/// identifiers. A reference to an element of any other resource, such as a
-/// source model element that no rule transformed, is stored as a
+/// identifiers, as are references to elements of another resource in the same
+/// resource set, which the serialiser locates itself. A reference to an
+/// element of any other resource, such as a source model element that no rule
+/// transformed, is stored as a
 /// ``ResourceProxy`` carrying the URI of that resource and an XPath-style
 /// fragment locating the element, which the XMI serialiser writes as a
 /// cross-document `href`.
@@ -66,7 +68,9 @@ enum ATLReferenceStorage {
     ///
     /// The first root element is addressed as `/`. Other elements are
     /// addressed by their containment path, for example `//@members.0/@name`.
-    /// An element that cannot be located by containment is addressed by its
+    /// Elements of Ecore models, whether native or dynamic, are addressed by
+    /// the names along their containment path, as EMF does, for example
+    /// `//Book/title`. An element that cannot be located is addressed by its
     /// identifier.
     ///
     /// - Parameters:
@@ -74,6 +78,9 @@ enum ATLReferenceStorage {
     ///   - resource: The resource containing the element
     /// - Returns: The fragment, without a leading `#`
     static func fragment(for object: any EObject, in resource: Resource) async -> String {
+        if let named = await FragmentNavigator(resource: resource).fragment(for: object.id) {
+            return named
+        }
         let roots = await resource.getRootObjects()
         if let first = roots.first, first.id == object.id {
             return "/"
@@ -157,6 +164,11 @@ enum ATLReferenceStorage {
             return referenced.id
         }
         if let home = await context.resourceContaining(referenced.id) {
+            if let sharedSet = await resource.resourceSet,
+                await home.resourceSet === sharedSet
+            {
+                return referenced.id
+            }
             return ResourceProxy(
                 uri: home.uri, fragment: await fragment(for: referenced, in: home))
         }
