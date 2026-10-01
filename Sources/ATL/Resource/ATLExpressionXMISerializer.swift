@@ -83,6 +83,8 @@ public struct ATLExpressionXMISerializer {
             return serializeCollection(collection, indent: indentString)
         } else if let typeLiteral = expression as? ATLTypeLiteralExpression {
             return serializeTypeLiteral(typeLiteral, indent: indentString)
+        } else if let enumLiteral = expression as? ATLEnumLiteralExpression {
+            return "\(indentString)<expression xsi:type=\"ocl:EnumLiteralExp\" name=\"\(escapeXML(enumLiteral.name))\"/>\n"
         } else {
             // Unknown expression type - serialize as placeholder
             return "\(indentString)<expression xsi:type=\"ocl:OclExpression\"><!-- Unknown expression type --></expression>\n"
@@ -218,7 +220,9 @@ public struct ATLExpressionXMISerializer {
         // Serialize as a simple parameter-body structure
         var xmi = "\(indent)<expression xsi:type=\"ocl:LambdaExp\">\n"
 
-        xmi += "\(indent)  <parameter name=\"\(escapeXML(lambda.parameter))\"/>\n"
+        for parameter in lambda.parameters {
+            xmi += "\(indent)  <parameter name=\"\(escapeXML(parameter))\"/>\n"
+        }
 
         xmi += "\(indent)  <body>\n"
         xmi += serialize(lambda.body, indent: indent.count + 4)

@@ -525,8 +525,16 @@ public struct ATLBinaryExpression: ATLExpression, Sendable, Equatable, Hashable 
     @MainActor
     public func evaluate(in context: ATLExecutionContext) async throws -> (any EcoreValue)? {
         let leftValue = try await left.evaluate(in: context)
+        if let decided = ATLOperatorSemantics.shortCircuit(self.`operator`, left: leftValue) {
+            return decided.value
+        }
         let rightValue = try await right.evaluate(in: context)
 
+        if let result = try ATLOperatorSemantics.evaluate(
+            self.`operator`, left: leftValue, right: rightValue)
+        {
+            return result.value
+        }
         return try await evaluateOperation(leftValue, self.`operator`, rightValue)
     }
 
@@ -578,6 +586,9 @@ public struct ATLBinaryExpression: ATLExpression, Sendable, Equatable, Hashable 
                 return try or(left, right)
             case .implies:
                 return try implies(left, right)
+            case .xor, .integerDivide:
+                throw ATLExecutionError.unsupportedOperation(
+                    "Operator '\(`operator`.rawValue)' is evaluated before the OCL library is consulted")
             case .union:
                 return EcoreValueArray(try union(left, right))
             case .intersection:
@@ -926,6 +937,19 @@ public struct ATLMethodCallExpression: ATLExpression, Sendable, Equatable, Hasha
 
         let receiverValue = try await receiver.evaluate(in: context)
 
+        // Operations whose arguments are type names or iterator lambdas
+        if let result = try await ATLTypeOperations.evaluate(
+            methodName: methodName, receiver: receiverValue, arguments: arguments, context: context)
+        {
+            return result.value
+        }
+        if arguments.count == 1, let lambdaArg = arguments[0] as? ATLLambdaExpression,
+            let result = try await ATLLambdaOperations.evaluate(
+                methodName: methodName, receiver: receiverValue, lambda: lambdaArg, context: context)
+        {
+            return result.value
+        }
+
         // For collection operations that need lambda expressions, pass them directly
         if isCollectionOperation(methodName) && arguments.count == 1 {
             if let lambdaArg = arguments[0] as? ATLLambdaExpression {
@@ -1006,6 +1030,12 @@ public struct ATLMethodCallExpression: ATLExpression, Sendable, Equatable, Hasha
             let receiverType = receiver.map { "\(type(of: $0))" } ?? "nil"
             print("[ATL DEBUG] Dispatching method '\(methodName)' on receiver: \(receiverType)")
             print("[ATL DEBUG] Arguments count: \(arguments.count)")
+        }
+
+        if let result = try await ATLBuiltinOperations.evaluate(
+            methodName: methodName, receiver: receiver, arguments: arguments, context: context)
+        {
+            return result.value
         }
 
         // Method signature: methodName + argument count + argument types
@@ -1114,46 +1144,21 @@ public struct ATLMethodCallExpression: ATLExpression, Sendable, Equatable, Hasha
                 // If ECoreExecutionEngine doesn't support the method, fall through to helper dispatch
             }
 
-            // If not an OCL method, try to call as a context helper
+            // If not an OCL method, try to call as a context-free helper with the receiver as 'self'
             if let receiver = receiver {
-                // Check if this is a context helper
-                // Check if it's a helper function
-                if let helper = context.module.helpers[methodName] as? ATLHelperWrapper,
-                   helper.contextType != nil {
+                if context.debug {
+                    print("[ATL DEBUG] Using regular helper call path for '\(methodName)'")
+                }
+                context.setVariable("self", value: receiver)
+                defer { context.setVariable("self", value: nil) }
 
-                    // Context helper - bind receiver as 'self' and evaluate directly
-                    if context.debug {
-                        print("[ATL DEBUG] Using contextual helper path for '\(methodName)'")
-                    }
-                    context.pushScope()
-                    defer { context.popScope() }
-
-                    // Bind receiver as 'self'
-                    context.setVariable("self", value: receiver)
-
-                    // Bind parameters
-                    for (parameter, argument) in zip(helper.parameters, arguments) {
-                        context.setVariable(parameter.name, value: argument)
-                    }
-
-                    // Evaluate the helper body expression
-                    return try await helper.bodyExpression.evaluate(in: context)
-                } else {
-                    // Try regular helper call with receiver bound as 'self'
-                    if context.debug {
-                        print("[ATL DEBUG] Using regular helper call path for '\(methodName)'")
-                    }
-                    context.setVariable("self", value: receiver)
-                    defer { context.setVariable("self", value: nil) }
-
-                    do {
-                        return try await context.callHelper(methodName, arguments: arguments)
-                    } catch ATLExecutionError.helperNotFound(_) {
-                        // Helper not found, fall through to error
-                    } catch {
-                        // Other helper evaluation error, rethrow
-                        throw error
-                    }
+                do {
+                    return try await context.callHelper(methodName, arguments: arguments)
+                } catch ATLExecutionError.helperNotFound(_) {
+                    // Helper not found, fall through to error
+                } catch {
+                    // Other helper evaluation error, rethrow
+                    throw error
                 }
             }
 
@@ -1202,7 +1207,7 @@ public struct ATLMethodCallExpression: ATLExpression, Sendable, Equatable, Hasha
         let className = String(typeComponents[1])
 
         // Find the model alias that uses this metamodel
-        guard let modelAlias = context.module.sourceMetamodels.first(where: { $0.value.name == metamodelName })?.key else {
+        guard let modelAlias = context.module.sourceAlias(forMetamodel: metamodelName) else {
             throw ATLExecutionError.invalidOperation("No source model found for metamodel '\(metamodelName)'")
         }
 
@@ -1726,11 +1731,7 @@ public struct ATLMethodCallExpression: ATLExpression, Sendable, Equatable, Hasha
     /// Handles both `EcoreValueArray` (returned by `allInstances()`) and typed arrays
     /// (e.g. `[String]`) stored as `(any EcoreValue)?`. Returns an empty array for `nil`.
     private func toCollection(_ value: (any EcoreValue)?) -> [any EcoreValue] {
-        if let array = value as? EcoreValueArray { return array.values }
-        if let anyArray = value as? [Any] {
-            return anyArray.compactMap { $0 as? (any EcoreValue) }
-        }
-        return []
+        return ATLCollections.elements(of: value)
     }
 
     /// Wraps a `[any EcoreValue]` as an `EcoreValueArray` result.
@@ -1846,6 +1847,10 @@ public enum ATLBinaryOperator: String, Sendable, CaseIterable, Equatable {
     case and = "and"
     case or = "or"
     case implies = "implies"
+    case xor = "xor"
+
+    // Integer division
+    case integerDivide = "div"
 
     // Collection operators
     case union = "union"
@@ -1867,6 +1872,15 @@ public enum ATLExecutionError: Error, LocalizedError, Sendable {
     case typeError(String)
     case runtimeError(String)
 
+    /// A required module parameter was not supplied.
+    case missingParameter(String)
+
+    /// A supplied parameter is not declared by the module.
+    case unknownParameter(String)
+
+    /// A value is not a literal of the enumeration it is assigned to.
+    case invalidEnumerationLiteral(String)
+
     public var errorDescription: String? {
         switch self {
         case .variableNotFound(let name):
@@ -1883,6 +1897,12 @@ public enum ATLExecutionError: Error, LocalizedError, Sendable {
             return "Type error: \(message)"
         case .runtimeError(let message):
             return "Runtime error: \(message)"
+        case .missingParameter(let name):
+            return "Required module parameter '\(name)' was not supplied"
+        case .unknownParameter(let name):
+            return "Module parameter '\(name)' is not declared (use '-- @param \(name) : Type')"
+        case .invalidEnumerationLiteral(let message):
+            return "Invalid enumeration literal: \(message)"
         }
     }
 }
@@ -1913,10 +1933,18 @@ public enum ATLExecutionError: Error, LocalizedError, Sendable {
 /// ```
 public struct ATLLambdaExpression: ATLExpression, Sendable, Equatable, Hashable {
     /// The parameter name for the lambda variable.
+    ///
+    /// For a lambda with several iterator variables this is the first one.
     public let parameter: String
+
+    /// The names of the iterator variables after the first, as in `exists(a, b | ...)`.
+    public let additionalParameters: [String]
 
     /// The expression body of the lambda.
     public let body: any ATLExpression
+
+    /// All iterator variable names in declaration order.
+    public var parameters: [String] { [parameter] + additionalParameters }
 
     /// Creates a lambda expression.
     ///
@@ -1925,6 +1953,20 @@ public struct ATLLambdaExpression: ATLExpression, Sendable, Equatable, Hashable 
     ///   - body: The expression to evaluate with the parameter bound
     public init(parameter: String, body: any ATLExpression) {
         self.parameter = parameter
+        self.additionalParameters = []
+        self.body = body
+    }
+
+    /// Creates a lambda expression with one or more iterator variables.
+    ///
+    /// - Parameters:
+    ///   - parameters: The iterator variable names; at least one is required
+    ///   - body: The expression to evaluate with the variables bound
+    /// - Precondition: `parameters` must not be empty
+    public init(parameters: [String], body: any ATLExpression) {
+        precondition(!parameters.isEmpty, "A lambda needs at least one parameter")
+        self.parameter = parameters[0]
+        self.additionalParameters = Array(parameters.dropFirst())
         self.body = body
     }
 
@@ -1968,11 +2010,11 @@ public struct ATLLambdaExpression: ATLExpression, Sendable, Equatable, Hashable 
     }
 
     public static func == (lhs: ATLLambdaExpression, rhs: ATLLambdaExpression) -> Bool {
-        return lhs.parameter == rhs.parameter && areATLExpressionsEqual(lhs.body, rhs.body)
+        return lhs.parameters == rhs.parameters && areATLExpressionsEqual(lhs.body, rhs.body)
     }
 
     public func hash(into hasher: inout Hasher) {
-        hasher.combine(parameter)
+        hasher.combine(parameters)
         hashATLExpression(body, into: &hasher)
     }
 }
@@ -2187,9 +2229,10 @@ public struct ATLIterateExpression: ATLExpression, Sendable, Equatable, Hashable
             throw ATLExecutionError.typeError("iterate() requires non-nil collection")
         }
 
-        guard let collection = sourceValue as? [Any] else {
+        guard ATLCollections.isCollection(sourceValue) else {
             throw ATLExecutionError.typeError("iterate() requires Collection receiver")
         }
+        let collection = ATLCollections.elements(of: sourceValue)
 
         // Evaluate the default accumulator value
         var accValue = try await defaultValue.evaluate(in: context)
@@ -2203,7 +2246,7 @@ public struct ATLIterateExpression: ATLExpression, Sendable, Equatable, Hashable
         // Iterate over the collection
         for item in collection {
             // Set the iteration parameter
-            context.setVariable(parameter, value: item as? (any EcoreValue))
+            context.setVariable(parameter, value: item)
             // Set the accumulator variable
             context.setVariable(accumulator, value: accValue)
             // Evaluate the body expression to get the new accumulator value
@@ -2420,26 +2463,20 @@ public struct ATLCollectionLiteralExpression: ATLExpression, Sendable, Equatable
     /// and evaluating all element expressions.
     @MainActor
     public func evaluate(in context: ATLExecutionContext) async throws -> (any EcoreValue)? {
-        // Evaluate all element expressions
-        var evaluatedElements: [String] = []
-        for elementExpr in elements {
-            if let value = try await elementExpr.evaluate(in: context) {
-                evaluatedElements.append("\(value)")
-            }
-        }
-
-        // Create the appropriate collection type
-        switch collectionType {
-        case "Sequence":
-            return evaluatedElements
-        case "Set":
-            return Array(Set(evaluatedElements))
-        case "Bag":
-            return evaluatedElements  // Bags allow duplicates like sequences
-        default:
+        guard let kind = ATLCollectionKind(rawValue: collectionType) else {
             throw ATLExecutionError.unsupportedOperation(
                 "Unknown collection type: \(collectionType)")
         }
+
+        // Evaluate all element expressions, keeping the elements themselves and their order
+        var evaluatedElements: [any EcoreValue] = []
+        for elementExpr in elements {
+            if let value = try await elementExpr.evaluate(in: context) {
+                evaluatedElements.append(value)
+            }
+        }
+
+        return ATLCollections.make(kind: kind, evaluatedElements)
     }
 
     /// Equality comparison for collection literal expressions.
@@ -2502,6 +2539,8 @@ internal func areATLExpressionsEqual(_ lhs: any ATLExpression, _ rhs: any ATLExp
         return l == r
     case (let l as ATLCollectionLiteralExpression, let r as ATLCollectionLiteralExpression):
         return l == r
+    case (let l as ATLEnumLiteralExpression, let r as ATLEnumLiteralExpression):
+        return l == r
     default:
         return false
     }
@@ -2534,6 +2573,8 @@ internal func hashATLExpression(_ expression: any ATLExpression, into hasher: in
     case let expr as ATLCollectionExpression:
         expr.hash(into: &hasher)
     case let expr as ATLCollectionLiteralExpression:
+        expr.hash(into: &hasher)
+    case let expr as ATLEnumLiteralExpression:
         expr.hash(into: &hasher)
     default:
         // Fallback to type information

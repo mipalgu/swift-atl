@@ -122,12 +122,15 @@ public final class ATLVirtualMachine {
     /// - Parameters:
     ///   - sources: Source models indexed by namespace aliases
     ///   - targets: Target models indexed by namespace aliases
-    /// - Throws: ATL execution errors for transformation failures
+    ///   - parameters: Values for the module parameters declared with `-- @param`, by name
+    /// - Throws: ATL execution errors for transformation failures, including
+    ///   ``ATLExecutionError/missingParameter(_:)`` for a required parameter without a value
     ///
     /// - Note: Source and target model aliases must match the module's metamodel specifications
     public func execute(
         sources: OrderedDictionary<String, Resource>,
-        targets: OrderedDictionary<String, Resource>
+        targets: OrderedDictionary<String, Resource>,
+        parameters: [String: any EcoreValue] = [:]
     ) async throws {
         if debug {
             print("[ATL] Executing transformation: \(module.name)")
@@ -140,6 +143,10 @@ public final class ATLVirtualMachine {
 
         // Validate model aliases against module specifications
         try validateModelAliases(sources: sources, targets: targets)
+
+        // Bind module parameters and start with fresh attribute helper values
+        try executionContext.setModuleParameters(parameters)
+        executionContext.clearAttributeHelperCache()
 
         // Configure execution context with models
         for (alias, resource) in sources {
@@ -256,9 +263,11 @@ public final class ATLVirtualMachine {
         let metamodelName = String(typeComponents[0])
         let sourceClassName = String(typeComponents[1])
 
-        guard
-            let modelAlias = module.sourceMetamodels.first(where: { $0.value.name == metamodelName }
-            )?.key
+        if debug {
+            print("[ATL]   Source type: \(metamodelName)!\(sourceClassName)")
+        }
+
+        guard let modelAlias = module.sourceAlias(forMetamodel: metamodelName)
         else {
             throw ATLExecutionError.invalidOperation(
                 "No source model found for metamodel '\(metamodelName)'")
@@ -478,7 +487,7 @@ public final class ATLVirtualMachine {
         }
         for (pattern, element) in zip(patterns, elements) {
             for binding in pattern.bindings {
-                await applyBinding(binding, to: element)
+                try await applyBinding(binding, to: element)
             }
         }
     }
@@ -491,12 +500,15 @@ public final class ATLVirtualMachine {
     /// - Parameters:
     ///   - binding: The binding to apply
     ///   - element: The target element to configure
-    private func applyBinding(_ binding: ATLPropertyBinding, to element: any EObject) async {
+    /// - Throws: ``ATLExecutionError/invalidEnumerationLiteral(_:)`` when the value is
+    ///   not a literal of the enumeration the feature is typed by
+    private func applyBinding(_ binding: ATLPropertyBinding, to element: any EObject) async throws {
         do {
             let value = try await binding.expression.evaluate(in: executionContext)
             try await executionContext.assignFeature(
                 on: element, feature: binding.property, value: value)
         } catch {
+            if case ATLExecutionError.invalidEnumerationLiteral = error { throw error }
             if debug {
                 print(
                     "[ATL DEBUG] Binding evaluation failed for property '\(binding.property)': \(error)"

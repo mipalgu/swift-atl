@@ -76,7 +76,13 @@ public final class ATLExecutionContext: Sendable {
     private var lazyBindings: [ATLLazyBinding] = []
 
     /// Helper functions registered for this context.
-    private var helpers: [String: any ATLHelperType] = [:]
+    var helpers: [String: any ATLHelperType] = [:]
+
+    /// Values of attribute helpers that have been computed, keyed by helper and receiver.
+    var attributeHelperCache: [ATLAttributeCacheKey: ATLCachedValue] = [:]
+
+    /// The values of the declared module parameters, available as `thisModule.<name>`.
+    var moduleParameters: [String: any EcoreValue] = [:]
 
     /// Error context for tracking issues during execution.
     private var errorContext: ATLErrorContext = ATLErrorContext()
@@ -263,7 +269,17 @@ public final class ATLExecutionContext: Sendable {
     public func navigate(from object: (any EcoreValue)?, property: String) async throws -> (
         any EcoreValue
     )? {
+        if ATLCollections.isCollection(object) {
+            return try await navigateCollection(ATLCollections.elements(of: object), property: property)
+        }
+
         guard var eObject = object as? (any EObject) else {
+            // Attribute helpers can be declared for primitive types too
+            if let object, let helper = bestContextHelper(
+                named: property, receiver: object, argumentCount: 0, includingOclAny: true)
+            {
+                return try await invokeContextHelper(helper, receiver: object, arguments: [])
+            }
             let objectType = object != nil ? String(reflecting: type(of: object!)) : "nil"
             throw ATLExecutionError.typeError("Source is not an EObject of type: \(objectType)")
         }
@@ -277,31 +293,21 @@ public final class ATLExecutionContext: Sendable {
         do {
             return try await executionEngine.navigate(from: eObject, property: property)
         } catch {
-            // If ECore navigation fails, try contextual helper fallback
-            if let helper = module.helpers[property] as? ATLHelperWrapper,
-                helper.contextType != nil
+            // If ECore navigation fails, try the contextual helper selected by the receiver's type
+            if let helper = bestContextHelper(
+                named: property, receiver: eObject, argumentCount: 0, includingOclAny: true)
             {
-
                 if debug {
                     print(
-                        "[ATL DEBUG] Property '\(property)' not found, trying contextual helper fallback"
+                        "[ATL DEBUG] Property '\(property)' not found, using contextual helper"
                     )
                 }
+                return try await invokeContextHelper(helper, receiver: eObject, arguments: [])
+            }
 
-                // Context helper - bind receiver as 'self' and evaluate directly
-                pushScope()
-                defer { popScope() }
-
-                // Bind receiver as 'self'
-                setVariable("self", value: object)
-
-                // Bind parameters (contextual helpers typically have no parameters)
-                for (parameter, _) in zip(helper.parameters, []) {
-                    setVariable(parameter.name, value: nil)
-                }
-
-                // Evaluate the helper body expression
-                return try await helper.bodyExpression.evaluate(in: self)
+            // Native metamodel elements answer their name without a reflective metamodel
+            if property == ATLLanguage.namePropertyName, let named = eObject as? any ENamedElement {
+                return named.name
             }
 
             // Neither property nor helper found, rethrow original error
@@ -330,7 +336,7 @@ public final class ATLExecutionContext: Sendable {
             return try await resolveTemp(arguments)
         }
 
-        guard let helper = helpers[name] else {
+        guard let helper = globalHelper(named: name) else {
             throw ATLExecutionError.helperNotFound(name)
         }
 
@@ -402,15 +408,18 @@ public final class ATLExecutionContext: Sendable {
     /// - Returns: The result of evaluating the helper
     /// - Throws: `ATLExecutionError` if the helper is not found or is contextual
     public func dispatchThisModuleAttribute(_ name: String) async throws -> (any EcoreValue)? {
-        guard let helper = helpers[name] as? ATLHelperWrapper else {
+        if let parameter = try moduleParameterValue(named: name) {
+            return parameter.value
+        }
+        guard let helper = globalHelper(named: name) as? ATLHelperWrapper else {
+            if helpers[name] != nil || module.helperOverloads[name] != nil {
+                throw ATLExecutionError.runtimeError(
+                    "Contextual helper '\(name)' requires a receiver object and cannot be accessed as a thisModule attribute"
+                )
+            }
             throw ATLExecutionError.helperNotFound(name)
         }
-        guard helper.contextType == nil else {
-            throw ATLExecutionError.runtimeError(
-                "Contextual helper '\(name)' requires a receiver object and cannot be accessed as a thisModule attribute"
-            )
-        }
-        return try await callHelper(name, arguments: [])
+        return try await evaluateGlobalAttribute(helper)
     }
 
     /// Resolve a named target element traced from a source object.
@@ -499,13 +508,17 @@ public final class ATLExecutionContext: Sendable {
     /// matched rule is replaced by that rule's default target element, an
     /// element of the same target model is stored by identifier, and any other
     /// element is stored as a cross-resource proxy. See ``ATLReferenceStorage``.
+    /// Collection values are unwrapped, so their elements are resolved the same way,
+    /// and enumeration and numeric attribute values are validated and converted
+    /// by ``ATLValueConversion``.
     ///
     /// - Parameters:
     ///   - element: The target element to modify
     ///   - name: The name of the feature to set
     ///   - value: The evaluated value to assign
-    /// - Throws: ``ATLExecutionError`` if the element is not part of a target model or
-    ///   has no feature of that name
+    /// - Throws: ``ATLExecutionError`` if the element is not part of a target model,
+    ///   has no feature of that name, or the value is not valid for the feature (such as
+    ///   an unknown enumeration literal)
     public func assignFeature(on element: any EObject, feature name: String, value: (any EcoreValue)?)
         async throws
     {
@@ -529,8 +542,9 @@ public final class ATLExecutionContext: Sendable {
             )
         }
 
+        let prepared = try ATLValueConversion.prepare(value, for: feature)
         let stored = await ATLReferenceStorage.storedValue(
-            for: value, feature: feature, in: resource, context: self)
+            for: prepared, feature: feature, in: resource, context: self)
         guard await resource.eSet(objectId: element.id, feature: name, value: stored) else {
             throw ATLExecutionError.runtimeError(
                 "Could not set property '\(name)' of class '\(eClass.name)'")
@@ -584,10 +598,7 @@ public final class ATLExecutionContext: Sendable {
         let actualMetamodelName = parsedMetamodel ?? metamodelName
 
         // Find the model alias that uses this metamodel
-        guard
-            let modelAlias = module.targetMetamodels.first(where: {
-                $0.value.name == actualMetamodelName
-            })?.key
+        guard let modelAlias = module.targetAlias(forMetamodel: actualMetamodelName)
         else {
             throw ATLExecutionError.invalidOperation(
                 "No target model found for metamodel '\(actualMetamodelName)'")
@@ -1112,7 +1123,6 @@ public struct ATLLazyBinding: Sendable {
 
         // Evaluate the expression with restored scope
         let value = try await expression.evaluate(in: context)
-
         try await context.assignFeature(on: targetObject, feature: property, value: value)
     }
 

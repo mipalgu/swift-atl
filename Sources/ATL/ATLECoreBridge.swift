@@ -202,6 +202,10 @@ extension ATLBinaryExpression {
             return "excludes"
         case .implies:
             return "implies"
+        case .xor:
+            return "xor"
+        case .integerDivide:
+            return "div"
         }
     }
 }

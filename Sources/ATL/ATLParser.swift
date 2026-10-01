@@ -63,16 +63,22 @@ public actor ATLParser {
     }
 
     /// Parse an ATL file and return an ATL module
-    /// - Parameter url: The URL of the ATL file to parse
     /// - Returns: An ATLModule representing the parsed ATL content
     /// - Throws: ATLParseError if parsing fails
-    public func parse(_ url: URL) async throws -> ATLModule {
+    ///
+    /// - Parameters:
+    ///   - url: The URL of the ATL file to parse
+    ///   - metamodelRegistry: Packages that `@nsURI` directives and metamodel names may bind to
+    public func parse(_ url: URL, metamodelRegistry: ATLMetamodelRegistry = .empty) async throws
+        -> ATLModule
+    {
         guard let content = try? String(contentsOf: url, encoding: .utf8) else {
             throw ATLParseError.fileNotFound(url.path)
         }
 
         // Pass the full path for proper relative path resolution
-        return try await parseContent(content, filename: url.path)
+        return try await parseContent(
+            content, filename: url.path, metamodelRegistry: metamodelRegistry)
     }
 
     /// Parse ATL content from a string.
@@ -82,19 +88,33 @@ public actor ATLParser {
     ///   - filename: Optional filename for error reporting
     ///   - searchPaths: Optional array of directory paths to search for metamodel files
     ///   - continueAfterErrors: Whether to continue parsing after encountering errors
+    ///   - metamodelRegistry: Packages that `@nsURI` directives and metamodel names may bind to
     /// - Returns: An ATLModule representing the parsed ATL content
     /// - Throws: ATLParseError if parsing fails
     public func parseContent(
         _ content: String,
         filename: String = "unknown",
         searchPaths: [String] = [],
-        continueAfterErrors: Bool = true
+        continueAfterErrors: Bool = true,
+        metamodelRegistry: ATLMetamodelRegistry = .empty
     ) async throws -> ATLModule {
         let lexer = ATLLexer(content: content)
         let tokens = try lexer.tokenize()
+        if let directiveError = lexer.directives.errors.first {
+            throw ATLParseError.invalidSyntax(directiveError)
+        }
         let parser = ATLSyntaxParser(tokens: tokens, filename: filename)
 
-        var module = try parser.parseModule()
+        var module = try parser.parseModule().withParameters(lexer.directives.parameters)
+
+        // Bind metamodels from @nsURI directives and the registry
+        let registryBinding = try bindRegistryMetamodels(
+            of: module,
+            directives: lexer.directives,
+            registry: metamodelRegistry,
+            continueAfterErrors: continueAfterErrors
+        )
+        module = registryBinding.module
 
         // Load metamodels from @path directives
         let baseURL = URL(fileURLWithPath: filename)
@@ -103,10 +123,61 @@ public actor ATLParser {
             pathDirectives: lexer.pathDirectives,
             relativeTo: baseURL,
             searchPaths: searchPaths,
-            continueAfterErrors: continueAfterErrors
+            continueAfterErrors: continueAfterErrors,
+            boundAliases: registryBinding.aliases
         )
 
         return module
+    }
+
+    /// Binds metamodels to packages supplied by a registry.
+    ///
+    /// A metamodel with an `@nsURI` directive is bound to the package registered
+    /// for that namespace URI. A metamodel without any `@path` or `@nsURI`
+    /// directive is bound to the registered package of the same name, if there is one.
+    ///
+    /// - Parameters:
+    ///   - module: The parsed module whose metamodels are still placeholders.
+    ///   - directives: The directives collected from the module header.
+    ///   - registry: The registry to resolve packages from.
+    ///   - continueAfterErrors: When `true`, an unresolved `@nsURI` leaves the placeholder in place.
+    /// - Returns: The module with bound metamodels and the aliases that were bound.
+    /// - Throws: ``ATLParseError/metamodelNotFound(_:)`` for an unresolved `@nsURI` when errors are fatal.
+    private func bindRegistryMetamodels(
+        of module: ATLModule,
+        directives: ATLDirectives,
+        registry: ATLMetamodelRegistry,
+        continueAfterErrors: Bool
+    ) throws -> (module: ATLModule, aliases: Set<String>) {
+        var boundAliases: Set<String> = []
+
+        func bound(_ metamodels: OrderedDictionary<String, EPackage>) throws
+            -> OrderedDictionary<String, EPackage>
+        {
+            var result = metamodels
+            for (alias, placeholder) in metamodels {
+                let name = placeholder.name
+                if let nsURI = directives.namespaceURIs[name] {
+                    guard let package = registry.package(nsURI: nsURI) else {
+                        if continueAfterErrors { continue }
+                        throw ATLParseError.metamodelNotFound(
+                            "No metamodel is registered for nsURI '\(nsURI)' (metamodel '\(name)')")
+                    }
+                    result[alias] = package
+                    boundAliases.insert(alias)
+                } else if directives.paths[name] == nil, let package = registry.package(named: name)
+                {
+                    result[alias] = package
+                    boundAliases.insert(alias)
+                }
+            }
+            return result
+        }
+
+        let source = try bound(module.sourceMetamodels)
+        let target = try bound(module.targetMetamodels)
+        guard !boundAliases.isEmpty else { return (module, boundAliases) }
+        return (module.withMetamodels(source: source, target: target), boundAliases)
     }
 
     /// Loads all metamodels specified by @path directives and replaces dummy metamodels.
@@ -117,7 +188,7 @@ public actor ATLParser {
     ///   - baseURL: The URL of the ATL file (for resolving relative paths)
     ///   - searchPaths: Array of directory paths to search for metamodel files
     /// - Returns: The module with real loaded metamodels
-    private func loadMetamodels(into module: ATLModule, pathDirectives: [String: String], relativeTo baseURL: URL, searchPaths: [String], continueAfterErrors: Bool = true) async throws -> ATLModule {
+    private func loadMetamodels(into module: ATLModule, pathDirectives: [String: String], relativeTo baseURL: URL, searchPaths: [String], continueAfterErrors: Bool = true, boundAliases: Set<String> = []) async throws -> ATLModule {
         if debug {
             print("[ATL] loadMetamodels: Starting metamodel loading")
             print("[ATL]   Path directives: \(pathDirectives)")
@@ -135,6 +206,7 @@ public actor ATLParser {
 
         // Load source metamodels
         for (alias, metamodel) in sourceMetamodels {
+            if boundAliases.contains(alias) { continue }
             if debug {
                 print("[ATL] Processing source metamodel '\(alias)' -> '\(metamodel.name)'")
             }
@@ -177,6 +249,7 @@ public actor ATLParser {
 
         // Load target metamodels
         for (alias, metamodel) in targetMetamodels {
+            if boundAliases.contains(alias) { continue }
             if debug {
                 print("[ATL] Processing target metamodel '\(alias)' -> '\(metamodel.name)'")
             }
@@ -243,14 +316,7 @@ public actor ATLParser {
         }
 
         // Return new module with loaded metamodels
-        return ATLModule(
-            name: module.name,
-            sourceMetamodels: sourceMetamodels,
-            targetMetamodels: targetMetamodels,
-            helpers: module.helpers,
-            matchedRules: module.matchedRules,
-            calledRules: module.calledRules
-        )
+        return module.withMetamodels(source: sourceMetamodels, target: targetMetamodels)
     }
 
     /// Loads a metamodel from an Ecore file.
@@ -370,6 +436,8 @@ private enum ATLTokenType: Equatable {
     case identifier(String)
     case stringLiteral(String)
     case integerLiteral(Int)
+    case realLiteral(Double)
+    case enumLiteral(String)
     case booleanLiteral(Bool)
     case `operator`(String)
     case punctuation(String)
@@ -394,9 +462,11 @@ private class ATLLexer {
     private var line: Int = 1
     private var column: Int = 1
 
-    /// Storage for @path directives extracted from comments
+    /// The header directives (`@path`, `@nsURI` and `@param`) extracted from comments.
+    var directives = ATLDirectives()
+
     /// Maps metamodel name to file path (e.g., "Families" -> "/Families2Persons/Families.ecore")
-    var pathDirectives: [String: String] = [:]
+    var pathDirectives: [String: String] { directives.paths }
 
     private static let keywords: Set<String> = [
         "module", "create", "from", "helper", "def", "context", "rule", "query",
@@ -437,31 +507,6 @@ private class ATLLexer {
         return tokens
     }
 
-    /// Extracts and stores @path directives from comments.
-    ///
-    /// Expected format: `@path MetamodelName=/path/to/Metamodel.ecore`
-    ///
-    /// - Parameter comment: The comment text (without the leading `--`)
-    private func extractPathDirective(from comment: String) {
-        let trimmed = comment.trimmingCharacters(in: .whitespaces)
-
-        // Remove "@path " prefix
-        guard trimmed.hasPrefix("@path ") else { return }
-        let directive = String(trimmed.dropFirst(6))  // Remove "@path "
-
-        // Parse "Name=/path/to/file.ecore"
-        let components = directive.split(separator: "=", maxSplits: 1)
-        guard components.count == 2 else {
-            // Malformed @path directive - silently ignore
-            return
-        }
-
-        let metamodelName = String(components[0]).trimmingCharacters(in: .whitespaces)
-        let filePath = String(components[1]).trimmingCharacters(in: .whitespaces)
-
-        pathDirectives[metamodelName] = filePath
-    }
-
     private func nextToken() throws -> ATLToken {
         guard position < content.endIndex else {
             return ATLToken(type: .eof, value: "", line: line, column: column)
@@ -496,8 +541,8 @@ private class ATLLexer {
                 advance()
             }
 
-            // Extract @path directive if present
-            extractPathDirective(from: comment)
+            // Extract header directives if present
+            directives.record(comment: comment)
 
             return ATLToken(
                 type: .comment(comment), value: "--" + comment, line: startLine, column: startColumn
@@ -509,9 +554,14 @@ private class ATLLexer {
             return try parseStringLiteral(startLine: startLine, startColumn: startColumn)
         }
 
+        // Enumeration literals: #name
+        if char == ATLLanguage.enumerationLiteralPrefix {
+            return try parseEnumerationLiteral(startLine: startLine, startColumn: startColumn)
+        }
+
         // Numbers
         if char.isNumber {
-            return parseNumericLiteral(startLine: startLine, startColumn: startColumn)
+            return try parseNumericLiteral(startLine: startLine, startColumn: startColumn)
         }
 
         // Multi-character operators
@@ -571,10 +621,16 @@ private class ATLLexer {
 
     private func parseStringLiteral(startLine: Int, startColumn: Int) throws -> ATLToken {
         advance()  // Skip opening quote
-        var value = ""
+        var raw = ""
 
         while position < content.endIndex && content[position] != "'" {
-            value.append(content[position])
+            if content[position] == ATLLanguage.StringEscape.introducer {
+                // Keep the escape undecoded, but never let an escaped quote end the literal
+                raw.append(content[position])
+                advance()
+                guard position < content.endIndex else { break }
+            }
+            raw.append(content[position])
             advance()
         }
 
@@ -583,28 +639,84 @@ private class ATLLexer {
         }
 
         advance()  // Skip closing quote
+        let value = ATLStringEscapes.decode(raw)
         return ATLToken(
-            type: .stringLiteral(value), value: "'\(value)'", line: startLine, column: startColumn)
+            type: .stringLiteral(value), value: "'\(raw)'", line: startLine, column: startColumn)
     }
 
-    private func parseNumericLiteral(startLine: Int, startColumn: Int) -> ATLToken {
-        var value = ""
-
+    private func parseEnumerationLiteral(startLine: Int, startColumn: Int) throws -> ATLToken {
+        advance()  // Skip '#'
+        var name = ""
         while position < content.endIndex
-            && (content[position].isNumber || content[position] == ".")
+            && (content[position].isLetter || content[position].isNumber || content[position] == "_")
         {
-            value.append(content[position])
+            name.append(content[position])
             advance()
         }
+        guard !name.isEmpty else {
+            throw ATLParseError.unexpectedToken(
+                "Expected an enumeration literal name after '#' at line \(startLine), column \(startColumn)"
+            )
+        }
+        return ATLToken(
+            type: .enumLiteral(name), value: "#\(name)", line: startLine, column: startColumn)
+    }
 
-        if let intValue = Int(value) {
+    private func parseNumericLiteral(startLine: Int, startColumn: Int) throws -> ATLToken {
+        var value = ""
+        var isReal = false
+
+        func appendDigits() {
+            while position < content.endIndex && content[position].isASCII
+                && content[position].isNumber
+            {
+                value.append(content[position])
+                advance()
+            }
+        }
+
+        func character(at offset: Int) -> Character? {
+            guard let index = content.index(position, offsetBy: offset, limitedBy: content.endIndex),
+                index < content.endIndex
+            else { return nil }
+            return content[index]
+        }
+
+        appendDigits()
+
+        // A fraction needs a digit after the point, so that `3.size()` still navigates
+        if character(at: 0) == ".", let next = character(at: 1), next.isASCII, next.isNumber {
+            isReal = true
+            value.append(".")
+            advance()
+            appendDigits()
+        }
+
+        if let marker = character(at: 0), marker == "e" || marker == "E" {
+            let hasSign = character(at: 1) == "+" || character(at: 1) == "-"
+            if let digit = character(at: hasSign ? 2 : 1), digit.isASCII, digit.isNumber {
+                isReal = true
+                value.append("e")
+                advance()
+                if hasSign {
+                    value.append(content[position])
+                    advance()
+                }
+                appendDigits()
+            }
+        }
+
+        if !isReal, let intValue = Int(value) {
             return ATLToken(
                 type: .integerLiteral(intValue), value: value, line: startLine, column: startColumn)
         }
 
-        // For simplicity, treat as integer even if parsing fails
+        guard let realValue = Double(value) else {
+            throw ATLParseError.invalidSyntax(
+                "Invalid numeric literal '\(value)' at line \(startLine), column \(startColumn)")
+        }
         return ATLToken(
-            type: .integerLiteral(0), value: value, line: startLine, column: startColumn)
+            type: .realLiteral(realValue), value: value, line: startLine, column: startColumn)
     }
 
     private func parseIdentifier(startLine: Int, startColumn: Int) -> ATLToken {
@@ -678,6 +790,7 @@ private class ATLSyntaxParser {
         var sourceMetamodels: OrderedDictionary<String, EPackage> = [:]
         var targetMetamodels: OrderedDictionary<String, EPackage> = [:]
         var helpers: OrderedDictionary<String, any ATLHelperType> = [:]
+        var helperOverloads: OrderedDictionary<String, [any ATLHelperType]> = [:]
         var matchedRules: [ATLMatchedRule] = []
         var calledRules: OrderedDictionary<String, ATLCalledRule> = [:]
 
@@ -693,6 +806,10 @@ private class ATLSyntaxParser {
             if currentToken()?.type == .keyword("helper") {
                 let helper = try parseHelper()
                 helpers[helper.name] = helper
+                helperOverloads[helper.name, default: []].removeAll {
+                    $0.contextType == helper.contextType
+                }
+                helperOverloads[helper.name, default: []].append(helper)
             } else if startsRuleDeclaration() {
                 let rule = try parseRuleDeclaration()
                 if let matchedRule = rule as? ATLMatchedRule {
@@ -723,7 +840,8 @@ private class ATLSyntaxParser {
             targetMetamodels: targetMetamodels,
             helpers: helpers,
             matchedRules: matchedRules,
-            calledRules: calledRules
+            calledRules: calledRules,
+            helperOverloads: helperOverloads
         )
     }
 
@@ -870,7 +988,9 @@ private class ATLSyntaxParser {
 
         // Parse parameters if present
         var parameters: [ATLParameter] = []
+        var hasParameterList = false
         if consumePunctuation("(") {
+            hasParameterList = true
             parameters = try parseParameterList()
             consumePunctuation(")")
         }
@@ -895,7 +1015,8 @@ private class ATLSyntaxParser {
             contextType: contextType,
             returnType: returnType,
             parameters: parameters,
-            body: bodyExpression
+            body: bodyExpression,
+            isAttribute: !hasParameterList
         )
     }
 
@@ -1122,7 +1243,7 @@ private class ATLSyntaxParser {
         // Handle if-then-else expressions
         if let token = currentToken(), case .keyword(let keyword) = token.type, keyword == "if" {
             advance()
-            let condition = try parseOrExpression()
+            let condition = try parseImpliesExpression()
 
             guard consumeKeyword("then") else {
                 let currentTok = currentToken()?.value ?? "EOF"
@@ -1144,7 +1265,7 @@ private class ATLSyntaxParser {
                 // This is 'else if' - parse as nested conditional WITHOUT consuming endif
                 // (the endif belongs to the outermost if)
                 advance()  // consume 'if'
-                let nestedCondition = try parseOrExpression()
+                let nestedCondition = try parseImpliesExpression()
 
                 guard consumeKeyword("then") else {
                     throw ATLParseError.invalidSyntax("Expected 'then' after 'else if' condition")
@@ -1179,20 +1300,37 @@ private class ATLSyntaxParser {
             )
         }
 
-        return try parseOrExpression()
+        return try parseImpliesExpression()
     }
 
-    private func parseOrExpression() throws -> any ATLExpression {
+    /// Parses the lowest-precedence boolean level: `a implies b`.
+    private func parseImpliesExpression() throws -> any ATLExpression {
+        var expr = try parseDisjunctionExpression()
+
+        while consumeInfixKeyword(.implies) {
+            let right = try parseDisjunctionExpression()
+            expr = ATLBinaryExpression(left: expr, operator: .implies, right: right)
+        }
+
+        return expr
+    }
+
+    /// Parses `a or b` and `a xor b`, which bind more weakly than `and`.
+    private func parseDisjunctionExpression() throws -> any ATLExpression {
         var expr = try parseAndExpression()
 
-        while currentToken()?.type == .keyword("or") {
-            advance()
+        while true {
+            let binOp: ATLBinaryOperator
+            if currentToken()?.type == .keyword("or") {
+                advance()
+                binOp = .or
+            } else if consumeInfixKeyword(.xor) {
+                binOp = .xor
+            } else {
+                break
+            }
             let right = try parseAndExpression()
-            expr = ATLBinaryExpression(
-                left: expr,
-                operator: .or,
-                right: right
-            )
+            expr = ATLBinaryExpression(left: expr, operator: binOp, right: right)
         }
 
         return expr
@@ -1285,13 +1423,21 @@ private class ATLSyntaxParser {
     private func parseMultiplicativeExpression() throws -> any ATLExpression {
         var expr = try parseUnaryExpression()
 
-        while let token = currentToken(),
-            case .`operator`(let op) = token.type,
-            ["*", "/"].contains(op)
-        {
-            advance()
+        while true {
+            let binOp: ATLBinaryOperator
+            if let token = currentToken(), case .`operator`(let op) = token.type,
+                ["*", "/"].contains(op)
+            {
+                advance()
+                binOp = op == "*" ? .multiply : .divide
+            } else if consumeInfixKeyword(.div) {
+                binOp = .integerDivide
+            } else if consumeInfixKeyword(.mod) {
+                binOp = .modulo
+            } else {
+                break
+            }
             let right = try parseUnaryExpression()
-            let binOp: ATLBinaryOperator = op == "*" ? .multiply : .divide
             expr = ATLBinaryExpression(
                 left: expr,
                 operator: binOp,
@@ -1355,7 +1501,9 @@ private class ATLSyntaxParser {
 
                         while !isAtEnd() && !(currentToken()?.type == .punctuation(")")) {
                             // Check for lambda expression syntax: param | body
-                            if let firstToken = currentToken(),
+                            if let lambda = try parseLambdaIfPresent() {
+                                args.append(lambda)
+                            } else if let firstToken = currentToken(),
                                 case .identifier(let paramName) = firstToken.type
                             {
                                 // Look ahead for '|' to detect lambda
@@ -1427,6 +1575,24 @@ private class ATLSyntaxParser {
             advance()
             return ATLLiteralExpression(value: value)
 
+        case .realLiteral(let value):
+            advance()
+            return ATLLiteralExpression(value: value)
+
+        case .enumLiteral(let name):
+            advance()
+            return ATLEnumLiteralExpression(name: name)
+
+        case .keyword(let typeName) where ATLLanguage.PrimitiveType(rawValue: typeName) != nil:
+            advance()
+            return ATLTypeLiteralExpression(typeName: typeName)
+
+        case .identifier(let name)
+        where name == ATLLanguage.UndefinedLiteral.oclUndefined
+            || name == ATLLanguage.UndefinedLiteral.null:
+            advance()
+            return ATLLiteralExpression(value: nil)
+
         case .booleanLiteral(let value):
             advance()
             return ATLLiteralExpression(value: value)
@@ -1435,8 +1601,13 @@ private class ATLSyntaxParser {
             // Parse tuple expression: Tuple{field1 : Type1 = expr1, field2 : Type2 = expr2, ...}
             return try parseTupleExpression()
 
+        case .identifier(let name)
+        where ATLLanguage.genericTypeNames.contains(name) && isNextPunctuation("("):
+            // A generic type used as a value, as in `oclIsKindOf(Sequence(Integer))`
+            return ATLTypeLiteralExpression(typeName: try parseTypeExpression())
+
         case .identifier(let collectionType)
-        where collectionType == "Sequence" || collectionType == "Set" || collectionType == "Bag":
+        where ATLCollectionKind(rawValue: collectionType) != nil:
             // Handle collection literals like Sequence{}, Set{1, 2, 3}, etc.
             advance()  // consume collection type
             guard consumePunctuation("{") else {
@@ -1494,7 +1665,9 @@ private class ATLSyntaxParser {
 
                 while !isAtEnd() && !(currentToken()?.type == .punctuation(")")) {
                     // Check for lambda expression syntax: param | body
-                    if let firstToken = currentToken(),
+                    if let lambda = try parseLambdaIfPresent() {
+                        args.append(lambda)
+                    } else if let firstToken = currentToken(),
                         case .identifier(let paramName) = firstToken.type
                     {
                         // Look ahead for '|' to detect lambda
@@ -1663,8 +1836,8 @@ private class ATLSyntaxParser {
     /// - Throws: ATLParseError if parsing fails
     private func parseExpressionUntilKeyword(_ keyword: String) throws -> any ATLExpression {
         // Parse expression, but stop when we encounter the specified keyword
-        // Use parseOrExpression to avoid consuming keywords like 'in'
-        return try parseOrExpression()
+        // Use parseImpliesExpression to avoid consuming keywords like 'in'
+        return try parseImpliesExpression()
     }
 
     /// Parses an expression until encountering a ')' token.
@@ -1774,6 +1947,58 @@ private class ATLSyntaxParser {
         }
 
         return ATLTupleExpression(fields: fields)
+    }
+
+    /// Whether the token after the current one is the given punctuation.
+    ///
+    /// - Parameter punctuation: The punctuation to look for.
+    /// - Returns: `true` if the following token is that punctuation.
+    private func isNextPunctuation(_ punctuation: String) -> Bool {
+        guard position + 1 < tokens.count else { return false }
+        return tokens[position + 1].type == .punctuation(punctuation)
+    }
+
+    /// Consumes an infix keyword (`implies`, `xor`, `div`, `mod`), which the lexer reads as an identifier.
+    ///
+    /// - Parameter keyword: The keyword to consume.
+    /// - Returns: `true` if the current token was the keyword and has been consumed.
+    private func consumeInfixKeyword(_ keyword: ATLLanguage.InfixKeyword) -> Bool {
+        guard let token = currentToken(), case .identifier(let name) = token.type,
+            name == keyword.rawValue
+        else {
+            return false
+        }
+        advance()
+        return true
+    }
+
+    /// Parses an iterator lambda such as `e | body`, `a, b | body` or `e : Type | body`.
+    ///
+    /// The position is left unchanged when the upcoming tokens are not a lambda.
+    ///
+    /// - Returns: The lambda, or `nil` when the arguments do not start with iterator variables and a bar.
+    private func parseLambdaIfPresent() throws -> ATLLambdaExpression? {
+        let savedPosition = position
+        var names: [String] = []
+
+        while let token = currentToken(), case .identifier(let name) = token.type {
+            names.append(name)
+            advance()
+            if consumeOperator(":") {
+                guard (try? parseTypeExpression()) != nil else {
+                    position = savedPosition
+                    return nil
+                }
+            }
+            if !consumePunctuation(",") { break }
+        }
+
+        guard !names.isEmpty, consumePunctuation("|") else {
+            position = savedPosition
+            return nil
+        }
+        let body = try parseExpression()
+        return ATLLambdaExpression(parameters: names, body: body)
     }
 
     @discardableResult
