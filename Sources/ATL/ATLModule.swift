@@ -85,6 +85,28 @@ public struct ATLModule: Sendable, Equatable, Hashable {
     /// within the otherwise declarative ATL framework.
     public let calledRules: OrderedDictionary<String, ATLCalledRule>
 
+    /// Every helper definition, grouped by helper name.
+    ///
+    /// Contextual helpers may share a name when their context types differ, so
+    /// ``helpers`` (which holds one helper per name) cannot represent them all.
+    /// This table holds every definition; contextual helpers are selected from
+    /// it by the dynamic type of the receiver, and context-free helpers have a
+    /// `nil` context type. Helpers supplied only through ``helpers`` are added
+    /// to this table on creation.
+    public let helperOverloads: OrderedDictionary<String, [any ATLHelperType]>
+
+    /// The parameters declared by `-- @param` header comments.
+    ///
+    /// Values for these parameters are supplied when the transformation is
+    /// executed and are read in the transformation as `thisModule.<name>`.
+    public let parameters: [ATLModuleParameter]
+
+    /// The metamodel names as written in the module header, indexed by model alias.
+    ///
+    /// Type references in rules and expressions (`Ecore!EClass`) use the name
+    /// declared in the header, which need not equal the name of the bound package.
+    public let declaredMetamodelNames: [String: String]
+
     // MARK: - Initialisation
 
     /// Creates a new ATL module with the specified configuration.
@@ -96,6 +118,9 @@ public struct ATLModule: Sendable, Equatable, Hashable {
     ///   - helpers: Helper functions indexed by their names (default: empty)
     ///   - matchedRules: Matched rules for automatic execution (default: empty)
     ///   - calledRules: Called rules indexed by their names (default: empty)
+    ///   - helperOverloads: Every helper definition grouped by name (default: derived from `helpers`)
+    ///   - parameters: The declared module parameters (default: none)
+    ///   - declaredMetamodelNames: The header metamodel names by alias (default: the package names)
     ///
     /// - Precondition: The module name must be a non-empty string
     /// - Precondition: At least one source metamodel must be specified
@@ -106,7 +131,10 @@ public struct ATLModule: Sendable, Equatable, Hashable {
         targetMetamodels: OrderedDictionary<String, EPackage>,
         helpers: OrderedDictionary<String, any ATLHelperType> = [:],
         matchedRules: [ATLMatchedRule] = [],
-        calledRules: OrderedDictionary<String, ATLCalledRule> = [:]
+        calledRules: OrderedDictionary<String, ATLCalledRule> = [:],
+        helperOverloads: OrderedDictionary<String, [any ATLHelperType]> = [:],
+        parameters: [ATLModuleParameter] = [],
+        declaredMetamodelNames: [String: String]? = nil
     ) {
         precondition(!name.isEmpty, "Module name must not be empty")
         precondition(!sourceMetamodels.isEmpty, "At least one source metamodel must be specified")
@@ -118,6 +146,104 @@ public struct ATLModule: Sendable, Equatable, Hashable {
         self.helpers = helpers
         self.matchedRules = matchedRules
         self.calledRules = calledRules
+        self.helperOverloads = Self.mergingOverloads(helperOverloads, with: helpers)
+        self.parameters = parameters
+        self.declaredMetamodelNames =
+            declaredMetamodelNames
+            ?? Dictionary(
+                Array(sourceMetamodels).map { ($0.key, $0.value.name) }
+                    + Array(targetMetamodels).map { ($0.key, $0.value.name) },
+                uniquingKeysWith: { first, _ in first })
+    }
+
+    /// Returns a copy of this module bound to different metamodel packages.
+    ///
+    /// All other members, including the declared metamodel names, are kept.
+    ///
+    /// - Parameters:
+    ///   - sourceMetamodels: The new source metamodels indexed by alias.
+    ///   - targetMetamodels: The new target metamodels indexed by alias.
+    /// - Returns: The rebound module.
+    public func withMetamodels(
+        source sourceMetamodels: OrderedDictionary<String, EPackage>,
+        target targetMetamodels: OrderedDictionary<String, EPackage>
+    ) -> ATLModule {
+        ATLModule(
+            name: name,
+            sourceMetamodels: sourceMetamodels,
+            targetMetamodels: targetMetamodels,
+            helpers: helpers,
+            matchedRules: matchedRules,
+            calledRules: calledRules,
+            helperOverloads: helperOverloads,
+            parameters: parameters,
+            declaredMetamodelNames: declaredMetamodelNames
+        )
+    }
+
+    /// Returns a copy of this module with the given declared parameters.
+    ///
+    /// - Parameter parameters: The module parameters.
+    /// - Returns: The module with its parameters replaced.
+    public func withParameters(_ parameters: [ATLModuleParameter]) -> ATLModule {
+        ATLModule(
+            name: name,
+            sourceMetamodels: sourceMetamodels,
+            targetMetamodels: targetMetamodels,
+            helpers: helpers,
+            matchedRules: matchedRules,
+            calledRules: calledRules,
+            helperOverloads: helperOverloads,
+            parameters: parameters,
+            declaredMetamodelNames: declaredMetamodelNames
+        )
+    }
+
+    // MARK: - Metamodel Lookup
+
+    /// Finds the alias of the source model whose metamodel has the given name.
+    ///
+    /// The name is compared with the name declared in the module header first
+    /// and with the name of the bound package second.
+    ///
+    /// - Parameter metamodelName: The metamodel name used in a type reference.
+    /// - Returns: The model alias, or `nil` when no source metamodel matches.
+    public func sourceAlias(forMetamodel metamodelName: String) -> String? {
+        Self.alias(forMetamodel: metamodelName, in: sourceMetamodels, declared: declaredMetamodelNames)
+    }
+
+    /// Finds the alias of the target model whose metamodel has the given name.
+    ///
+    /// The name is compared with the name declared in the module header first
+    /// and with the name of the bound package second.
+    ///
+    /// - Parameter metamodelName: The metamodel name used in a type reference.
+    /// - Returns: The model alias, or `nil` when no target metamodel matches.
+    public func targetAlias(forMetamodel metamodelName: String) -> String? {
+        Self.alias(forMetamodel: metamodelName, in: targetMetamodels, declared: declaredMetamodelNames)
+    }
+
+    private static func alias(
+        forMetamodel metamodelName: String,
+        in metamodels: OrderedDictionary<String, EPackage>,
+        declared: [String: String]
+    ) -> String? {
+        metamodels.first(where: { declared[$0.key] == metamodelName })?.key
+            ?? metamodels.first(where: { $0.value.name == metamodelName })?.key
+    }
+
+    private static func mergingOverloads(
+        _ overloads: OrderedDictionary<String, [any ATLHelperType]>,
+        with helpers: OrderedDictionary<String, any ATLHelperType>
+    ) -> OrderedDictionary<String, [any ATLHelperType]> {
+        var merged = overloads
+        for (name, helper) in helpers {
+            let existing = merged[name] ?? []
+            if !existing.contains(where: { $0.contextType == helper.contextType }) {
+                merged[name] = existing + [helper]
+            }
+        }
+        return merged
     }
 
     // MARK: - Hashable
@@ -438,6 +564,13 @@ public struct ATLHelperWrapper: ATLHelperType, Sendable, Equatable, Hashable {
     /// The body expression (stored as any ATLExpression).
     public let bodyExpression: any ATLExpression
 
+    /// Whether the helper was declared as an attribute, that is without a parameter list.
+    ///
+    /// The value of an attribute helper is computed once per receiver and then
+    /// reused, as ATL does. Helpers declared with a (possibly empty) parameter
+    /// list are operations and are evaluated on every call.
+    public let isAttribute: Bool
+
     // MARK: - Initialisation
 
     /// Creates a type-erased helper wrapper.
@@ -448,18 +581,21 @@ public struct ATLHelperWrapper: ATLHelperType, Sendable, Equatable, Hashable {
     ///   - returnType: The return type specification
     ///   - parameters: The parameter list
     ///   - body: The body expression
+    ///   - isAttribute: Whether the helper is an attribute whose value is cached per receiver
     public init(
         name: String,
         contextType: String? = nil,
         returnType: String,
         parameters: [ATLParameter] = [],
-        body: any ATLExpression
+        body: any ATLExpression,
+        isAttribute: Bool = false
     ) {
         self.name = name
         self.contextType = contextType
         self.returnType = returnType
         self.parameters = parameters
         self.bodyExpression = body
+        self.isAttribute = isAttribute
     }
 
     // MARK: - ATLHelperType Conformance
@@ -503,6 +639,7 @@ public struct ATLHelperWrapper: ATLHelperType, Sendable, Equatable, Hashable {
             && lhs.contextType == rhs.contextType
             && lhs.returnType == rhs.returnType
             && lhs.parameters == rhs.parameters
+            && lhs.isAttribute == rhs.isAttribute
     }
 
     // MARK: - Hashable
@@ -512,5 +649,161 @@ public struct ATLHelperWrapper: ATLHelperType, Sendable, Equatable, Hashable {
         hasher.combine(contextType)
         hasher.combine(returnType)
         hasher.combine(parameters)
+        hasher.combine(isAttribute)
+    }
+}
+
+// MARK: - Module Parameters
+
+/// The types that a module parameter may have.
+public enum ATLParameterType: String, Sendable, CaseIterable, Hashable {
+    /// A character string.
+    case string = "String"
+
+    /// A whole number.
+    case integer = "Integer"
+
+    /// A truth value.
+    case boolean = "Boolean"
+
+    /// A floating-point number.
+    case real = "Real"
+}
+
+/// A value for a module parameter.
+public enum ATLParameterValue: Sendable, Hashable {
+    /// A string value.
+    case string(String)
+
+    /// An integer value.
+    case integer(Int)
+
+    /// A boolean value.
+    case boolean(Bool)
+
+    /// A real value.
+    case real(Double)
+
+    /// The value as it is seen by transformation expressions.
+    public var ecoreValue: any EcoreValue {
+        switch self {
+        case .string(let value): return value
+        case .integer(let value): return value
+        case .boolean(let value): return value
+        case .real(let value): return value
+        }
+    }
+}
+
+/// A module parameter declared with a `-- @param name : Type = default` header comment.
+///
+/// A parameter without a default value is required: executing the module
+/// without a value for it fails with ``ATLExecutionError/missingParameter(_:)``.
+///
+/// ## Example Usage
+///
+/// ```swift
+/// // -- @param basePackage : String = 'org.example'
+/// // -- @param generateTests : Boolean = false
+/// // -- @param projectName : String
+/// ```
+public struct ATLModuleParameter: Sendable, Equatable, Hashable {
+
+    /// The parameter name, used as `thisModule.<name>`.
+    public let name: String
+
+    /// The declared type of the parameter.
+    public let type: ATLParameterType
+
+    /// The value used when the caller supplies none, or `nil` for a required parameter.
+    public let defaultValue: ATLParameterValue?
+
+    /// Whether the caller must supply a value.
+    public var isRequired: Bool { defaultValue == nil }
+
+    /// Creates a module parameter.
+    ///
+    /// - Parameters:
+    ///   - name: The parameter name.
+    ///   - type: The declared type.
+    ///   - defaultValue: The default value, or `nil` to make the parameter required.
+    public init(name: String, type: ATLParameterType, defaultValue: ATLParameterValue? = nil) {
+        self.name = name
+        self.type = type
+        self.defaultValue = defaultValue
+    }
+
+    /// Converts the text of a value to this parameter's type.
+    ///
+    /// Strings are taken verbatim; the other types are parsed. This is the
+    /// conversion command line tools use for `--param name=value`.
+    ///
+    /// - Parameter text: The textual value.
+    /// - Returns: The typed value.
+    /// - Throws: ``ATLExecutionError/typeError(_:)`` when the text is not a valid value of the type.
+    public func value(fromText text: String) throws -> ATLParameterValue {
+        switch type {
+        case .string:
+            return .string(text)
+        case .integer:
+            guard let value = Int(text) else {
+                throw ATLExecutionError.typeError(
+                    "Parameter '\(name)' expects an Integer but was given '\(text)'")
+            }
+            return .integer(value)
+        case .boolean:
+            switch text.lowercased() {
+            case "true": return .boolean(true)
+            case "false": return .boolean(false)
+            default:
+                throw ATLExecutionError.typeError(
+                    "Parameter '\(name)' expects a Boolean but was given '\(text)'")
+            }
+        case .real:
+            guard let value = Double(text) else {
+                throw ATLExecutionError.typeError(
+                    "Parameter '\(name)' expects a Real but was given '\(text)'")
+            }
+            return .real(value)
+        }
+    }
+
+    /// Checks a supplied value against this parameter's type.
+    ///
+    /// Integers are accepted for real parameters and converted.
+    ///
+    /// - Parameter value: The value supplied by the caller.
+    /// - Returns: The value in the representation of the declared type.
+    /// - Throws: ``ATLExecutionError/typeError(_:)`` when the value has the wrong type.
+    public func validated(_ value: any EcoreValue) throws -> any EcoreValue {
+        switch (type, value) {
+        case (.string, is String), (.integer, is Int), (.boolean, is Bool), (.real, is Double):
+            return value
+        case (.real, let integer as Int):
+            return Double(integer)
+        default:
+            throw ATLExecutionError.typeError(
+                "Parameter '\(name)' expects a \(type.rawValue) but was given \(Swift.type(of: value))")
+        }
+    }
+}
+
+extension ATLModule {
+
+    /// Converts textual parameter values to the types the module declares.
+    ///
+    /// - Parameter text: The textual values by parameter name.
+    /// - Returns: The typed values by parameter name.
+    /// - Throws: ``ATLExecutionError/unknownParameter(_:)`` for undeclared names and
+    ///   ``ATLExecutionError/typeError(_:)`` for malformed values.
+    public func parameterValues(fromText text: [String: String]) throws -> [String: any EcoreValue] {
+        var values: [String: any EcoreValue] = [:]
+        for (name, raw) in text {
+            guard let declaration = parameters.first(where: { $0.name == name }) else {
+                throw ATLExecutionError.unknownParameter(name)
+            }
+            values[name] = try declaration.value(fromText: raw).ecoreValue
+        }
+        return values
     }
 }

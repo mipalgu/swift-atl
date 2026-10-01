@@ -122,12 +122,15 @@ public final class ATLVirtualMachine {
     /// - Parameters:
     ///   - sources: Source models indexed by namespace aliases
     ///   - targets: Target models indexed by namespace aliases
-    /// - Throws: ATL execution errors for transformation failures
+    ///   - parameters: Values for the module parameters declared with `-- @param`, by name
+    /// - Throws: ATL execution errors for transformation failures, including
+    ///   ``ATLExecutionError/missingParameter(_:)`` for a required parameter without a value
     ///
     /// - Note: Source and target model aliases must match the module's metamodel specifications
     public func execute(
         sources: OrderedDictionary<String, Resource>,
-        targets: OrderedDictionary<String, Resource>
+        targets: OrderedDictionary<String, Resource>,
+        parameters: [String: any EcoreValue] = [:]
     ) async throws {
         if debug {
             print("[ATL] Executing transformation: \(module.name)")
@@ -140,6 +143,10 @@ public final class ATLVirtualMachine {
 
         // Validate model aliases against module specifications
         try validateModelAliases(sources: sources, targets: targets)
+
+        // Bind module parameters and start with fresh attribute helper values
+        try executionContext.setModuleParameters(parameters)
+        executionContext.clearAttributeHelperCache()
 
         // Configure execution context with models
         for (alias, resource) in sources {
@@ -220,9 +227,7 @@ public final class ATLVirtualMachine {
         }
 
         // Find the model alias that uses this metamodel
-        guard
-            let modelAlias = module.sourceMetamodels.first(where: { $0.value.name == metamodelName }
-            )?.key
+        guard let modelAlias = module.sourceAlias(forMetamodel: metamodelName)
         else {
             throw ATLExecutionError.invalidOperation(
                 "No source model found for metamodel '\(metamodelName)'")
@@ -377,6 +382,7 @@ public final class ATLVirtualMachine {
                 currentElement = try await setElementProperty(
                     currentElement, property: binding.property, value: propertyValue, targetPattern: pattern)
             } catch {
+                if case ATLExecutionError.invalidEnumerationLiteral = error { throw error }
                 if debug {
                     print(
                         "[ATL DEBUG] Binding evaluation failed for property '\(binding.property)': \(error)"
@@ -428,8 +434,9 @@ public final class ATLVirtualMachine {
         // so the XMI serialiser can resolve and serialise the references correctly.
         let featureIsMany =
             (feature as? EReference)?.isMany ?? (feature as? EAttribute)?.isMany ?? false
+        let preparedValue = try ATLValueConversion.prepare(value, for: feature)
         let valueToSet: (any EcoreValue)?
-        if featureIsMany, let collection = value as? EcoreValueArray {
+        if featureIsMany, let collection = preparedValue as? EcoreValueArray {
             let ids = collection.values.compactMap { ($0 as? any EObject)?.id }
             if !ids.isEmpty {
                 // [EUUID] conforms to EcoreValue; the XMI serialiser resolves IDs to objects
@@ -439,7 +446,7 @@ public final class ATLVirtualMachine {
                 valueToSet = collection
             }
         } else {
-            valueToSet = value as? (any EcoreValue)
+            valueToSet = preparedValue
         }
 
         // Create a mutable copy and set the property
@@ -455,9 +462,7 @@ public final class ATLVirtualMachine {
             )
         }
         let metamodelName = String(typeComponents[0])
-        guard let targetAlias = executionContext.module.targetMetamodels.first(where: {
-            $0.value.name == metamodelName
-        })?.key else {
+        guard let targetAlias = executionContext.module.targetAlias(forMetamodel: metamodelName) else {
             throw ATLExecutionError.invalidOperation(
                 "No target model found for metamodel '\(metamodelName)'"
             )
