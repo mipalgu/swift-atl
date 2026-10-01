@@ -1320,12 +1320,12 @@ public struct ATLMethodCallExpression: ATLExpression, Sendable, Equatable, Hasha
 
     // MARK: - OCL Meta Operations
 
-    /// Handles `oclIsUndefined()` — returns `true` if the receiver is `nil`.
+    /// Handles `oclIsUndefined()`, returns `true` if the receiver is `nil`.
     private func handleOclIsUndefined(_ receiverValue: (any EcoreValue)?) -> (any EcoreValue)? {
         return receiverValue == nil
     }
 
-    /// Handles `oclIsKindOf(typeName)` — returns `true` if the receiver's class matches
+    /// Handles `oclIsKindOf(typeName)`, returns `true` if the receiver's class matches
     /// or is a subtype of the named class.
     private func handleOclIsKindOf(_ receiverValue: (any EcoreValue)?, _ typeName: (any EcoreValue)?) throws -> (any EcoreValue)? {
         guard let typeName = typeName as? String else {
@@ -1344,7 +1344,7 @@ public struct ATLMethodCallExpression: ATLExpression, Sendable, Equatable, Hasha
         return false
     }
 
-    /// Handles `notEmpty()` — returns `true` when the collection or string is non-empty.
+    /// Handles `notEmpty()`, returns `true` when the collection or string is non-empty.
     private func handleNotEmpty(_ receiverValue: (any EcoreValue)?) throws -> (any EcoreValue)? {
         if let stringValue = receiverValue as? String {
             return !stringValue.isEmpty

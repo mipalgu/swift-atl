@@ -944,7 +944,7 @@ struct ATLThisModuleTests {
         let collection = EcoreValueArray([1 as any EcoreValue, 2, 3])
         context.setVariable("c", value: collection)
 
-        // Use size() as a proxy — it only resolves if the type signature is recognised
+        // Use size() as a proxy - it only resolves if the type signature is recognised
         let expr = ATLMethodCallExpression(
             receiver: ATLVariableExpression(name: "c"),
             methodName: "size",
