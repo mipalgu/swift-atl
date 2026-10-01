@@ -1258,39 +1258,18 @@ private class ATLSyntaxParser {
                     "Expected 'else' in conditional expression, found '\(currentTok)'")
             }
 
-            // Check if this is an 'else if' chain (no endif for nested if)
-            let elseExpr: any ATLExpression
-            if let token = currentToken(), case .keyword(let keyword) = token.type, keyword == "if"
-            {
-                // This is 'else if' - parse as nested conditional WITHOUT consuming endif
-                // (the endif belongs to the outermost if)
-                advance()  // consume 'if'
-                let nestedCondition = try parseImpliesExpression()
+            let elseExpr = try parseExpression()
 
-                guard consumeKeyword("then") else {
-                    throw ATLParseError.invalidSyntax("Expected 'then' after 'else if' condition")
-                }
-                let nestedThen = try parseExpression()
-
-                guard consumeKeyword("else") else {
-                    throw ATLParseError.invalidSyntax("Expected 'else' in 'else if' chain")
-                }
-                let nestedElse = try parseExpression()
-
-                elseExpr = ATLConditionalExpression(
-                    condition: nestedCondition,
-                    thenExpression: nestedThen,
-                    elseExpression: nestedElse
-                )
+            // A chain written as `else if ... else ... endif` shares one
+            // `endif`; a fully nested conditional has its own.
+            if elseExpr is ATLConditionalExpression {
+                _ = consumeKeyword("endif")
             } else {
-                // Regular else clause
-                elseExpr = try parseExpression()
-            }
-
-            guard consumeKeyword("endif") else {
-                let currentTok = currentToken()?.value ?? "EOF"
-                throw ATLParseError.invalidSyntax(
-                    "Expected 'endif' in conditional expression, found '\(currentTok)'")
+                guard consumeKeyword("endif") else {
+                    let currentTok = currentToken()?.value ?? "EOF"
+                    throw ATLParseError.invalidSyntax(
+                        "Expected 'endif' in conditional expression, found '\(currentTok)'")
+                }
             }
 
             return ATLConditionalExpression(
