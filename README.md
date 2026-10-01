@@ -146,6 +146,16 @@ try await ATLVirtualMachine(module: module).execute(
 
 A missing required parameter, an undeclared parameter or a value of the wrong type is reported as an `ATLExecutionError`. `ATLModule.parameterValues(fromText:)` converts textual values, for example from a command line, to the declared types.
 
+### Execution semantics
+
+A transformation runs in two phases. All matched rules first create their target elements (and `entrypoint` called rules run), then every binding and `do` block is applied, then failed bindings are retried and `endpoint` rules run. Rule order therefore never matters for references.
+
+- A source element assigned to a reference becomes the default target element it was transformed into; `thisModule.resolveTemp(source, 'pattern')` selects a named target pattern element instead.
+- The same applies inside collections: `Sequence{a, b}`, `Set{}` and results of `collect` keep their elements, which are then resolved element by element when assigned to a multi-valued feature.
+- References to elements of the same target model are stored by identifier, references to elements that were not transformed are stored as cross-resource proxies, and a mix is stored as a mixed collection.
+- Every assignment (bindings, `target.feature <- value;` in `do` blocks and retried bindings) applies the enumeration-literal check and numeric conversion of the target feature.
+- `abstract`, `extends`, `unique lazy`, `entrypoint` and `endpoint` rules, `using` variables, several source patterns and imperative `do` statements are supported. Metamodels are looked up through the aliases declared in the module header, so `-- @nsURI` bindings and `thisModule` parameters work in every rule kind.
+
 ## CLI Tool
 
 The `swift-atl` command-line tool is available in the [swift-modelling](https://github.com/mipalgu/swift-modelling) package and provides comprehensive transformation functionality:
@@ -205,10 +215,10 @@ To use the CLI tool, install the [swift-modelling](https://github.com/mipalgu/sw
 - [x] **ATLVirtualMachine**: Basic VM architecture
 - [x] **ATLExecutionContext**: Transformation context management
 - [x] **Model Adapters**: Source/target model integration
-- [ ] **Rule Execution**: Matched rule execution with element selection
-- [ ] **Lazy Binding Resolution**: Deferred reference resolution
-- [ ] **Helper Execution**: Context and standalone helper invocation
-- [ ] **OCL Expression Evaluation**: Full expression evaluation engine
+- [x] **Rule Execution**: Matched rule execution with element selection
+- [x] **Lazy Binding Resolution**: Deferred reference resolution
+- [x] **Helper Execution**: Context and standalone helper invocation
+- [x] **OCL Expression Evaluation**: Full expression evaluation engine
 - [ ] **Model Loading**: XMI/JSON source model loading
 - [ ] **Model Saving**: Target model serialisation
 - [x] **Two-phase Execution**: All matched rules create their targets before any binding is applied

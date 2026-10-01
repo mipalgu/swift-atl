@@ -243,6 +243,14 @@ ATL executes in phases:
 
 - Cross-references between target elements are resolved
 - Lazy bindings are evaluated
+- `endpoint` rules run last; `entrypoint` rules run after the creation phase
+
+Every assignment, whether from a binding, a `do` block statement or a retried
+binding, converts its value for the target feature: source elements in single
+values and in collections become the target elements they were transformed into,
+elements of the same target model are stored by identifier, other elements are
+stored as cross-resource proxies, and enumeration-typed attributes accept only
+the literals the enumeration declares.
 
 ## The Trace Model
 
