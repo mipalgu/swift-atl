@@ -31,11 +31,20 @@ public struct ATLExpressionStatement: ATLStatement {
     /// The expression to evaluate.
     public let expression: any ATLExpression
 
+    /// The source range the node was parsed from, if it was parsed.
+    ///
+    /// The origin never takes part in equality or hashing, so nodes that differ only
+    /// in where they were written compare equal.
+    public let origin: SourceOrigin
+
     /// Creates an expression statement.
     ///
-    /// - Parameter expression: The expression to evaluate
-    public init(expression: any ATLExpression) {
+    /// - Parameters:
+    ///   - expression: The expression to evaluate
+    ///   - origin: The source range the node was parsed from.
+    public init(expression: any ATLExpression, origin: SourceOrigin = .init()) {
         self.expression = expression
+        self.origin = origin
     }
 
     /// Evaluates the expression and discards its value.
@@ -66,16 +75,24 @@ public struct ATLVariableDeclarationStatement: ATLStatement {
     /// The initialising expression, if any.
     public let initialiser: (any ATLExpression)?
 
+    /// The source range the node was parsed from, if it was parsed.
+    ///
+    /// The origin never takes part in equality or hashing, so nodes that differ only
+    /// in where they were written compare equal.
+    public let origin: SourceOrigin
+
     /// Creates a variable declaration.
     ///
     /// - Parameters:
     ///   - name: The variable name
     ///   - type: The declared type, if any
     ///   - initialiser: The initialising expression, if any
-    public init(name: String, type: String? = nil, initialiser: (any ATLExpression)? = nil) {
+    ///   - origin: The source range the node was parsed from.
+    public init(name: String, type: String? = nil, initialiser: (any ATLExpression)? = nil, origin: SourceOrigin = .init()) {
         self.name = name
         self.type = type
         self.initialiser = initialiser
+        self.origin = origin
     }
 
     /// Evaluates the initialiser and binds the variable in the current scope.
@@ -116,14 +133,22 @@ public struct ATLAssignmentStatement: ATLStatement {
     /// The expression computing the assigned value.
     public let value: any ATLExpression
 
+    /// The source range the node was parsed from, if it was parsed.
+    ///
+    /// The origin never takes part in equality or hashing, so nodes that differ only
+    /// in where they were written compare equal.
+    public let origin: SourceOrigin
+
     /// Creates an assignment statement.
     ///
     /// - Parameters:
     ///   - target: The variable or feature to assign
     ///   - value: The expression computing the value
-    public init(target: ATLAssignmentTarget, value: any ATLExpression) {
+    ///   - origin: The source range the node was parsed from.
+    public init(target: ATLAssignmentTarget, value: any ATLExpression, origin: SourceOrigin = .init()) {
         self.target = target
         self.value = value
+        self.origin = origin
     }
 
     /// Evaluates the value and performs the assignment.
@@ -169,20 +194,29 @@ public struct ATLConditionalStatement: ATLStatement {
     /// The statements executed otherwise.
     public let elseStatements: [any ATLStatement]
 
+    /// The source range the node was parsed from, if it was parsed.
+    ///
+    /// The origin never takes part in equality or hashing, so nodes that differ only
+    /// in where they were written compare equal.
+    public let origin: SourceOrigin
+
     /// Creates a conditional statement.
     ///
     /// - Parameters:
     ///   - condition: The boolean condition
     ///   - thenStatements: The statements for a true condition
     ///   - elseStatements: The statements for any other outcome
+    ///   - origin: The source range the node was parsed from.
     public init(
         condition: any ATLExpression,
         thenStatements: [any ATLStatement],
-        elseStatements: [any ATLStatement] = []
+        elseStatements: [any ATLStatement] = [],
+        origin: SourceOrigin = .init()
     ) {
         self.condition = condition
         self.thenStatements = thenStatements
         self.elseStatements = elseStatements
+        self.origin = origin
     }
 
     /// Evaluates the condition and executes the selected block.
@@ -216,16 +250,24 @@ public struct ATLForStatement: ATLStatement {
     /// The statements executed for each element.
     public let body: [any ATLStatement]
 
+    /// The source range the node was parsed from, if it was parsed.
+    ///
+    /// The origin never takes part in equality or hashing, so nodes that differ only
+    /// in where they were written compare equal.
+    public let origin: SourceOrigin
+
     /// Creates a for statement.
     ///
     /// - Parameters:
     ///   - variable: The loop variable name
     ///   - collection: The expression yielding the collection
     ///   - body: The statements executed per element
-    public init(variable: String, collection: any ATLExpression, body: [any ATLStatement]) {
+    ///   - origin: The source range the node was parsed from.
+    public init(variable: String, collection: any ATLExpression, body: [any ATLStatement], origin: SourceOrigin = .init()) {
         self.variable = variable
         self.collection = collection
         self.body = body
+        self.origin = origin
     }
 
     /// Iterates the collection and executes the body for each element.

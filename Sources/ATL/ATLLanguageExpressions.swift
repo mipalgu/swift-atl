@@ -28,12 +28,21 @@ public struct ATLEnumLiteralExpression: ATLExpression, Equatable, Hashable {
     /// The name of the enumeration literal, without the leading `#`.
     public let name: String
 
+    /// The source range the node was parsed from, if it was parsed.
+    ///
+    /// The origin never takes part in equality or hashing, so nodes that differ only
+    /// in where they were written compare equal.
+    public let origin: SourceOrigin
+
     /// Creates an enumeration literal expression.
     ///
-    /// - Parameter name: The literal name, without the leading `#`.
-    public init(name: String) {
+    /// - Parameters:
+    ///   - name: The literal name, without the leading `#`.
+    ///   - origin: The source range the node was parsed from.
+    public init(name: String, origin: SourceOrigin = .init()) {
         precondition(!name.isEmpty, "Enumeration literal name must not be empty")
         self.name = name
+        self.origin = origin
     }
 
     /// Evaluates to the literal name.
