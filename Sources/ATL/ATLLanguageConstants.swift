@@ -27,6 +27,74 @@ enum ATLLanguage {
 
         /// Declares a module parameter: `-- @param name : Type = default`.
         static let parameter = "@param"
+
+        /// Every directive name.
+        static let all = [path, namespaceURI, parameter]
+    }
+
+    /// The words that the lexer reads as keywords.
+    static let keywords: Set<String> = [
+        "module", "create", "from", "helper", "def", "context", "rule", "query",
+        "if", "then", "else", "endif", "and", "or", "not", "true", "false",
+        "let", "in", "do", "to", "self", "lazy",
+        "Integer", "String", "Boolean", "Real",
+    ]
+
+    /// Words that the lexer reads as identifiers but that have a fixed meaning in a declaration.
+    static let contextualKeywords: Set<String> = [
+        ATLReservedNames.abstract, ATLReservedNames.unique, ATLReservedNames.entrypoint,
+        ATLReservedNames.endpoint, ATLReservedNames.extends, ATLReservedNames.using,
+        ATLReservedNames.forLoop,
+        InfixKeyword.implies.rawValue, InfixKeyword.xor.rawValue, InfixKeyword.div.rawValue,
+        InfixKeyword.mod.rawValue,
+    ]
+
+    /// The operators made of two characters, which the lexer must try before single characters.
+    static let multiCharacterOperators: [String] = ["<>", "<=", "<-", ">=", "->"]
+
+    /// Every operator, whether it is made of one or of several characters.
+    static let operators: Set<String> = Set(multiCharacterOperators).union([
+        "+", "-", "*", "/", "=", "<", ">", ".", ":", "!",
+    ])
+
+    /// The punctuation characters.
+    static let punctuation: Set<String> = ["(", ")", "{", "}", "[", "]", ";", ",", "|"]
+
+    /// The prefix that starts a line comment.
+    static let lineCommentPrefix = "--"
+
+    /// The character that opens and closes a string literal.
+    static let stringDelimiter: Character = "'"
+
+    /// The names of types that the lexical highlighter shows as type names.
+    static let typeNames: Set<String> = Set(PrimitiveType.allCases.map(\.rawValue))
+        .union(genericTypeNames)
+        .union([
+            SpecialType.any, SpecialType.undefined, SpecialType.void, SpecialType.tuple,
+        ])
+
+    /// Words of the full ATL language that this implementation does not support.
+    ///
+    /// Each is reported as an unsupported construct instead of being skipped or
+    /// misread as something else.
+    enum UnsupportedKeyword {
+        /// Introduces a library, as in `library Helpers;`.
+        static let library = "library"
+
+        /// Imports a library, as in `uses Helpers;`.
+        static let uses = "uses"
+
+        /// Selects refining mode, as in `create OUT : M refining IN : M;`.
+        static let refining = "refining"
+
+        /// Marks a rule that is not applied by default.
+        static let nodefault = "nodefault"
+
+        /// Marks the elements created by an iterated target pattern as distinct.
+        static let distinct = "distinct"
+
+        /// Starts an iterated target pattern.
+        static let foreach = "foreach"
     }
 
     /// The names of the undefined literal.

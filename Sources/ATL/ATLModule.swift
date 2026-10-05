@@ -109,6 +109,12 @@ public struct ATLModule: Sendable, Equatable, Hashable {
 
     // MARK: - Initialisation
 
+    /// The source range the node was parsed from, if it was parsed.
+    ///
+    /// The origin never takes part in equality or hashing, so nodes that differ only
+    /// in where they were written compare equal.
+    public let origin: SourceOrigin
+
     /// Creates a new ATL module with the specified configuration.
     ///
     /// - Parameters:
@@ -121,6 +127,7 @@ public struct ATLModule: Sendable, Equatable, Hashable {
     ///   - helperOverloads: Every helper definition grouped by name (default: derived from `helpers`)
     ///   - parameters: The declared module parameters (default: none)
     ///   - declaredMetamodelNames: The header metamodel names by alias (default: the package names)
+    ///   - origin: The source range the node was parsed from.
     ///
     /// - Precondition: The module name must be a non-empty string
     /// - Precondition: At least one source metamodel must be specified
@@ -134,7 +141,8 @@ public struct ATLModule: Sendable, Equatable, Hashable {
         calledRules: OrderedDictionary<String, ATLCalledRule> = [:],
         helperOverloads: OrderedDictionary<String, [any ATLHelperType]> = [:],
         parameters: [ATLModuleParameter] = [],
-        declaredMetamodelNames: [String: String]? = nil
+        declaredMetamodelNames: [String: String]? = nil,
+        origin: SourceOrigin = .init()
     ) {
         precondition(!name.isEmpty, "Module name must not be empty")
         precondition(!sourceMetamodels.isEmpty, "At least one source metamodel must be specified")
@@ -154,6 +162,7 @@ public struct ATLModule: Sendable, Equatable, Hashable {
                 Array(sourceMetamodels).map { ($0.key, $0.value.name) }
                     + Array(targetMetamodels).map { ($0.key, $0.value.name) },
                 uniquingKeysWith: { first, _ in first })
+        self.origin = origin
     }
 
     /// Returns a copy of this module bound to different metamodel packages.
@@ -177,7 +186,8 @@ public struct ATLModule: Sendable, Equatable, Hashable {
             calledRules: calledRules,
             helperOverloads: helperOverloads,
             parameters: parameters,
-            declaredMetamodelNames: declaredMetamodelNames
+            declaredMetamodelNames: declaredMetamodelNames,
+            origin: origin
         )
     }
 
@@ -195,7 +205,8 @@ public struct ATLModule: Sendable, Equatable, Hashable {
             calledRules: calledRules,
             helperOverloads: helperOverloads,
             parameters: parameters,
-            declaredMetamodelNames: declaredMetamodelNames
+            declaredMetamodelNames: declaredMetamodelNames,
+            origin: origin
         )
     }
 
@@ -345,11 +356,19 @@ public protocol ATLHelperType: Sendable {
     /// The parameters accepted by the helper function.
     var parameters: [ATLParameter] { get }
 
+    /// The source range the node was parsed from, or an empty origin for a node built in code.
+    var origin: SourceOrigin { get }
+
     /// Check if two helpers are equal for their identifying properties
     func isEqual(to other: any ATLHelperType) -> Bool
 
     /// Get hash value for the helper's identifying properties
     func hashValue() -> Int
+}
+
+extension ATLHelperType {
+    /// The source range the node was parsed from, or an empty origin for a node built in code.
+    public var origin: SourceOrigin { SourceOrigin() }
 }
 
 // MARK: - ATL Helper
@@ -428,6 +447,12 @@ public struct ATLHelper<BodyExpression: ATLExpression>: ATLHelperType, Sendable,
 
     // MARK: - Initialisation
 
+    /// The source range the node was parsed from, if it was parsed.
+    ///
+    /// The origin never takes part in equality or hashing, so nodes that differ only
+    /// in where they were written compare equal.
+    public let origin: SourceOrigin
+
     /// Creates a new ATL helper function.
     ///
     /// - Parameters:
@@ -436,6 +461,7 @@ public struct ATLHelper<BodyExpression: ATLExpression>: ATLHelperType, Sendable,
     ///   - returnType: The return type specification
     ///   - parameters: The parameter list (default: empty)
     ///   - body: The expression that computes the helper's result
+    ///   - origin: The source range the node was parsed from.
     ///
     /// - Precondition: The helper name must be a non-empty string
     /// - Precondition: The return type must be a non-empty string
@@ -444,7 +470,8 @@ public struct ATLHelper<BodyExpression: ATLExpression>: ATLHelperType, Sendable,
         contextType: String? = nil,
         returnType: String,
         parameters: [ATLParameter] = [],
-        body: BodyExpression
+        body: BodyExpression,
+        origin: SourceOrigin = .init()
     ) {
         precondition(!name.isEmpty, "Helper name must not be empty")
         precondition(!returnType.isEmpty, "Return type must not be empty")
@@ -454,6 +481,7 @@ public struct ATLHelper<BodyExpression: ATLExpression>: ATLHelperType, Sendable,
         self.returnType = returnType
         self.parameters = parameters
         self.body = body
+        self.origin = origin
     }
 
     // MARK: - Equatable
@@ -522,20 +550,28 @@ public struct ATLParameter: Sendable, Equatable, Hashable {
 
     // MARK: - Initialisation
 
+    /// The source range the node was parsed from, if it was parsed.
+    ///
+    /// The origin never takes part in equality or hashing, so nodes that differ only
+    /// in where they were written compare equal.
+    public let origin: SourceOrigin
+
     /// Creates a new ATL parameter.
     ///
     /// - Parameters:
     ///   - name: The parameter name for variable binding
     ///   - type: The parameter type specification
+    ///   - origin: The source range the node was parsed from.
     ///
     /// - Precondition: The parameter name must be a non-empty string
     /// - Precondition: The parameter type must be a non-empty string
-    public init(name: String, type: String) {
+    public init(name: String, type: String, origin: SourceOrigin = .init()) {
         precondition(!name.isEmpty, "Parameter name must not be empty")
         precondition(!type.isEmpty, "Parameter type must not be empty")
 
         self.name = name
         self.type = type
+        self.origin = origin
     }
 }
 
@@ -573,6 +609,12 @@ public struct ATLHelperWrapper: ATLHelperType, Sendable, Equatable, Hashable {
 
     // MARK: - Initialisation
 
+    /// The source range the node was parsed from, if it was parsed.
+    ///
+    /// The origin never takes part in equality or hashing, so nodes that differ only
+    /// in where they were written compare equal.
+    public let origin: SourceOrigin
+
     /// Creates a type-erased helper wrapper.
     ///
     /// - Parameters:
@@ -582,13 +624,15 @@ public struct ATLHelperWrapper: ATLHelperType, Sendable, Equatable, Hashable {
     ///   - parameters: The parameter list
     ///   - body: The body expression
     ///   - isAttribute: Whether the helper is an attribute whose value is cached per receiver
+    ///   - origin: The source range the node was parsed from.
     public init(
         name: String,
         contextType: String? = nil,
         returnType: String,
         parameters: [ATLParameter] = [],
         body: any ATLExpression,
-        isAttribute: Bool = false
+        isAttribute: Bool = false,
+        origin: SourceOrigin = .init()
     ) {
         self.name = name
         self.contextType = contextType
@@ -596,6 +640,7 @@ public struct ATLHelperWrapper: ATLHelperType, Sendable, Equatable, Hashable {
         self.parameters = parameters
         self.bodyExpression = body
         self.isAttribute = isAttribute
+        self.origin = origin
     }
 
     // MARK: - ATLHelperType Conformance

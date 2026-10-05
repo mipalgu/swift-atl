@@ -777,7 +777,19 @@ public final class ATLExecutionContext: Sendable {
     ///
     /// - Throws: `ATLExecutionError` if resolution fails
     public func resolveLazyBindings() async throws {
+        try await resolveLazyBindings {}
+    }
+
+    /// The number of bindings awaiting resolution.
+    var pendingLazyBindingCount: Int { lazyBindings.count }
+
+    /// Resolves the pending lazy bindings, calling a closure before each one.
+    ///
+    /// - Parameter beforeEach: Called before each binding is resolved; it may throw to stop the run.
+    /// - Throws: Errors raised by `beforeEach` or by a binding.
+    func resolveLazyBindings(beforeEach: () async throws -> Void) async throws {
         for binding in lazyBindings {
+            try await beforeEach()
             try await binding.resolve(in: self)
         }
         lazyBindings.removeAll()

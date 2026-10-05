@@ -81,6 +81,9 @@ extension Array {
 /// ```
 public protocol ATLExpression: Sendable, Equatable, Hashable {
 
+    /// The source range the node was parsed from, or an empty origin for a node built in code.
+    var origin: SourceOrigin { get }
+
     /// Evaluates the expression within the specified execution context.
     ///
     /// - Parameter context: The execution context providing model access and variable bindings
@@ -88,6 +91,11 @@ public protocol ATLExpression: Sendable, Equatable, Hashable {
     /// - Throws: ATL execution errors if expression evaluation failures
     @MainActor
     func evaluate(in context: ATLExecutionContext) async throws -> (any EcoreValue)?
+}
+
+extension ATLExpression {
+    /// The source range the node was parsed from, or an empty origin for a node built in code.
+    public var origin: SourceOrigin { SourceOrigin() }
 }
 
 // MARK: - Variable Expression
@@ -119,13 +127,22 @@ public struct ATLVariableExpression: ATLExpression, Equatable, Hashable {
 
     // MARK: - Initialisation
 
+    /// The source range the node was parsed from, if it was parsed.
+    ///
+    /// The origin never takes part in equality or hashing, so nodes that differ only
+    /// in where they were written compare equal.
+    public let origin: SourceOrigin
+
     /// Creates a new variable reference expression.
     ///
-    /// - Parameter name: The variable name to reference
+    /// - Parameters:
+    ///   - name: The variable name to reference
+    ///   - origin: The source range the node was parsed from.
     /// - Precondition: The variable name must be a non-empty string
-    public init(name: String) {
+    public init(name: String, origin: SourceOrigin = .init()) {
         precondition(!name.isEmpty, "Variable name must not be empty")
         self.name = name
+        self.origin = origin
     }
 
     // MARK: - Expression Evaluation
@@ -186,17 +203,25 @@ public struct ATLNavigationExpression: ATLExpression, Sendable, Equatable, Hasha
 
     // MARK: - Initialisation
 
+    /// The source range the node was parsed from, if it was parsed.
+    ///
+    /// The origin never takes part in equality or hashing, so nodes that differ only
+    /// in where they were written compare equal.
+    public let origin: SourceOrigin
+
     /// Creates a new navigation expression.
     ///
     /// - Parameters:
     ///   - source: The source expression to navigate from
     ///   - property: The property name to navigate to
+    ///   - origin: The source range the node was parsed from.
     ///
     /// - Precondition: The property name must be a non-empty string
-    public init(source: any ATLExpression, property: String) {
+    public init(source: any ATLExpression, property: String, origin: SourceOrigin = .init()) {
         precondition(!property.isEmpty, "Property name must not be empty")
         self.source = source
         self.property = property
+        self.origin = origin
     }
 
     // MARK: - Expression Evaluation
@@ -268,17 +293,25 @@ public struct ATLHelperCallExpression: ATLExpression, Equatable, Hashable {
 
     // MARK: - Initialisation
 
+    /// The source range the node was parsed from, if it was parsed.
+    ///
+    /// The origin never takes part in equality or hashing, so nodes that differ only
+    /// in where they were written compare equal.
+    public let origin: SourceOrigin
+
     /// Creates a new helper call expression.
     ///
     /// - Parameters:
     ///   - helperName: The name of the helper function to invoke
     ///   - arguments: The argument expressions to pass
+    ///   - origin: The source range the node was parsed from.
     ///
     /// - Precondition: The helper name must be a non-empty string
-    public init(helperName: String, arguments: [any ATLExpression] = []) {
+    public init(helperName: String, arguments: [any ATLExpression] = [], origin: SourceOrigin = .init()) {
         precondition(!helperName.isEmpty, "Helper name must not be empty")
         self.helperName = helperName
         self.arguments = arguments
+        self.origin = origin
     }
 
     // MARK: - Expression Evaluation
@@ -357,11 +390,20 @@ public struct ATLLiteralExpression: ATLExpression, Equatable, Hashable {
 
     // MARK: - Initialisation
 
+    /// The source range the node was parsed from, if it was parsed.
+    ///
+    /// The origin never takes part in equality or hashing, so nodes that differ only
+    /// in where they were written compare equal.
+    public let origin: SourceOrigin
+
     /// Creates a new literal expression.
     ///
-    /// - Parameter value: The literal value to represent
-    public init(value: (any EcoreValue)?) {
+    /// - Parameters:
+    ///   - value: The literal value to represent
+    ///   - origin: The source range the node was parsed from.
+    public init(value: (any EcoreValue)?, origin: SourceOrigin = .init()) {
         self.value = value
+        self.origin = origin
     }
 
     // MARK: - Expression Evaluation
@@ -431,12 +473,21 @@ public struct ATLTypeLiteralExpression: ATLExpression, Sendable, Equatable, Hash
 
     // MARK: - Initialisation
 
+    /// The source range the node was parsed from, if it was parsed.
+    ///
+    /// The origin never takes part in equality or hashing, so nodes that differ only
+    /// in where they were written compare equal.
+    public let origin: SourceOrigin
+
     /// Creates a new type literal expression.
     ///
-    /// - Parameter typeName: The type name to represent
-    public init(typeName: String) {
+    /// - Parameters:
+    ///   - typeName: The type name to represent
+    ///   - origin: The source range the node was parsed from.
+    public init(typeName: String, origin: SourceOrigin = .init()) {
         precondition(!typeName.isEmpty, "Type name must not be empty")
         self.typeName = typeName
+        self.origin = origin
     }
 
     // MARK: - Expression Evaluation
@@ -508,16 +559,24 @@ public struct ATLBinaryExpression: ATLExpression, Sendable, Equatable, Hashable 
 
     // MARK: - Initialisation
 
+    /// The source range the node was parsed from, if it was parsed.
+    ///
+    /// The origin never takes part in equality or hashing, so nodes that differ only
+    /// in where they were written compare equal.
+    public let origin: SourceOrigin
+
     /// Creates a new binary operation expression.
     ///
     /// - Parameters:
     ///   - left: The left operand expression
     ///   - operator: The binary operator to apply
     ///   - right: The right operand expression
-    public init(left: any ATLExpression, `operator`: ATLBinaryOperator, right: any ATLExpression) {
+    ///   - origin: The source range the node was parsed from.
+    public init(left: any ATLExpression, `operator`: ATLBinaryOperator, right: any ATLExpression, origin: SourceOrigin = .init()) {
         self.left = left
         self.`operator` = `operator`
         self.right = right
+        self.origin = origin
     }
 
     // MARK: - Expression Evaluation
@@ -645,19 +704,28 @@ public struct ATLConditionalExpression: ATLExpression, Sendable, Equatable, Hash
     /// The expression to evaluate if condition is false.
     public let elseExpression: any ATLExpression
 
+    /// The source range the node was parsed from, if it was parsed.
+    ///
+    /// The origin never takes part in equality or hashing, so nodes that differ only
+    /// in where they were written compare equal.
+    public let origin: SourceOrigin
+
     /// Creates a conditional expression.
     ///
     /// - Parameters:
     ///   - condition: Expression that evaluates to a boolean
     ///   - thenExpression: Expression for true condition
     ///   - elseExpression: Expression for false condition
+    ///   - origin: The source range the node was parsed from.
     public init(
         condition: any ATLExpression, thenExpression: any ATLExpression,
-        elseExpression: any ATLExpression
+        elseExpression: any ATLExpression,
+        origin: SourceOrigin = .init()
     ) {
         self.condition = condition
         self.thenExpression = thenExpression
         self.elseExpression = elseExpression
+        self.origin = origin
     }
 
     @MainActor
@@ -693,14 +761,22 @@ public struct ATLUnaryExpression: ATLExpression, Sendable, Equatable, Hashable {
     /// The operand expression.
     public let operand: any ATLExpression
 
+    /// The source range the node was parsed from, if it was parsed.
+    ///
+    /// The origin never takes part in equality or hashing, so nodes that differ only
+    /// in where they were written compare equal.
+    public let origin: SourceOrigin
+
     /// Creates a unary operation expression.
     ///
     /// - Parameters:
     ///   - operator: The unary operator
     ///   - operand: The operand expression
-    public init(`operator`: ATLUnaryOperator, operand: any ATLExpression) {
+    ///   - origin: The source range the node was parsed from.
+    public init(`operator`: ATLUnaryOperator, operand: any ATLExpression, origin: SourceOrigin = .init()) {
         self.`operator` = `operator`
         self.operand = operand
+        self.origin = origin
     }
 
     @MainActor
@@ -775,6 +851,12 @@ public struct ATLLetExpression: ATLExpression, Sendable, Equatable, Hashable {
     /// The body expression evaluated with the variable binding in scope.
     public let inExpression: any ATLExpression
 
+    /// The source range the node was parsed from, if it was parsed.
+    ///
+    /// The origin never takes part in equality or hashing, so nodes that differ only
+    /// in where they were written compare equal.
+    public let origin: SourceOrigin
+
     /// Creates a let expression.
     ///
     /// - Parameters:
@@ -782,17 +864,20 @@ public struct ATLLetExpression: ATLExpression, Sendable, Equatable, Hashable {
     ///   - variableType: Optional type annotation
     ///   - initExpression: Expression to initialise the variable
     ///   - inExpression: Expression evaluated with the binding in scope
+    ///   - origin: The source range the node was parsed from.
     public init(
         variableName: String,
         variableType: String? = nil,
         initExpression: any ATLExpression,
-        inExpression: any ATLExpression
+        inExpression: any ATLExpression,
+        origin: SourceOrigin = .init()
     ) {
         precondition(!variableName.isEmpty, "Variable name must not be empty")
         self.variableName = variableName
         self.variableType = variableType
         self.initExpression = initExpression
         self.inExpression = inExpression
+        self.origin = origin
     }
 
     @MainActor
@@ -855,11 +940,20 @@ public struct ATLTupleExpression: ATLExpression, Sendable, Equatable, Hashable {
     /// The fields of the tuple.
     public let fields: [TupleField]
 
+    /// The source range the node was parsed from, if it was parsed.
+    ///
+    /// The origin never takes part in equality or hashing, so nodes that differ only
+    /// in where they were written compare equal.
+    public let origin: SourceOrigin
+
     /// Creates a new tuple expression.
     ///
-    /// - Parameter fields: The tuple fields with names, optional types, and value expressions
-    public init(fields: [TupleField]) {
+    /// - Parameters:
+    ///   - fields: The tuple fields with names, optional types, and value expressions
+    ///   - origin: The source range the node was parsed from.
+    public init(fields: [TupleField], origin: SourceOrigin = .init()) {
         self.fields = fields
+        self.origin = origin
     }
 
     @MainActor
@@ -913,18 +1007,27 @@ public struct ATLMethodCallExpression: ATLExpression, Sendable, Equatable, Hasha
     /// The method arguments.
     public let arguments: [any ATLExpression]
 
+    /// The source range the node was parsed from, if it was parsed.
+    ///
+    /// The origin never takes part in equality or hashing, so nodes that differ only
+    /// in where they were written compare equal.
+    public let origin: SourceOrigin
+
     /// Creates a method call expression.
     ///
     /// - Parameters:
     ///   - receiver: The object on which to call the method
     ///   - methodName: The name of the method
     ///   - arguments: The method arguments
+    ///   - origin: The source range the node was parsed from.
     public init(
-        receiver: any ATLExpression, methodName: String, arguments: [any ATLExpression] = []
+        receiver: any ATLExpression, methodName: String, arguments: [any ATLExpression] = [],
+        origin: SourceOrigin = .init()
     ) {
         self.receiver = receiver
         self.methodName = methodName
         self.arguments = arguments
+        self.origin = origin
     }
 
     @MainActor
@@ -1946,15 +2049,23 @@ public struct ATLLambdaExpression: ATLExpression, Sendable, Equatable, Hashable 
     /// All iterator variable names in declaration order.
     public var parameters: [String] { [parameter] + additionalParameters }
 
+    /// The source range the node was parsed from, if it was parsed.
+    ///
+    /// The origin never takes part in equality or hashing, so nodes that differ only
+    /// in where they were written compare equal.
+    public let origin: SourceOrigin
+
     /// Creates a lambda expression.
     ///
     /// - Parameters:
     ///   - parameter: The name of the lambda parameter
     ///   - body: The expression to evaluate with the parameter bound
-    public init(parameter: String, body: any ATLExpression) {
+    ///   - origin: The source range the node was parsed from.
+    public init(parameter: String, body: any ATLExpression, origin: SourceOrigin = .init()) {
         self.parameter = parameter
         self.additionalParameters = []
         self.body = body
+        self.origin = origin
     }
 
     /// Creates a lambda expression with one or more iterator variables.
@@ -1962,12 +2073,14 @@ public struct ATLLambdaExpression: ATLExpression, Sendable, Equatable, Hashable 
     /// - Parameters:
     ///   - parameters: The iterator variable names; at least one is required
     ///   - body: The expression to evaluate with the variables bound
+    ///   - origin: The source range the node was parsed from.
     /// - Precondition: `parameters` must not be empty
-    public init(parameters: [String], body: any ATLExpression) {
+    public init(parameters: [String], body: any ATLExpression, origin: SourceOrigin = .init()) {
         precondition(!parameters.isEmpty, "A lambda needs at least one parameter")
         self.parameter = parameters[0]
         self.additionalParameters = Array(parameters.dropFirst())
         self.body = body
+        self.origin = origin
     }
 
     /// Evaluates the lambda expression in the standard context.
@@ -2062,17 +2175,25 @@ public struct ATLOperationExpression: ATLExpression, Sendable, Equatable, Hashab
 
     // MARK: - Initialisation
 
+    /// The source range the node was parsed from, if it was parsed.
+    ///
+    /// The origin never takes part in equality or hashing, so nodes that differ only
+    /// in where they were written compare equal.
+    public let origin: SourceOrigin
+
     /// Creates a new operation expression.
     ///
     /// - Parameters:
     ///   - source: The source expression (receiver)
     ///   - operationName: The operation name
     ///   - arguments: The operation arguments
-    public init(source: (any ATLExpression)?, operationName: String, arguments: [any ATLExpression])
+    ///   - origin: The source range the node was parsed from.
+    public init(source: (any ATLExpression)?, operationName: String, arguments: [any ATLExpression], origin: SourceOrigin = .init())
     {
         self.source = source
         self.operationName = operationName
         self.arguments = arguments
+        self.origin = origin
     }
 
     // MARK: - Expression Evaluation
@@ -2190,6 +2311,12 @@ public struct ATLIterateExpression: ATLExpression, Sendable, Equatable, Hashable
 
     // MARK: - Initialization
 
+    /// The source range the node was parsed from, if it was parsed.
+    ///
+    /// The origin never takes part in equality or hashing, so nodes that differ only
+    /// in where they were written compare equal.
+    public let origin: SourceOrigin
+
     /// Creates a new iterate expression.
     ///
     /// - Parameters:
@@ -2199,13 +2326,15 @@ public struct ATLIterateExpression: ATLExpression, Sendable, Equatable, Hashable
     ///   - accumulatorType: The accumulator type (optional)
     ///   - defaultValue: The default value for the accumulator
     ///   - body: The body expression
+    ///   - origin: The source range the node was parsed from.
     public init(
         source: any ATLExpression,
         parameter: String,
         accumulator: String,
         accumulatorType: String? = nil,
         defaultValue: any ATLExpression,
-        body: any ATLExpression
+        body: any ATLExpression,
+        origin: SourceOrigin = .init()
     ) {
         self.source = source
         self.parameter = parameter
@@ -2213,6 +2342,7 @@ public struct ATLIterateExpression: ATLExpression, Sendable, Equatable, Hashable
         self.accumulatorType = accumulatorType
         self.defaultValue = defaultValue
         self.body = body
+        self.origin = origin
     }
 
     // MARK: - ATLExpression Protocol
@@ -2324,6 +2454,12 @@ public struct ATLCollectionExpression: ATLExpression, Sendable, Equatable, Hasha
 
     // MARK: - Initialisation
 
+    /// The source range the node was parsed from, if it was parsed.
+    ///
+    /// The origin never takes part in equality or hashing, so nodes that differ only
+    /// in where they were written compare equal.
+    public let origin: SourceOrigin
+
     /// Creates a new collection expression.
     ///
     /// - Parameters:
@@ -2331,16 +2467,19 @@ public struct ATLCollectionExpression: ATLExpression, Sendable, Equatable, Hasha
     ///   - operation: The collection operation
     ///   - iterator: Optional iterator variable name
     ///   - body: Optional body expression for iterator operations
+    ///   - origin: The source range the node was parsed from.
     public init(
         source: any ATLExpression,
         operation: ATLCollectionOperation,
         iterator: String? = nil,
-        body: (any ATLExpression)? = nil
+        body: (any ATLExpression)? = nil,
+        origin: SourceOrigin = .init()
     ) {
         self.source = source
         self.operation = operation
         self.iterator = iterator
         self.body = body
+        self.origin = origin
     }
 
     // MARK: - Expression Evaluation
@@ -2450,13 +2589,21 @@ public struct ATLCollectionLiteralExpression: ATLExpression, Sendable, Equatable
     /// The expressions for the collection elements.
     public let elements: [any ATLExpression]
 
+    /// The source range the node was parsed from, if it was parsed.
+    ///
+    /// The origin never takes part in equality or hashing, so nodes that differ only
+    /// in where they were written compare equal.
+    public let origin: SourceOrigin
+
     /// Creates a new collection literal expression.
     /// - Parameters:
     ///   - collectionType: The collection type identifier
     ///   - elements: The element expressions
-    public init(collectionType: String, elements: [any ATLExpression]) {
+    ///   - origin: The source range the node was parsed from.
+    public init(collectionType: String, elements: [any ATLExpression], origin: SourceOrigin = .init()) {
         self.collectionType = collectionType
         self.elements = elements
+        self.origin = origin
     }
 
     /// Evaluates the collection literal by creating the appropriate collection type

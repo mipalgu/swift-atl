@@ -112,6 +112,12 @@ public struct ATLMatchedRule: Sendable, Equatable, Hashable {
 
     // MARK: - Initialisation
 
+    /// The source range the node was parsed from, if it was parsed.
+    ///
+    /// The origin never takes part in equality or hashing, so nodes that differ only
+    /// in where they were written compare equal.
+    public let origin: SourceOrigin
+
     /// Creates a new ATL matched rule.
     ///
     /// - Parameters:
@@ -124,6 +130,7 @@ public struct ATLMatchedRule: Sendable, Equatable, Hashable {
     ///   - doStatements: The imperative statements of the `do` block
     ///   - superRuleName: The name of the extended rule, if any
     ///   - isAbstract: Whether the rule is abstract
+    ///   - origin: The source range the node was parsed from.
     ///
     /// - Precondition: The rule name must be a non-empty string
     /// - Precondition: At least one target pattern must be specified unless the
@@ -137,7 +144,8 @@ public struct ATLMatchedRule: Sendable, Equatable, Hashable {
         localVariables: [ATLLocalVariable] = [],
         doStatements: [any ATLStatement] = [],
         superRuleName: String? = nil,
-        isAbstract: Bool = false
+        isAbstract: Bool = false,
+        origin: SourceOrigin = .init()
     ) {
         precondition(!name.isEmpty, "Rule name must not be empty")
         precondition(
@@ -153,6 +161,7 @@ public struct ATLMatchedRule: Sendable, Equatable, Hashable {
         self.doStatements = doStatements
         self.superRuleName = superRuleName
         self.isAbstract = isAbstract
+        self.origin = origin
     }
 
     /// All source patterns of the rule in declaration order.
@@ -309,6 +318,12 @@ public struct ATLCalledRule: Sendable, Equatable, Hashable {
 
     // MARK: - Initialisation
 
+    /// The source range the node was parsed from, if it was parsed.
+    ///
+    /// The origin never takes part in equality or hashing, so nodes that differ only
+    /// in where they were written compare equal.
+    public let origin: SourceOrigin
+
     /// Creates a new ATL called rule.
     ///
     /// - Parameters:
@@ -322,6 +337,7 @@ public struct ATLCalledRule: Sendable, Equatable, Hashable {
     ///   - isEntrypoint: Whether the rule is an entry point
     ///   - isEndpoint: Whether the rule is an end point
     ///   - guard: The guard of a lazy rule's source patterns
+    ///   - origin: The source range the node was parsed from.
     ///
     /// - Precondition: The rule name must be a non-empty string
     public init(
@@ -334,7 +350,8 @@ public struct ATLCalledRule: Sendable, Equatable, Hashable {
         isUnique: Bool = false,
         isEntrypoint: Bool = false,
         isEndpoint: Bool = false,
-        `guard`: (any ATLExpression)? = nil
+        `guard`: (any ATLExpression)? = nil,
+        origin: SourceOrigin = .init()
     ) {
         precondition(!name.isEmpty, "Rule name must not be empty")
 
@@ -348,6 +365,7 @@ public struct ATLCalledRule: Sendable, Equatable, Hashable {
         self.isEntrypoint = isEntrypoint
         self.isEndpoint = isEndpoint
         self.`guard` = `guard`
+        self.origin = origin
     }
 
     // MARK: - Equatable
@@ -413,22 +431,30 @@ public struct ATLSourcePattern: Sendable, Equatable, Hashable {
 
     // MARK: - Initialisation
 
+    /// The source range the node was parsed from, if it was parsed.
+    ///
+    /// The origin never takes part in equality or hashing, so nodes that differ only
+    /// in where they were written compare equal.
+    public let origin: SourceOrigin
+
     /// Creates a new ATL source pattern.
     ///
     /// - Parameters:
     ///   - variableName: The variable name for element binding
     ///   - type: The type specification for pattern matching
     ///   - guard: Optional boolean expression for conditional matching
+    ///   - origin: The source range the node was parsed from.
     ///
     /// - Precondition: The variable name must be a non-empty string
     /// - Precondition: The type specification must be a non-empty string
-    public init(variableName: String, type: String, `guard`: (any ATLExpression)? = nil) {
+    public init(variableName: String, type: String, `guard`: (any ATLExpression)? = nil, origin: SourceOrigin = .init()) {
         precondition(!variableName.isEmpty, "Variable name must not be empty")
         precondition(!type.isEmpty, "Type specification must not be empty")
 
         self.variableName = variableName
         self.type = type
         self.`guard` = `guard`
+        self.origin = origin
     }
 
     // MARK: - Equatable
@@ -514,19 +540,27 @@ public struct ATLTargetPattern: Sendable, Equatable, Hashable {
 
     // MARK: - Initialisation
 
+    /// The source range the node was parsed from, if it was parsed.
+    ///
+    /// The origin never takes part in equality or hashing, so nodes that differ only
+    /// in where they were written compare equal.
+    public let origin: SourceOrigin
+
     /// Creates a new ATL target pattern.
     ///
     /// - Parameters:
     ///   - variableName: The variable name for element binding
     ///   - type: The type specification for element creation
     ///   - bindings: Property bindings for element initialisation
+    ///   - origin: The source range the node was parsed from.
     ///
     /// - Precondition: The variable name must be a non-empty string
     /// - Precondition: The type specification must be a non-empty string
     public init(
         variableName: String,
         type: String,
-        bindings: [ATLPropertyBinding] = []
+        bindings: [ATLPropertyBinding] = [],
+        origin: SourceOrigin = .init()
     ) {
         precondition(!variableName.isEmpty, "Variable name must not be empty")
         precondition(!type.isEmpty, "Type specification must not be empty")
@@ -534,6 +568,7 @@ public struct ATLTargetPattern: Sendable, Equatable, Hashable {
         self.variableName = variableName
         self.type = type
         self.bindings = bindings
+        self.origin = origin
     }
 
     // MARK: - Equatable
@@ -601,18 +636,26 @@ public struct ATLPropertyBinding: Sendable, Equatable, Hashable {
 
     // MARK: - Initialisation
 
+    /// The source range the node was parsed from, if it was parsed.
+    ///
+    /// The origin never takes part in equality or hashing, so nodes that differ only
+    /// in where they were written compare equal.
+    public let origin: SourceOrigin
+
     /// Creates a new ATL property binding.
     ///
     /// - Parameters:
     ///   - property: The property name to bind
     ///   - expression: The value expression
+    ///   - origin: The source range the node was parsed from.
     ///
     /// - Precondition: The property name must be a non-empty string
-    public init(property: String, expression: any ATLExpression) {
+    public init(property: String, expression: any ATLExpression, origin: SourceOrigin = .init()) {
         precondition(!property.isEmpty, "Property name must not be empty")
 
         self.property = property
         self.expression = expression
+        self.origin = origin
     }
 
     // MARK: - Equatable
@@ -657,19 +700,27 @@ public struct ATLLocalVariable: Sendable, Equatable, Hashable {
     /// The expression that computes the initial value.
     public let expression: any ATLExpression
 
+    /// The source range the node was parsed from, if it was parsed.
+    ///
+    /// The origin never takes part in equality or hashing, so nodes that differ only
+    /// in where they were written compare equal.
+    public let origin: SourceOrigin
+
     /// Creates a new local variable declaration.
     ///
     /// - Parameters:
     ///   - name: The variable name
     ///   - type: The declared type, if any
     ///   - expression: The initialising expression
+    ///   - origin: The source range the node was parsed from.
     ///
     /// - Precondition: The variable name must be a non-empty string
-    public init(name: String, type: String? = nil, expression: any ATLExpression) {
+    public init(name: String, type: String? = nil, expression: any ATLExpression, origin: SourceOrigin = .init()) {
         precondition(!name.isEmpty, "Variable name must not be empty")
         self.name = name
         self.type = type
         self.expression = expression
+        self.origin = origin
     }
 
     public static func == (lhs: ATLLocalVariable, rhs: ATLLocalVariable) -> Bool {
@@ -693,6 +744,14 @@ public struct ATLLocalVariable: Sendable, Equatable, Hashable {
 public protocol ATLRuleType: Sendable {
     /// The name of the rule.
     var name: String { get }
+
+    /// The source range the node was parsed from, or an empty origin for a node built in code.
+    var origin: SourceOrigin { get }
+}
+
+extension ATLRuleType {
+    /// The source range the node was parsed from, or an empty origin for a node built in code.
+    public var origin: SourceOrigin { SourceOrigin() }
 }
 
 // MARK: - ATL Statement Protocol
@@ -717,12 +776,20 @@ public protocol ATLRuleType: Sendable {
 /// within ATL virtual machines operating across multiple actors.
 public protocol ATLStatement: Sendable {
 
+    /// The source range the node was parsed from, or an empty origin for a node built in code.
+    var origin: SourceOrigin { get }
+
     /// Executes the statement within the specified execution context.
     ///
     /// - Parameter context: The execution context providing variable bindings and model access
     /// - Throws: ATL execution errors if statement execution failures
     @MainActor
     func execute(in context: ATLExecutionContext) async throws
+}
+
+extension ATLStatement {
+    /// The source range the node was parsed from, or an empty origin for a node built in code.
+    public var origin: SourceOrigin { SourceOrigin() }
 }
 
 // MARK: - Rule Type Conformance

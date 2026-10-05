@@ -156,6 +156,16 @@ A transformation runs in two phases. All matched rules first create their target
 - Every assignment (bindings, `target.feature <- value;` in `do` blocks and retried bindings) applies the enumeration-literal check and numeric conversion of the target feature.
 - `abstract`, `extends`, `unique lazy`, `entrypoint` and `endpoint` rules, `using` variables, several source patterns and imperative `do` statements are supported. Metamodels are looked up through the aliases declared in the module header, so `-- @nsURI` bindings and `thisModule` parameters work in every rule kind.
 
+### Progress and cancellation
+
+`ATLVirtualMachine.execute(sources:targets:parameters:progress:)` reports `ATLProgress` values (the phase, the number of steps completed, the total when it is known and the current rule) to a `@MainActor` callback, and the run ends with a `finished` report. The run checks for cancellation at every rule, element and binding and gives other tasks a turn about every ten milliseconds, so a run started on the main actor keeps the interface responsive. A cancelled run throws `CancellationError` and leaves the target models partly populated.
+
+### Editor support
+
+`ATLSyntax.tokens(in:)` classifies the tokens of ATL source text, including comments and unreadable text, without ever failing. `ATLParser.parseDiagnosing(_:name:metamodelRegistry:)` parses source text without throwing: it recovers at declaration and binding level, and returns the module read so far, diagnostics with source ranges and stable `ATLDiagnosticCode` values, an outline of the module and the tokens. Parsed syntax tree nodes carry a `SourceOrigin` with their range in the source text, which does not take part in equality.
+
+The ATL constructs that are not supported (libraries and `uses`, refining mode, `nodefault` rules, iterated target patterns with `foreach` or `distinct`, and `extends` on lazy or called rules) are reported as `unsupportedConstruct` errors at the offending token. Text that cannot start a declaration is reported as an unexpected token by both parsers.
+
 ## CLI Tool
 
 The `swift-atl` command-line tool is available in the [swift-modelling](https://github.com/mipalgu/swift-modelling) package and provides comprehensive transformation functionality:
