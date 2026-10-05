@@ -4,7 +4,8 @@ import PackageDescription
 let package = Package(
     name: "swift-atl",
     platforms: [
-        .macOS(.v15)
+        .macOS(.v15),
+        .iOS(.v18)
     ],
     products: [
         .library(
@@ -15,6 +16,7 @@ let package = Package(
     dependencies: [
         .package(url: "https://github.com/apple/swift-collections", from: "1.0.0"),
         .package(url: "https://github.com/mipalgu/swift-ecore", from: "0.2.0"),
+        .package(url: "https://github.com/swiftxml/SwiftXML.git", from: "1.0.0"),
     ],
     targets: [
         .target(
@@ -24,6 +26,7 @@ let package = Package(
                 .product(name: "EMFBase", package: "swift-ecore"),
                 .product(name: "OCL", package: "swift-ecore"),
                 .product(name: "OrderedCollections", package: "swift-collections"),
+                .product(name: "SwiftXML", package: "SwiftXML"),
             ],
             swiftSettings: [
                 .enableUpcomingFeature("StrictConcurrency")
