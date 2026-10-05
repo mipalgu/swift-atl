@@ -75,6 +75,9 @@ public final class ATLVirtualMachine {
     /// Debug mode flag for systematic tracing.
     private var debug: Bool = false
 
+    /// The monitor of the run in progress, if any.
+    private var monitor: ATLRunMonitor?
+
     // MARK: - Initialisation
 
     /// Creates a new ATL virtual machine for the specified module.
@@ -132,6 +135,40 @@ public final class ATLVirtualMachine {
         targets: OrderedDictionary<String, Resource>,
         parameters: [String: any EcoreValue] = [:]
     ) async throws {
+        try await execute(
+            sources: sources, targets: targets, parameters: parameters, progress: nil)
+    }
+
+    /// Executes the ATL transformation, reporting progress and honouring cancellation.
+    ///
+    /// The run reports a snapshot whenever a rule, match or binding has been
+    /// processed, and a final snapshot in the ``ATLProgressPhase/finished`` phase
+    /// on success. It checks for cancellation of the surrounding task at every
+    /// rule, source element, match and lazy binding, and it suspends for a
+    /// moment after each ten milliseconds of work, so that other work on the
+    /// main actor, such as the user interface, keeps running.
+    ///
+    /// A cancelled run throws `CancellationError` and does not report the
+    /// finished phase. The target models are left partly populated with the
+    /// elements and bindings created up to that point; callers that need an
+    /// all-or-nothing result should discard the targets.
+    ///
+    /// - Parameters:
+    ///   - sources: Source models indexed by namespace aliases
+    ///   - targets: Target models indexed by namespace aliases
+    ///   - parameters: Values for the module parameters declared with `-- @param`, by name
+    ///   - progress: A callback that receives progress snapshots on the main actor
+    /// - Throws: `CancellationError` when the task is cancelled, otherwise the errors of
+    ///   ``execute(sources:targets:parameters:)``
+    public func execute(
+        sources: OrderedDictionary<String, Resource>,
+        targets: OrderedDictionary<String, Resource>,
+        parameters: [String: any EcoreValue] = [:],
+        progress: ATLProgressHandler?
+    ) async throws {
+        let monitor = ATLRunMonitor(handler: progress)
+        self.monitor = monitor
+        defer { self.monitor = nil }
         if debug {
             print("[ATL] Executing transformation: \(module.name)")
             print("[ATL] Source models: \(sources.keys.joined(separator: ", "))")
@@ -164,17 +201,29 @@ public final class ATLVirtualMachine {
             let rules = try effectiveMatchedRules()
             let matches = try await matchRules(rules)
 
-            try await executeCalledRules { $0.isEntrypoint }
+            try await executeCalledRules(.entrypoint) { $0.isEntrypoint }
 
             // Phase 2: apply bindings and imperative blocks
-            for match in matches {
+            for (index, match) in matches.enumerated() {
+                monitor.report(
+                    .applying, completed: index, total: matches.count, rule: match.rule.rule.name)
+                try await monitor.checkpoint()
                 try await apply(match)
             }
+            monitor.report(.applying, completed: matches.count, total: matches.count)
 
             // Resolve lazy bindings for forward references
-            try await executionContext.resolveLazyBindings()
+            let pending = executionContext.pendingLazyBindingCount
+            monitor.report(.resolvingBindings, completed: 0, total: pending)
+            var resolved = 0
+            try await executionContext.resolveLazyBindings {
+                try await monitor.checkpoint()
+                resolved += 1
+                monitor.report(.resolvingBindings, completed: resolved, total: pending)
+            }
 
-            try await executeCalledRules { $0.isEndpoint }
+            try await executeCalledRules(.endpoint) { $0.isEndpoint }
+            monitor.report(.finished, completed: 1, total: 1)
 
             // Update execution statistics
             statistics.executionTime = Date().timeIntervalSince(startTime)
@@ -292,8 +341,12 @@ public final class ATLVirtualMachine {
     /// - Returns: The matches, in rule and source element order
     /// - Throws: ATL execution errors for rule execution failures
     private func matchRules(_ rules: [ATLEffectiveMatchedRule]) async throws -> [PendingMatch] {
+        let monitor = self.monitor ?? ATLRunMonitor(handler: nil)
         var candidates: [MatchCandidate] = []
-        for rule in rules {
+        for (index, rule) in rules.enumerated() {
+            monitor.report(
+                .matching, completed: index, total: rules.count, rule: rule.rule.name)
+            try await monitor.checkpoint()
             if debug {
                 print("[ATL] Matching rule: \(rule.rule.name)")
             }
@@ -301,8 +354,10 @@ public final class ATLVirtualMachine {
             candidates.append(contentsOf: try await matchingCandidates(for: rule))
         }
 
+        monitor.report(.matching, completed: rules.count, total: rules.count)
         var matches: [PendingMatch] = []
         for candidate in candidates {
+            try await monitor.checkpoint()
             let isHidden = candidates.contains { other in
                 other.sourceIDs == candidate.sourceIDs
                     && other.rule.rule.name != candidate.rule.rule.name
@@ -337,6 +392,7 @@ public final class ATLVirtualMachine {
 
         var result: [MatchCandidate] = []
         for tuple in tuples {
+            try await monitor?.checkpoint()
             statistics.elementsProcessed += 1
             if try await satisfiesGuards(rule, sources: tuple) {
                 result.append(MatchCandidate(rule: rule, sources: tuple))
@@ -527,12 +583,21 @@ public final class ATLVirtualMachine {
 
     /// Executes every parameterless called rule selected by a predicate.
     ///
-    /// - Parameter selection: Decides which called rules run
+    /// - Parameters:
+    ///   - phase: The phase under which progress is reported
+    ///   - selection: Decides which called rules run
     /// - Throws: ATL execution errors for rule execution failures
-    private func executeCalledRules(_ selection: (ATLCalledRule) -> Bool) async throws {
-        for rule in module.calledRules.values where selection(rule) {
+    private func executeCalledRules(
+        _ phase: ATLProgressPhase, _ selection: (ATLCalledRule) -> Bool
+    ) async throws {
+        let selected = module.calledRules.values.filter(selection)
+        monitor?.report(phase, completed: 0, total: selected.count)
+        for (index, rule) in selected.enumerated() {
+            monitor?.report(phase, completed: index, total: selected.count, rule: rule.name)
+            try await monitor?.checkpoint()
             _ = try await executeCalledRule(rule.name, arguments: [])
         }
+        monitor?.report(phase, completed: selected.count, total: selected.count)
     }
 
     /// Executes a called rule with the specified parameters.
