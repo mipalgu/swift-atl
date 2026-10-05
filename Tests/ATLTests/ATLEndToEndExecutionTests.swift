@@ -22,10 +22,15 @@ import Testing
 @MainActor
 struct ATLEndToEndExecutionTests {
 
-    /// The directory holding the fixtures of this suite.
+    /// The location of a fixture of this suite.
+    ///
+    /// Depending on the toolchain, the copied `Resources` directory is either the
+    /// bundle's resource directory itself or nested inside it, so both are tried.
     private func fixtureURL(_ name: String) throws -> URL {
         let resources = try #require(Bundle.module.resourceURL)
-        return resources.appendingPathComponent("Resources/Semantics/\(name)")
+        let nested = resources.appendingPathComponent("Resources/Semantics/\(name)")
+        if FileManager.default.fileExists(atPath: nested.path) { return nested }
+        return resources.appendingPathComponent("Semantics/\(name)")
     }
 
     /// Runs the Families to Persons transformation and returns the target and its XMI text.
