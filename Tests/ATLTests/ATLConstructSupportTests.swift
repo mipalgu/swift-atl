@@ -275,4 +275,26 @@ struct ATLConstructSupportTests {
         }
         #expect(parsed >= 10)
     }
+
+    @Test(
+        "References to things that do not exist fail the transformation",
+        arguments: [
+            "rule R { from s : Src!Nonexistent to t : Tgt!TNode (name <- 'x') }",
+            "rule R { from s : Src!Node to t : Tgt!Nonexistent (name <- 'x') }",
+            "rule R { from s : Src!Node to t : Tgt!TNode (bogus <- 'x') }",
+            "rule R { from s : Src!Node to t : Tgt!TNode (name <- thisModule.nope()) }",
+            "rule R { from s : Src!Node to t : Tgt!TNode (name <- thisModule.Nope(s)) }",
+            "rule R { from s : Src!Node to t : Tgt!TNode (name <- s.bogus) }",
+            "rule R { from s : Foo!Node to t : Tgt!TNode (name <- 'x') }",
+            "rule R { from s : Src!Node to t : Tgt!TNode (name <- nope(1)) }",
+            "rule R { from s : Src!Node to t : Tgt!TNode (name <- s.name.nopeMethod()) }",
+            "rule R { from s : Src!Node to t : Tgt!TNode (name <- undefinedVariable) }",
+        ])
+    func unknownReferences(_ declarations: String) async throws {
+        var fixture = SemanticsFixture()
+        await fixture.populate()
+        await #expect(throws: (any Error).self) {
+            try await fixture.run(declarations)
+        }
+    }
 }
