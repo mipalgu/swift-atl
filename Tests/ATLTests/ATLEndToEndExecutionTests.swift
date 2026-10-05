@@ -28,9 +28,11 @@ struct ATLEndToEndExecutionTests {
     /// bundle's resource directory itself or nested inside it, so both are tried.
     private func fixtureURL(_ name: String) throws -> URL {
         let resources = try #require(Bundle.module.resourceURL)
-        let nested = resources.appendingPathComponent("Resources/Semantics/\(name)")
-        if FileManager.default.fileExists(atPath: nested.path) { return nested }
-        return resources.appendingPathComponent("Semantics/\(name)")
+        let nested = resources.appendingPathComponent("Resources")
+        var isDirectory: ObjCBool = false
+        let root = FileManager.default.fileExists(atPath: nested.path, isDirectory: &isDirectory)
+            && isDirectory.boolValue ? nested : resources
+        return root.appendingPathComponent("Semantics/\(name)")
     }
 
     /// Runs the Families to Persons transformation and returns the target and its XMI text.
