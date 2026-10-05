@@ -10,10 +10,8 @@
 import ECore
 import EMFBase
 import Foundation
-#if canImport(FoundationXML)
-import FoundationXML
-#endif
 import OrderedCollections
+import SwiftXML
 
 /// Parses Eclipse ATL XMI format into ATL modules.
 ///
@@ -51,17 +49,20 @@ public struct ATLXMIParser {
     /// - Returns: The parsed ATL module
     /// - Throws: `ATLResourceError.parsingError` if parsing fails
     public func parse(_ xmi: String) throws -> ATLModule {
-        guard let data = xmi.data(using: .utf8) else {
-            throw ATLResourceError.parsingError("Failed to convert XMI string to UTF-8 data")
+        let document: XDocument
+        do {
+            document = try parseXML(fromText: xmi)
+        } catch {
+            throw ATLResourceError.parsingError("Failed to parse ATL XMI: \(error.localizedDescription)")
         }
 
-        let delegate = ATLXMIParserDelegate()
-        let parser = XMLParser(data: data)
-        parser.delegate = delegate
+        let builder = ATLXMIModuleBuilder()
+        for root in document.children {
+            builder.visit(root)
+        }
 
-        guard parser.parse(), let module = delegate.module else {
-            let error = delegate.error ?? "Unknown XML parsing error"
-            throw ATLResourceError.parsingError("Failed to parse ATL XMI: \(error)")
+        guard let module = builder.module else {
+            throw ATLResourceError.parsingError("Failed to parse ATL XMI: Unknown XML parsing error")
         }
 
         return module
@@ -70,13 +71,12 @@ public struct ATLXMIParser {
 
 // MARK: - XML Parser Delegate
 
-/// Internal delegate for parsing ATL XMI using Foundation's XMLParser.
-private class ATLXMIParserDelegate: NSObject, XMLParserDelegate {
+/// Internal builder that walks a parsed XML document in document order to assemble an ATL module.
+private final class ATLXMIModuleBuilder {
 
     // MARK: - State
 
     var module: ATLModule?
-    var error: String?
 
     // Parsing state
     private var moduleName: String?
@@ -86,21 +86,19 @@ private class ATLXMIParserDelegate: NSObject, XMLParserDelegate {
     private var matchedRules: [ATLMatchedRule] = []
     private var calledRules: OrderedDictionary<String, ATLCalledRule> = [:]
 
-    // Current parsing context
-    private var currentElement: String?
-    private var currentAttributes: [String: String] = [:]
+    // MARK: - Traversal
 
-    // MARK: - XMLParserDelegate Methods
+    func visit(_ element: XElement) {
+        didStart(element)
+        for child in element.children {
+            visit(child)
+        }
+        didEnd(element)
+    }
 
-    func parser(
-        _ parser: XMLParser,
-        didStartElement elementName: String,
-        namespaceURI: String?,
-        qualifiedName qName: String?,
-        attributes attributeDict: [String: String] = [:]
-    ) {
-        currentElement = elementName
-        currentAttributes = attributeDict
+    private func didStart(_ element: XElement) {
+        let elementName = element.name
+        let attributeDict = element
 
         switch elementName {
         case "atl:Module", "Module":
@@ -134,12 +132,8 @@ private class ATLXMIParserDelegate: NSObject, XMLParserDelegate {
         }
     }
 
-    func parser(
-        _ parser: XMLParser,
-        didEndElement elementName: String,
-        namespaceURI: String?,
-        qualifiedName qName: String?
-    ) {
+    private func didEnd(_ element: XElement) {
+        let elementName = element.name
         if elementName == "atl:Module" || elementName == "Module" {
             // Module parsing complete - construct the ATL module
             if let name = moduleName {
@@ -163,13 +157,9 @@ private class ATLXMIParserDelegate: NSObject, XMLParserDelegate {
         }
     }
 
-    func parser(_ parser: XMLParser, parseErrorOccurred parseError: Error) {
-        error = parseError.localizedDescription
-    }
-
     // MARK: - Helper Parsing
 
-    private func parseHelper(attributes: [String: String]) {
+    private func parseHelper(attributes: XElement) {
         guard let name = attributes["name"] else { return }
 
         // For now, create a minimal helper placeholder
@@ -187,7 +177,7 @@ private class ATLXMIParserDelegate: NSObject, XMLParserDelegate {
 
     // MARK: - Element (Rule) Parsing
 
-    private func parseElement(attributes: [String: String]) {
+    private func parseElement(attributes: XElement) {
         guard let type = attributes["xsi:type"] ?? attributes["type"],
               let name = attributes["name"]
         else { return }

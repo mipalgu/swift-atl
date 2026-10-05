@@ -8,9 +8,7 @@
 //  Parses ATL/OCL expressions from Eclipse ATL XMI format.
 //
 import Foundation
-#if canImport(FoundationXML)
-import FoundationXML
-#endif
+import SwiftXML
 
 /// Parses ATL/OCL expressions from Eclipse ATL XMI format.
 ///
@@ -55,12 +53,8 @@ public struct ATLExpressionXMIParser {
     /// - Returns: The parsed expression
     /// - Throws: Parsing errors if the XMI is invalid
     public func parse(_ xmi: String) throws -> any ATLExpression {
-        guard let data = xmi.data(using: .utf8) else {
-            throw ExpressionParseError.invalidXML("Failed to convert XMI to UTF-8")
-        }
-
-        let document = try XMLDocument(data: data, options: [])
-        guard let root = document.rootElement() else {
+        let document = try parseXML(fromText: xmi)
+        guard let root = document.children.first else {
             throw ExpressionParseError.invalidXML("No root element")
         }
 
@@ -75,14 +69,13 @@ public struct ATLExpressionXMIParser {
     // MARK: - Helper Methods
 
     /// Finds the first expression element in the tree.
-    private func findFirstExpression(in element: XMLElement) -> XMLElement? {
+    private func findFirstExpression(in element: XElement) -> XElement? {
         if element.name == "expression" {
             return element
         }
 
-        for child in element.children ?? [] {
-            if let childElement = child as? XMLElement,
-               let found = findFirstExpression(in: childElement) {
+        for child in element.children {
+            if let found = findFirstExpression(in: child) {
                 return found
             }
         }
@@ -91,12 +84,12 @@ public struct ATLExpressionXMIParser {
     }
 
     /// Gets attribute value from element.
-    private func attribute(_ name: String, from element: XMLElement) -> String? {
-        return element.attribute(forName: name)?.stringValue
+    private func attribute(_ name: String, from element: XElement) -> String? {
+        return element[name]
     }
 
     /// Gets required attribute value from element.
-    private func requiredAttribute(_ name: String, from element: XMLElement) throws -> String {
+    private func requiredAttribute(_ name: String, from element: XElement) throws -> String {
         guard let value = attribute(name, from: element) else {
             throw ExpressionParseError.missingAttribute("Missing required attribute '\(name)'")
         }
@@ -104,12 +97,12 @@ public struct ATLExpressionXMIParser {
     }
 
     /// Finds first child element with given name.
-    private func child(_ name: String, in element: XMLElement) -> XMLElement? {
-        return element.elements(forName: name).first
+    private func child(_ name: String, in element: XElement) -> XElement? {
+        return element.children(name).first
     }
 
     /// Finds first expression element within a named container.
-    private func childExpression(_ containerName: String, in element: XMLElement) throws -> XMLElement? {
+    private func childExpression(_ containerName: String, in element: XElement) throws -> XElement? {
         guard let container = child(containerName, in: element) else {
             return nil
         }
@@ -119,7 +112,7 @@ public struct ATLExpressionXMIParser {
     // MARK: - Expression Parsing Dispatcher
 
     /// Parses an expression element based on its xsi:type.
-    private func parseExpression(_ element: XMLElement) throws -> any ATLExpression {
+    private func parseExpression(_ element: XElement) throws -> any ATLExpression {
         // Get type from xsi:type or type attribute
         guard let type = attribute("xsi:type", from: element) ?? attribute("type", from: element) else {
             throw ExpressionParseError.missingAttribute("Missing xsi:type or type attribute")
@@ -169,12 +162,12 @@ public struct ATLExpressionXMIParser {
 
     // MARK: - Literal Expression Parsers
 
-    private func parseVariable(_ element: XMLElement) throws -> ATLVariableExpression {
+    private func parseVariable(_ element: XElement) throws -> ATLVariableExpression {
         let varName = try requiredAttribute("varName", from: element)
         return ATLVariableExpression(name: varName)
     }
 
-    private func parseInteger(_ element: XMLElement) throws -> ATLLiteralExpression {
+    private func parseInteger(_ element: XElement) throws -> ATLLiteralExpression {
         let symbol = try requiredAttribute("integerSymbol", from: element)
         guard let value = Int(symbol) else {
             throw ExpressionParseError.invalidXML("Invalid integer value: \(symbol)")
@@ -182,7 +175,7 @@ public struct ATLExpressionXMIParser {
         return ATLLiteralExpression(value: value)
     }
 
-    private func parseReal(_ element: XMLElement) throws -> ATLLiteralExpression {
+    private func parseReal(_ element: XElement) throws -> ATLLiteralExpression {
         let symbol = try requiredAttribute("realSymbol", from: element)
         guard let value = Double(symbol) else {
             throw ExpressionParseError.invalidXML("Invalid real value: \(symbol)")
@@ -190,12 +183,12 @@ public struct ATLExpressionXMIParser {
         return ATLLiteralExpression(value: value)
     }
 
-    private func parseString(_ element: XMLElement) throws -> ATLLiteralExpression {
+    private func parseString(_ element: XElement) throws -> ATLLiteralExpression {
         let symbol = try requiredAttribute("stringSymbol", from: element)
         return ATLLiteralExpression(value: symbol)
     }
 
-    private func parseBoolean(_ element: XMLElement) throws -> ATLLiteralExpression {
+    private func parseBoolean(_ element: XElement) throws -> ATLLiteralExpression {
         let symbol = try requiredAttribute("booleanSymbol", from: element)
         guard let value = Bool(symbol) else {
             throw ExpressionParseError.invalidXML("Invalid boolean value: \(symbol)")
@@ -207,14 +200,14 @@ public struct ATLExpressionXMIParser {
         return ATLLiteralExpression(value: nil)
     }
 
-    private func parseTypeLiteral(_ element: XMLElement) throws -> ATLTypeLiteralExpression {
+    private func parseTypeLiteral(_ element: XElement) throws -> ATLTypeLiteralExpression {
         let typeName = try requiredAttribute("typeName", from: element)
         return ATLTypeLiteralExpression(typeName: typeName)
     }
 
     // MARK: - Navigation Expression Parser
 
-    private func parseNavigation(_ element: XMLElement) throws -> ATLNavigationExpression {
+    private func parseNavigation(_ element: XElement) throws -> ATLNavigationExpression {
         let name = try requiredAttribute("name", from: element)
 
         guard let sourceElement = try childExpression("source", in: element) else {
@@ -227,7 +220,7 @@ public struct ATLExpressionXMIParser {
 
     // MARK: - Operation Expression Parsers
 
-    private func parseOperationCall(_ element: XMLElement) throws -> any ATLExpression {
+    private func parseOperationCall(_ element: XElement) throws -> any ATLExpression {
         let opName = try requiredAttribute("operationName", from: element)
 
         // Parse source
@@ -235,7 +228,7 @@ public struct ATLExpressionXMIParser {
         let source = try sourceElement.map { try parseExpression($0) }
 
         // Parse arguments
-        let argumentElements = element.elements(forName: "arguments")
+        let argumentElements = Array(element.children("arguments"))
         var arguments: [any ATLExpression] = []
         for argContainer in argumentElements {
             if let argExpr = child("expression", in: argContainer) {
@@ -266,11 +259,11 @@ public struct ATLExpressionXMIParser {
         }
     }
 
-    private func parseHelperCall(_ element: XMLElement) throws -> ATLHelperCallExpression {
+    private func parseHelperCall(_ element: XElement) throws -> ATLHelperCallExpression {
         let helperName = try requiredAttribute("helperName", from: element)
 
         // Parse arguments
-        let argumentElements = element.elements(forName: "arguments")
+        let argumentElements = Array(element.children("arguments"))
         var arguments: [any ATLExpression] = []
         for argContainer in argumentElements {
             if let argExpr = child("expression", in: argContainer) {
@@ -283,7 +276,7 @@ public struct ATLExpressionXMIParser {
 
     // MARK: - Control Flow Expression Parsers
 
-    private func parseConditional(_ element: XMLElement) throws -> ATLConditionalExpression {
+    private func parseConditional(_ element: XElement) throws -> ATLConditionalExpression {
         // Parse condition
         guard let conditionElement = try childExpression("condition", in: element) else {
             throw ExpressionParseError.missingAttribute("Missing condition in IfExp")
@@ -311,7 +304,7 @@ public struct ATLExpressionXMIParser {
 
     // MARK: - Collection Expression Parsers
 
-    private func parseIterator(_ element: XMLElement) throws -> any ATLExpression {
+    private func parseIterator(_ element: XElement) throws -> any ATLExpression {
         let name = try requiredAttribute("name", from: element)
 
         // Parse source
@@ -340,7 +333,7 @@ public struct ATLExpressionXMIParser {
         )
     }
 
-    private func parseIterate(_ element: XMLElement) throws -> ATLIterateExpression {
+    private func parseIterate(_ element: XElement) throws -> ATLIterateExpression {
         // Parse source
         guard let sourceElement = try childExpression("source", in: element) else {
             throw ExpressionParseError.missingAttribute("Missing source in IterateExp")
@@ -360,7 +353,7 @@ public struct ATLExpressionXMIParser {
         }
 
         // Parse accumulator type (optional)
-        let accumulatorType = resultElement.attribute(forName: "type")?.stringValue
+        let accumulatorType = resultElement["type"]
 
         // Parse accumulator init expression
         guard let initElement = try childExpression("initExpression", in: resultElement) else {
@@ -384,11 +377,11 @@ public struct ATLExpressionXMIParser {
         )
     }
 
-    private func parseCollectionLiteral(_ element: XMLElement) throws -> ATLCollectionLiteralExpression {
+    private func parseCollectionLiteral(_ element: XElement) throws -> ATLCollectionLiteralExpression {
         let kind = attribute("kind", from: element) ?? "Sequence"
 
         // Parse parts (collection elements)
-        let partsElements = element.elements(forName: "parts")
+        let partsElements = Array(element.children("parts"))
         var elements: [any ATLExpression] = []
         for partContainer in partsElements {
             if let partExpr = child("expression", in: partContainer) {
@@ -401,7 +394,7 @@ public struct ATLExpressionXMIParser {
 
     // MARK: - Advanced Expression Parsers
 
-    private func parseLet(_ element: XMLElement) throws -> ATLLetExpression {
+    private func parseLet(_ element: XElement) throws -> ATLLetExpression {
         // Parse variable
         guard let variableElement = child("variable", in: element),
               let varName = attribute("name", from: variableElement) else {
@@ -430,9 +423,9 @@ public struct ATLExpressionXMIParser {
         )
     }
 
-    private func parseLambda(_ element: XMLElement) throws -> ATLLambdaExpression {
+    private func parseLambda(_ element: XElement) throws -> ATLLambdaExpression {
         // Parse the iterator variables
-        let parameterNames = element.elements(forName: "parameter").compactMap {
+        let parameterNames = Array(element.children("parameter")).compactMap {
             attribute("name", from: $0)
         }
         guard !parameterNames.isEmpty else {
@@ -448,9 +441,9 @@ public struct ATLExpressionXMIParser {
         return ATLLambdaExpression(parameters: parameterNames, body: body)
     }
 
-    private func parseTuple(_ element: XMLElement) throws -> ATLTupleExpression {
+    private func parseTuple(_ element: XElement) throws -> ATLTupleExpression {
         // Parse tuple parts
-        let partElements = element.elements(forName: "tuplePart")
+        let partElements = Array(element.children("tuplePart"))
         var fields: [(name: String, type: String?, value: any ATLExpression)] = []
 
         for partElement in partElements {
