@@ -431,7 +431,7 @@ public actor ATLParser {
 // MARK: - ATL Lexer
 
 /// Token types for ATL lexical analysis
-private enum ATLTokenType: Equatable {
+enum ATLTokenType: Equatable {
     case keyword(String)
     case identifier(String)
     case stringLiteral(String)
@@ -448,7 +448,7 @@ private enum ATLTokenType: Equatable {
 }
 
 /// Token representation
-private struct ATLToken: Equatable {
+struct ATLToken: Equatable {
     let type: ATLTokenType
     let value: String
     let line: Int
@@ -456,7 +456,7 @@ private struct ATLToken: Equatable {
 }
 
 /// ATL lexical analyzer
-private class ATLLexer {
+final class ATLLexer {
     private let content: String
     private var position: String.Index
     private var line: Int = 1
@@ -483,11 +483,49 @@ private class ATLLexer {
         "(", ")", "{", "}", "[", "]", ";", ",", "|",
     ]
 
+    /// Creates a lexer for ATL source text.
+    ///
+    /// Line terminators in the text (`\r\n`, a lone `\r` and `\n`) are all treated as
+    /// a single line feed, so that tokens, directives, string literals and source
+    /// locations are the same whichever convention the source file uses.
+    ///
+    /// - Parameter content: The ATL source text to tokenise.
     init(content: String) {
-        self.content = content
+        self.content = Self.normalisingLineEndings(content)
         self.position = content.startIndex
     }
 
+    /// Converts every line terminator in a text to a single line feed.
+    ///
+    /// - Parameter text: The text whose line terminators are normalised.
+    /// - Returns: The text with `\r\n` and lone `\r` replaced by `\n`.
+    static func normalisingLineEndings(_ text: String) -> String {
+        var scalars = String.UnicodeScalarView()
+        var previousWasCarriageReturn = false
+        for scalar in text.unicodeScalars {
+            switch scalar {
+            case "\r":
+                scalars.append("\n")
+                previousWasCarriageReturn = true
+            case "\n":
+                if !previousWasCarriageReturn { scalars.append(scalar) }
+                previousWasCarriageReturn = false
+            default:
+                scalars.append(scalar)
+                previousWasCarriageReturn = false
+            }
+        }
+        return String(scalars)
+    }
+
+    /// Splits the source text into tokens.
+    ///
+    /// Whitespace, newlines and comments are dropped from the result, which always
+    /// ends with an end-of-file token. Header directives found in comments are
+    /// collected in ``directives``.
+    ///
+    /// - Returns: The tokens of the source text.
+    /// - Throws: ``ATLParseError`` for an unterminated string literal or an unexpected character.
     func tokenize() throws -> [ATLToken] {
         var tokens: [ATLToken] = []
 

@@ -105,7 +105,7 @@ struct ATLDirectives {
     ///
     /// - Parameter comment: The comment text without the leading `--`.
     mutating func record(comment: String) {
-        let trimmed = comment.trimmingCharacters(in: .whitespaces)
+        let trimmed = comment.trimmingCharacters(in: .whitespacesAndNewlines)
         if let body = Self.body(of: trimmed, directive: ATLLanguage.Directive.path) {
             recordBinding(body, into: \.paths)
         } else if let body = Self.body(of: trimmed, directive: ATLLanguage.Directive.namespaceURI) {
@@ -131,8 +131,8 @@ struct ATLDirectives {
             }
             return
         }
-        let name = String(components[0]).trimmingCharacters(in: .whitespaces)
-        let value = String(components[1]).trimmingCharacters(in: .whitespaces)
+        let name = String(components[0]).trimmingCharacters(in: .whitespacesAndNewlines)
+        let value = String(components[1]).trimmingCharacters(in: .whitespacesAndNewlines)
         self[keyPath: keyPath][name] = value
     }
 
@@ -142,10 +142,10 @@ struct ATLDirectives {
             errors.append("Malformed @param '\(body)': expected 'name : Type = default'")
             return
         }
-        let name = String(nameAndRest[0]).trimmingCharacters(in: .whitespaces)
+        let name = String(nameAndRest[0]).trimmingCharacters(in: .whitespacesAndNewlines)
         let typeAndDefault = nameAndRest[1].split(
             separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
-        let typeName = String(typeAndDefault[0]).trimmingCharacters(in: .whitespaces)
+        let typeName = String(typeAndDefault[0]).trimmingCharacters(in: .whitespacesAndNewlines)
 
         guard !name.isEmpty, name.allSatisfy({ $0.isLetter || $0.isNumber || $0 == "_" }) else {
             errors.append("Malformed @param '\(body)': invalid parameter name '\(name)'")
@@ -165,7 +165,7 @@ struct ATLDirectives {
 
         var defaultValue: ATLParameterValue?
         if typeAndDefault.count == 2 {
-            let text = String(typeAndDefault[1]).trimmingCharacters(in: .whitespaces)
+            let text = String(typeAndDefault[1]).trimmingCharacters(in: .whitespacesAndNewlines)
             guard let value = Self.defaultValue(text, of: type) else {
                 errors.append("Malformed @param '\(name)': '\(text)' is not a valid \(typeName)")
                 return
