@@ -522,9 +522,10 @@ public final class ATLExecutionContext: Sendable {
     public func assignFeature(on element: any EObject, feature name: String, value: (any EcoreValue)?)
         async throws
     {
-        guard let eClass = element.eClass as? EClass else {
+        let classifier: any EClassifier = element.eClass
+        guard let eClass = classifier as? EClass else {
             throw ATLExecutionError.typeError(
-                "Element eClass is not an EClass: \(type(of: element.eClass))"
+                "Element eClass is not an EClass: \(type(of: classifier))"
             )
         }
         guard let feature = eClass.getStructuralFeature(name: name) else {
