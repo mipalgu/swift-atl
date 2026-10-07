@@ -69,7 +69,7 @@ struct ATLEnumerationBindingTests {
 
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(
             "enum-\(UUID().uuidString).xmi")
-        try xml.write(to: url, atomically: true, encoding: .utf8)
+        try xml.write(to: url, atomically: testWritesAtomically, encoding: .utf8)
         defer { try? FileManager.default.removeItem(at: url) }
 
         let resourceSet = ResourceSet()

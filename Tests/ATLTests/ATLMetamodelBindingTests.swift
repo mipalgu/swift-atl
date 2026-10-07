@@ -267,7 +267,7 @@ struct ATLMetamodelBindingTests {
     func parseFileWithRegistry() async throws {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(
             "ATLBinding-\(UUID().uuidString).atl")
-        try nsURIHeader.write(to: url, atomically: true, encoding: .utf8)
+        try nsURIHeader.write(to: url, atomically: testWritesAtomically, encoding: .utf8)
         defer { try? FileManager.default.removeItem(at: url) }
 
         let registry = ATLMetamodelRegistry(packages: [fixture.package])

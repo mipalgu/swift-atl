@@ -183,7 +183,7 @@ public final class ATLResource {
 
         let serializer = ATLXMISerializer()
         let xmiText = try serializer.serialize(module)
-        try xmiText.write(to: url, atomically: true, encoding: .utf8)
+        try xmiText.write(to: url, atomically: FileURIHandler.writesAtomically, encoding: .utf8)
     }
 }
 

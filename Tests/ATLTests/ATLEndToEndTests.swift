@@ -6,7 +6,6 @@
 //  Copyright © 2025 Rene Hexel. All rights reserved.
 //
 
-import Dispatch
 import Foundation
 import Testing
 
@@ -351,12 +350,13 @@ struct ATLEndToEndTests {
         let parser = ATLParser()
 
         // When
-        let startTime = DispatchTime.now()
+        let startTime = ContinuousClock.now
         let module = try await parser.parse(resourceURL)
-        let endTime = DispatchTime.now()
+        let endTime = ContinuousClock.now
 
         // Then
-        let parseTime = Double(endTime.uptimeNanoseconds - startTime.uptimeNanoseconds) / 1_000_000_000
+        let parseTime = Double(startTime.duration(to: endTime).components.seconds)
+            + Double(startTime.duration(to: endTime).components.attoseconds) / 1e18
         #expect(parseTime < 1.0)  // Should parse in less than 1 second
         #expect(!module.name.isEmpty)
         #expect(module.helpers.count > 0)
@@ -404,7 +404,7 @@ struct ATLEndToEndTests {
         let tempDir = FileManager.default.temporaryDirectory
         let tempFile = tempDir.appendingPathComponent(UUID().uuidString + ".atl")
 
-        try content.write(to: tempFile, atomically: true, encoding: .utf8)
+        try content.write(to: tempFile, atomically: testWritesAtomically, encoding: .utf8)
 
         return tempFile
     }
@@ -676,11 +676,12 @@ struct ATLEndToEndTests {
         for filename in advancedFiles {
             let resourceURL = try getResourceURL(filename)
 
-            let startTime = DispatchTime.now()
+            let startTime = ContinuousClock.now
             let module = try await parser.parse(resourceURL)
-            let endTime = DispatchTime.now()
+            let endTime = ContinuousClock.now
 
-            let parseTime = Double(endTime.uptimeNanoseconds - startTime.uptimeNanoseconds) / 1_000_000_000
+            let parseTime = Double(startTime.duration(to: endTime).components.seconds)
+                + Double(startTime.duration(to: endTime).components.attoseconds) / 1e18
             #expect(
                 parseTime < 2.0,
                 "File \(filename) should parse in less than 2 seconds, took \(parseTime)")

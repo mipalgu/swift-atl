@@ -186,7 +186,7 @@ struct ATLGenModelFindingsTests {
         directory: URL, targetInSameSet: Bool
     ) async throws -> String {
         let libraryURL = directory.appendingPathComponent("lib.ecore")
-        try Self.libraryEcore.write(to: libraryURL, atomically: true, encoding: .utf8)
+        try Self.libraryEcore.write(to: libraryURL, atomically: testWritesAtomically, encoding: .utf8)
         let set = ResourceSet()
         let source = try await set.loadEcoreResource(uri: libraryURL.absoluteString)
 
@@ -239,7 +239,7 @@ struct ATLGenModelFindingsTests {
         let directory = try makeDirectory()
         defer { try? FileManager.default.removeItem(at: directory) }
         let libraryURL = directory.appendingPathComponent("lib.ecore")
-        try Self.libraryEcore.write(to: libraryURL, atomically: true, encoding: .utf8)
+        try Self.libraryEcore.write(to: libraryURL, atomically: testWritesAtomically, encoding: .utf8)
         let set = ResourceSet()
         let resource = try await set.loadEcoreResource(uri: libraryURL.absoluteString)
         let package = try #require(await resource.getRootObjects().first as? EPackage)
@@ -340,7 +340,7 @@ struct ATLGenModelFindingsTests {
 
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(
             "names-\(UUID().uuidString).xmi")
-        try xml.write(to: url, atomically: true, encoding: .utf8)
+        try xml.write(to: url, atomically: testWritesAtomically, encoding: .utf8)
         defer { try? FileManager.default.removeItem(at: url) }
         let resourceSet = ResourceSet()
         await resourceSet.registerMetamodel(package, uri: "http://example.org/names")

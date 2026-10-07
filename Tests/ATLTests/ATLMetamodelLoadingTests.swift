@@ -122,7 +122,7 @@ struct ATLMetamodelLoadingTests {
         </ecore:EPackage>
         """
 
-        try ecoreContent.write(to: ecoreFile, atomically: true, encoding: .utf8)
+        try ecoreContent.write(to: ecoreFile, atomically: testWritesAtomically, encoding: .utf8)
         defer { try? FileManager.default.removeItem(at: ecoreFile) }
 
         // Create ATL file in same directory
@@ -134,7 +134,7 @@ struct ATLMetamodelLoadingTests {
         create OUT: TestModel from IN: TestModel;
         """
 
-        try atlContent.write(to: atlFile, atomically: true, encoding: .utf8)
+        try atlContent.write(to: atlFile, atomically: testWritesAtomically, encoding: .utf8)
         defer { try? FileManager.default.removeItem(at: atlFile) }
 
         // When
@@ -178,7 +178,7 @@ struct ATLMetamodelLoadingTests {
         </ecore:EPackage>
         """
 
-        try ecoreContent.write(to: ecoreFile, atomically: true, encoding: .utf8)
+        try ecoreContent.write(to: ecoreFile, atomically: testWritesAtomically, encoding: .utf8)
 
         // Create ATL file with workspace-relative path
         let atlFile = tempDir.appendingPathComponent("test-\(UUID().uuidString).atl")
@@ -189,7 +189,7 @@ struct ATLMetamodelLoadingTests {
         create OUT: Persons from IN: Families;
         """
 
-        try atlContent.write(to: atlFile, atomically: true, encoding: .utf8)
+        try atlContent.write(to: atlFile, atomically: testWritesAtomically, encoding: .utf8)
         defer { try? FileManager.default.removeItem(at: atlFile) }
 
         // When - parse with search path
