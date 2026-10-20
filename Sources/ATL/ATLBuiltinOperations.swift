@@ -947,20 +947,35 @@ struct ATLConsole {
     let writeError: @MainActor (String) -> Void
 
     /// The console that writes to the standard output and standard error of the process.
-    static var system: ATLConsole { writing(errorsTo: .standardError) }
-
-    /// A console that prints output lines and writes error lines to a file handle.
     ///
     /// Output lines are printed, so that they keep their order with other text the
-    /// process prints. A line that cannot be written to the error destination, for
-    /// example because it has been closed, is dropped.
-    ///
-    /// - Parameter errors: The destination of the error lines.
-    /// - Returns: The console.
-    static func writing(errorsTo errors: FileHandle) -> ATLConsole {
+    /// process prints. Error lines are written through ``ATLStandardErrorStream``.
+    static var system: ATLConsole {
         ATLConsole(
             writeOutput: { print($0) },
-            writeError: { try? errors.write(contentsOf: Data(($0 + "\n").utf8)) })
+            writeError: {
+                var errors = ATLStandardErrorStream()
+                print($0, to: &errors)
+            })
+    }
+}
+
+/// A text output stream that writes to the standard error of the process.
+///
+/// The text is written through the C library, which every platform provides,
+/// including WebAssembly, where file handles cannot be created. Text that
+/// standard error cannot take, for example because it has been closed, is
+/// dropped instead of stopping the transformation.
+struct ATLStandardErrorStream: TextOutputStream {
+    /// Writes text to standard error.
+    ///
+    /// - Parameter string: The text to write.
+    mutating func write(_ string: String) {
+        #if os(Windows)
+        try? FileHandle.standardError.write(contentsOf: Data(string.utf8))
+        #else
+        fputs(string, stderr)
+        #endif
     }
 }
 

@@ -584,23 +584,60 @@ struct ATLReflectiveOperationTests {
         #expect(ATLReflectiveOperations.render(fixture.source.getClassifier("Leaf") as? EClass) == "EClass 'Leaf'")
     }
 
-    @Test("A console writes each error line, terminated, to its error destination")
-    func consoleWritesErrorLines() throws {
-        let pipe = Pipe()
-        let console = ATLConsole.writing(errorsTo: pipe.fileHandleForWriting)
-        console.writeError("first")
-        console.writeError("second")
-        try pipe.fileHandleForWriting.close()
-        let written = String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
-        #expect(written == "first\nsecond\n")
+    #if !os(WASI) && !os(Windows)
+    /// Runs a body while the standard error of the process is redirected.
+    ///
+    /// - Parameters:
+    ///   - descriptor: The file descriptor that receives what is written to standard error.
+    ///   - body: The code to run while standard error is redirected.
+    private func redirectingStandardError(to descriptor: Int32, _ body: () -> Void) {
+        fflush(stderr)
+        let saved = dup(STDERR_FILENO)
+        dup2(descriptor, STDERR_FILENO)
+        body()
+        fflush(stderr)
+        dup2(saved, STDERR_FILENO)
+        close(saved)
     }
 
-    @Test("A console whose error destination is closed drops the line instead of failing")
-    func consoleToleratesClosedDestination() throws {
+    /// Writes error lines through the system console and returns what reached standard error.
+    ///
+    /// - Parameter lines: The lines to write.
+    /// - Returns: The text written to standard error meanwhile.
+    private func standardErrorText(writing lines: [String]) throws -> String {
         let pipe = Pipe()
+        redirectingStandardError(to: pipe.fileHandleForWriting.fileDescriptor) {
+            for line in lines {
+                ATLConsole.system.writeError(line)
+            }
+        }
         try pipe.fileHandleForWriting.close()
-        ATLConsole.writing(errorsTo: pipe.fileHandleForWriting).writeError("lost")
-        #expect(pipe.fileHandleForReading.readDataToEndOfFile().isEmpty)
+        return String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+    }
+
+    @Test("The system console writes each error line, terminated, to standard error")
+    func systemConsoleWritesErrorLines() throws {
+        let written = try standardErrorText(writing: ["first console line", "second console line"])
+        #expect(written.contains("first console line\nsecond console line\n"))
+    }
+
+    @Test("The system console drops error lines that standard error cannot take")
+    func systemConsoleToleratesUnwritableStandardError() throws {
+        let readOnly = open("/dev/null", O_RDONLY)
+        try #require(readOnly >= 0)
+        defer { close(readOnly) }
+        redirectingStandardError(to: readOnly) {
+            ATLConsole.system.writeError("dropped console line")
+        }
+        let written = try standardErrorText(writing: ["restored console line"])
+        #expect(written.contains("restored console line\n"))
+        #expect(!written.contains("dropped console line"))
+    }
+    #endif
+
+    @Test("debug on the default console returns its receiver")
+    func debugOnSystemConsole() async throws {
+        #expect(try await LanguageHarness.evaluate("5.debug('default console check')") as? Int == 5)
     }
 
     @Test("println on the default console returns its receiver")
