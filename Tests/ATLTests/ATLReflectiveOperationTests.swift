@@ -591,11 +591,11 @@ struct ATLReflectiveOperationTests {
     ///   - descriptor: The file descriptor that receives what is written to standard error.
     ///   - body: The code to run while standard error is redirected.
     private func redirectingStandardError(to descriptor: Int32, _ body: () -> Void) {
-        fflush(stderr)
+        fflush(nil)
         let saved = dup(STDERR_FILENO)
         dup2(descriptor, STDERR_FILENO)
         body()
-        fflush(stderr)
+        fflush(nil)
         dup2(saved, STDERR_FILENO)
         close(saved)
     }
