@@ -148,6 +148,11 @@ public final class ATLVirtualMachine {
     /// moment after each ten milliseconds of work, so that other work on the
     /// main actor, such as the user interface, keeps running.
     ///
+    /// Navigation reads an unset single-valued attribute as its default value
+    /// literal or, without one, as the default of its type (`false` or zero), as
+    /// the Eclipse Modeling Framework does; unset strings and references read as
+    /// `OclUndefined`.
+    ///
     /// A cancelled run throws `CancellationError` and does not report the
     /// finished phase. The target models are left partly populated with the
     /// elements and bindings created up to that point; callers that need an
@@ -185,7 +190,8 @@ public final class ATLVirtualMachine {
         try executionContext.setModuleParameters(parameters)
         executionContext.clearAttributeHelperCache()
 
-        // Configure execution context with models
+        // Read unset attributes as their defaults, as EMF does, then register the models
+        await executionContext.executionEngine.enableDefaultValues()
         for (alias, resource) in sources {
             await executionContext.addSource(alias, resource: resource)
         }

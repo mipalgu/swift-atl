@@ -96,6 +96,11 @@ public final class ATLExecutionContext: Sendable {
     /// Debug mode flag for systematic tracing.
     public var debug: Bool = false
 
+    /// The destinations of the text written by the `debug` and `println` operations.
+    ///
+    /// By default, `println` writes to standard output and `debug` to standard error.
+    var console: ATLConsole = .system
+
     /// Back-reference to the owning virtual machine for called rule dispatch.
     public weak var virtualMachine: ATLVirtualMachine?
 

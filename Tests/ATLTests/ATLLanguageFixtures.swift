@@ -115,6 +115,7 @@ struct LanguageHarness {
         let context = ATLExecutionContext(
             module: module, sources: sources, targets: [:],
             executionEngine: ECoreExecutionEngine(models: [:]))
+        await context.executionEngine.enableDefaultValues()
         return LanguageHarness(module: module, context: context)
     }
 

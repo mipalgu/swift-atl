@@ -167,6 +167,16 @@ rule Class2Table {
 }
 ```
 
+### Navigating to the Container
+
+Any model element can be asked for the object that contains it, so a helper does not need
+the parent passed in:
+
+```atl
+helper context MM!Transition def: owner : MM!Machine =
+    self.refImmediateComposite();
+```
+
 ## Using Called Rules
 
 Called rules are invoked explicitly rather than matched:

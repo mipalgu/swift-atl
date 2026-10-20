@@ -165,6 +165,103 @@ struct ATLCollectionOperationTests {
         #expect(result.integers == [1, 2, 3])
     }
 
+    // MARK: - Bulk inclusion and exclusion
+
+    @Test(
+        "Bulk operations add and remove several elements",
+        arguments: [
+            ("Set{1, 2, 3}->symmetricDifference(Set{2, 3, 4})", [1, 4]),
+            ("Set{1, 2}->symmetricDifference(Set{1, 2})", []),
+            ("Set{1, 2}->symmetricDifference(Set{})", [1, 2]),
+            ("Sequence{1, 2, 2}->symmetricDifference(Sequence{2, 5, 5})", [1, 5]),
+            ("Sequence{1, 2}->includingAll(Sequence{2, 3})", [1, 2, 2, 3]),
+            ("Sequence{1}->includingAll(OclUndefined)", [1]),
+            ("OrderedSet{1, 2}->includingAll(Sequence{2, 3, 3})", [1, 2, 3]),
+            ("Set{1, 2}->includingAll(Set{2, 3})", [1, 2, 3]),
+            ("Sequence{1, 4}->includingAll(Sequence{2, 3}, 2)", [1, 2, 3, 4]),
+            ("Sequence{2}->includingAll(Sequence{1}, 1)", [1, 2]),
+            ("Sequence{1, 2}->includingAll(Sequence{3}, 3)", [1, 2, 3]),
+            ("OrderedSet{1, 4}->includingAll(Sequence{4, 2, 2}, 1)", [2, 1, 4]),
+            ("Sequence{0}->includingRange(1, 3)", [0, 1, 2, 3]),
+            ("Sequence{}->includingRange(2, 2)", [2]),
+            ("Sequence{9}->includingRange(3, 1)", [9]),
+            ("OrderedSet{2}->includingRange(1, 3)", [2, 1, 3]),
+            ("Sequence{1, 2, 1, 3, 2}->excludingAll(Sequence{1, 2})", [3]),
+            ("OrderedSet{1, 2, 3}->excludingAll(Set{2, 9})", [1, 3]),
+            ("Sequence{1, 2}->excludingAll(OclUndefined)", [1, 2]),
+        ])
+    func bulkOperations(expression: String, expected: [Int]) async throws {
+        #expect(try await LanguageHarness.evaluate(expression).integers == expected, "\(expression)")
+    }
+
+    @Test("Bulk operations keep the kind of their receiver")
+    func bulkOperationKinds() async throws {
+        let kinds: [(String, ATLCollectionKind)] = [
+            ("Set{1}->symmetricDifference(Set{2})", .set),
+            ("OrderedSet{1}->symmetricDifference(Set{2})", .orderedSet),
+            ("Sequence{1}->symmetricDifference(Sequence{2})", .set),
+            ("OrderedSet{1}->includingAll(Sequence{2})", .orderedSet),
+            ("OrderedSet{1}->includingAll(Sequence{2}, 1)", .orderedSet),
+            ("OrderedSet{1}->includingRange(2, 3)", .orderedSet),
+            ("Set{1, 2}->excludingAll(Set{2})", .set),
+        ]
+        for (expression, kind) in kinds {
+            let result = try await LanguageHarness.evaluate(expression)
+            #expect((result as? ATLCollectionValue)?.kind == kind, "\(expression)")
+        }
+        let sequence = try await LanguageHarness.evaluate("Sequence{1}->includingAll(Sequence{1})")
+        #expect(sequence is EcoreValueArray)
+    }
+
+    @Test("includingRange accepts ranges up to the maximum length")
+    func includingRangeAtMaximum() async throws {
+        let maximum = ATLBuiltinOperations.maximumRangeLength
+        let sequence = try await LanguageHarness.evaluate(
+            "Sequence{}->includingRange(1, \(maximum))->size()")
+        #expect(sequence as? Int == maximum)
+    }
+
+    @Test("includingRange skips integers a unique collection already holds, compared numerically")
+    func includingRangeIntoUniqueCollection() async throws {
+        let result = try await LanguageHarness.evaluate("OrderedSet{1, 2.0, 'a'}->includingRange(1, 4)")
+        let elements = try #require(result.collectionElements)
+        #expect(elements.count == 5)
+        #expect(elements.dropFirst(3).compactMap { $0 as? Int } == [3, 4])
+        #expect((result as? ATLCollectionValue)?.kind == .orderedSet)
+    }
+
+    @Test(
+        "includingRange rejects ranges longer than the maximum length",
+        arguments: [
+            (1, ATLBuiltinOperations.maximumRangeLength + 1), (1, 1_000_000_000), (Int.min, Int.max),
+        ])
+    func includingRangeTooLong(lower: Int, upper: Int) async throws {
+        let harness = try await LanguageHarness.make(expression: "Sequence{}->includingRange(lo, hi)")
+        harness.context.setVariable("lo", value: lower)
+        harness.context.setVariable("hi", value: upper)
+        await #expect {
+            _ = try await harness.context.callHelper(LanguageHarness.probeName, arguments: [])
+        } throws: { error in
+            guard case ATLExecutionError.runtimeError(let message) = error else { return false }
+            return message.contains("includingRange")
+        }
+    }
+
+    @Test(
+        "Bulk operations reject invalid positions and bounds",
+        arguments: [
+            "Sequence{1}->includingAll(Sequence{2}, 3)",
+            "Sequence{1}->includingAll(Sequence{2}, 0)",
+            "Sequence{1}->includingAll(Sequence{2}, 'x')",
+            "Sequence{}->includingRange('a', 2)",
+            "Sequence{}->includingRange(1, 2.5)",
+        ])
+    func bulkOperationErrors(expression: String) async {
+        await #expect(throws: ATLExecutionError.self, "\(expression)") {
+            _ = try await LanguageHarness.evaluate(expression)
+        }
+    }
+
     // MARK: - Boolean results
 
     @Test(

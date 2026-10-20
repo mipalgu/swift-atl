@@ -19,6 +19,7 @@ A pure Swift implementation of the Eclipse Atlas Transformation Language (ATL) w
 - **Resource Framework**: Integration with ECore Resource/ResourceSet for metamodel management
 - **Expression System**: 16+ expression types (literals, navigation, operations, collections, control flow)
 - **Advanced OCL**: Let expressions, tuple expressions, iterate operations, lambda expressions
+- **Reflection**: `refImmediateComposite()`, `refGetValue`, `refSetValue`, `refUnsetValue` and `refInvokeOperation` on any model element
 - **Metamodel-Qualified Types**: Full support for `MM!Type` syntax
 - **Lazy Rules**: Deferred rule execution with lazy binding resolution
 - **Helper Functions**: Context and standalone helper functions
@@ -101,11 +102,15 @@ try await xmiResource.save()
 
 ### Built-in operations
 
-Collections: `any`, `count`, `sum`, `at`, `append`, `prepend`, `insertAt`, `subSequence`, `subOrderedSet`, `including`, `excluding`, `union`, `intersection`, `indexOf`, `lastIndexOf`, `includesAll`, `excludesAll`, `isUnique`, `one`, `exists` and `forAll` (with several iterator variables), `sortedBy`, `flatten`, `reverse`, `max`, `min`, and the conversions `asSet`, `asOrderedSet`, `asSequence` and `asBag`. `first()` and `last()` return `OclUndefined` on an empty collection. Single values behave as one-element collections.
+Collections: `any`, `count`, `sum`, `at`, `append`, `prepend`, `insertAt`, `subSequence`, `subOrderedSet`, `including`, `includingAll`, `includingRange`, `excluding`, `excludingAll`, `union`, `intersection`, `symmetricDifference`, `indexOf`, `lastIndexOf`, `includesAll`, `excludesAll`, `isUnique`, `one`, `exists` and `forAll` (with several iterator variables), `sortedBy`, `flatten`, `reverse`, `max`, `min`, and the conversions `asSet`, `asOrderedSet`, `asSequence` and `asBag`. `first()` and `last()` return `OclUndefined` on an empty collection. Single values behave as one-element collections.
 
-Strings: `concat`, `substring`, `toInteger`, `toReal`, `toUpper`, `toLower`, `toSequence`, `trim`, `startsWith`, `endsWith`, `indexOf`, `lastIndexOf`, `split`, `replaceAll` and `regexReplaceAll` (positions are 1-based).
+Strings: `concat`, `substring`, `toInteger`, `toReal`, `toUpper`, `toLower`, `toSequence`, `trim`, `startsWith`, `endsWith`, `indexOf`, `lastIndexOf`, `split`, `replaceAll` and `regexReplaceAll` (positions are 1-based). `'text'.println()` prints the string to standard output.
+
+Numbers: the method form `div(n)`, `longValue()`, and the Real functions `sqrt`, `exp`, `log`, `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `toDegrees` and `toRadians`.
 
 Types: `oclIsKindOf` and `oclIsTypeOf` (over the complete supertype closure), `oclAsType`, `oclType`, `oclIsUndefined`, `MM!Class.allInstances()` and `MM!Class.allInstancesFrom('IN')`.
+
+Reflection and containment: `refImmediateComposite()` returns the object that directly contains the receiver (or `OclUndefined`); `refGetValue(name)` returns the value of the named feature; `refSetValue(name, value)` sets a feature of a target element and returns the element; `refUnsetValue(name)` resets a feature of a target element; `refInvokeOperation(name, args)` invokes the helper of that name with a sequence of arguments; `eContainer()`, `eContainingFeature()`, `eContents()` and `eAllContents()` offer the EMF spellings of container navigation (the property forms such as `obj.eContainer` also work); and `MM!Class.newInstance()` creates an element of that class in the target model bound to `MM`. Source models are read-only, so setting or unsetting a feature of a source element is an error. `debug(message)` prints `message: value` to standard error and returns the value. `writeTo` is deliberately not supported, because a transformation must not write arbitrary files.
 
 ### Helpers
 
@@ -154,6 +159,7 @@ A transformation runs in two phases. All matched rules first create their target
 - The same applies inside collections: `Sequence{a, b}`, `Set{}` and results of `collect` keep their elements, which are then resolved element by element when assigned to a multi-valued feature.
 - References to elements of the same target model are stored by identifier, references to elements that were not transformed are stored as cross-resource proxies, and a mix is stored as a mixed collection.
 - Every assignment (bindings, `target.feature <- value;` in `do` blocks and retried bindings) applies the enumeration-literal check and numeric conversion of the target feature.
+- Reading an attribute that the model leaves unset gives the feature's default value, as `eGet` does in the Eclipse Modeling Framework: the declared default, otherwise `false`, `0` or `0.0`; strings and references read as `OclUndefined`. A guard such as `not c.isAbstract` therefore holds for an element whose XMI omits the attribute.
 - `abstract`, `extends`, `unique lazy`, `entrypoint` and `endpoint` rules, `using` variables, several source patterns and imperative `do` statements are supported. Metamodels are looked up through the aliases declared in the module header, so `-- @nsURI` bindings and `thisModule` parameters work in every rule kind.
 
 ### Progress and cancellation
@@ -236,6 +242,8 @@ To use the CLI tool, install the [swift-modelling](https://github.com/mipalgu/sw
 - [x] **Cross-model References**: References to elements that were not transformed are stored as `ResourceProxy` values (URI of the source resource plus an XPath-style fragment) so that they serialise as cross-document `href`s
 - [x] **Rule Variants**: `abstract` rules, `extends` inheritance, `unique lazy` memoisation, `entrypoint` and `endpoint` rules, `using` variables and several source patterns in `from`
 - [x] **Imperative Blocks**: `do { }` sections with `target.feature <- value;`, variable declarations and assignments, `if`/`else`, `for` and expression statements
+- [x] **Reflective Operations**: `refImmediateComposite`, `refGetValue`, `refSetValue`, `refUnsetValue`, `refInvokeOperation` and the `eContainer`, `eContainingFeature`, `eContents` and `eAllContents` method forms
+- [x] **Read-only Source Models**: Setting or unsetting a feature of a source element is an error; only target elements can be modified
 
 
 ## Architecture

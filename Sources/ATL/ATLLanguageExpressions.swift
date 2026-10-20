@@ -149,7 +149,18 @@ enum ATLOperatorSemantics {
         }
     }
 
-    private static func integerDivide(_ left: (any EcoreValue)?, _ right: (any EcoreValue)?) throws
+    /// Divides two integers, discarding the remainder.
+    ///
+    /// The quotient is truncated towards zero, as in Java, which ATL builds on.
+    /// This implements both the `div` operator and the `div` operation.
+    ///
+    /// - Parameters:
+    ///   - left: The dividend.
+    ///   - right: The divisor.
+    /// - Returns: The integer quotient.
+    /// - Throws: ``ATLExecutionError/typeError(_:)`` when an operand is not an Integer, and
+    ///   ``ATLExecutionError/divisionByZero`` when the divisor is zero.
+    static func integerDivide(_ left: (any EcoreValue)?, _ right: (any EcoreValue)?) throws
         -> Int
     {
         guard let dividend = left as? Int, let divisor = right as? Int else {

@@ -292,6 +292,78 @@ a and b                           -- Boolean logic
 if cond then x else y endif       -- Conditionals
 ```
 
+### Reflection and Containment
+
+Standard OCL cannot navigate from an object to the object that contains it unless the
+metamodel declares an opposite reference. ATL offers `refImmediateComposite()` for this
+purpose, but it is an engine extension that not every ATL virtual machine provides (EMFTVM
+in particular lacks it). Transformation authors therefore often thread parents through
+helper parameters, or declare `eOpposite` references in the metamodel purely for the
+transformation. This implementation supports `refImmediateComposite()` and the EMF
+spellings `eContainer()`, `eContainingFeature()`, `eContents()` and `eAllContents()`, so
+a transformation over a metamodel with plain containment can ask an element for its
+container directly. For example, a transition in a nested arrangement of state machines
+can find the machine that owns it:
+
+```atl
+module Machines2Flat;
+create OUT : MM from IN : MM;
+
+helper context MM!Transition def : owner : MM!Machine =
+    self.refImmediateComposite();
+
+rule Transition2Edge {
+    from
+        t : MM!Transition
+    to
+        e : MM!Edge (
+            machineName <- t.owner.name,
+            parent <- t.refImmediateComposite()
+        )
+}
+```
+
+The `refGetValue`, `refSetValue` and `refUnsetValue` operations read and modify features
+by name. Source models are read-only, so these setters apply only to target elements;
+setting a feature of a source element is an error.
+
+```atl
+rule Machine2Node {
+    from
+        m : MM!Machine
+    to
+        n : MM!Node
+    do {
+        n.refSetValue('label', m.refGetValue('name'));
+        n.refUnsetValue('comment');
+    }
+}
+```
+
+`refInvokeOperation` calls the helper of the given name on the receiver with a sequence
+of arguments, which is useful when the helper to call is chosen at run time:
+
+```atl
+helper context MM!Machine def : scaled(factor : Integer) : Integer =
+    self.size * factor;
+
+rule Machine2Scaled {
+    from
+        m : MM!Machine
+    to
+        n : MM!Node (
+            size <- m.refInvokeOperation('scaled', Sequence {2})
+        )
+}
+```
+
+`MM!Class.newInstance()` creates a new element of that class in the target model bound to
+`MM`, for use in called rules and `do` blocks.
+
+`debug(message)` prints `message: value` to standard error and returns the value, which
+makes it convenient for inspecting an expression in place. `writeTo` is intentionally not
+supported, since a transformation must not write arbitrary files.
+
 ## Best Practices
 
 1. **Keep rules simple**: One rule per concept mapping
@@ -299,6 +371,7 @@ if cond then x else y endif       -- Conditionals
 3. **Guard early**: Use guards to filter, not conditional bindings
 4. **Name outputs**: Give meaningful names to output pattern elements
 5. **Test incrementally**: Verify rules work before adding complexity
+6. **Ask for the container**: Prefer `refImmediateComposite()` over threading parents through helper parameters, or adding `eOpposite` references to the metamodel only for the transformation
 
 ## Next Steps
 

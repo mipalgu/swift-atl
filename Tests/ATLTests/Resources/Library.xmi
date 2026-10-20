@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<library:Library xmi:version="2.0" xmlns:xmi="http://www.omg.org/XMI" xmlns:library="http://swift-atl.test/library" name="City Library">
+  <shelves name="Fiction">
+    <books title="Dune" pages="412"/>
+    <books title="Emma" pages="474"/>
+  </shelves>
+  <shelves name="Science">
+    <books title="Cosmos" pages="396"/>
+  </shelves>
+</library:Library>

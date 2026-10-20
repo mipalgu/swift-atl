@@ -19,13 +19,15 @@ enum ATLOperation: String {
     case indexOf, lastIndexOf, asSet, asOrderedSet, asSequence, asBag
     case flatten, first, last, reverse
     case max, min
+    case symmetricDifference, includingAll, includingRange, excludingAll
 
     // Strings
     case concat, substring, toInteger, toReal, toUpper, toLower, toUpperCase, toLowerCase
     case toSequence, trim, startsWith, endsWith, split, replaceAll, regexReplaceAll
 
     // Numbers
-    case abs, floor, round
+    case abs, floor, round, div, longValue
+    case sqrt, exp, log, sin, cos, tan, asin, acos, atan, toDegrees, toRadians
 
     // Models
     case allInstances, allInstancesFrom
@@ -37,7 +39,9 @@ enum ATLOperation: String {
 /// implement ATL semantics: collections keep their elements and order, the
 /// undefined value is a legitimate result, single values convert implicitly to
 /// one-element collections, and contextual helpers declared for a specific
-/// type take precedence over built-in operations of the same name.
+/// type take precedence over built-in operations of the same name. Helpers
+/// declared for `OclAny` take precedence over the reflective operations of
+/// ``ATLReflectiveOperations``, which ATL defines for `OclAny` as well.
 @MainActor
 enum ATLBuiltinOperations {
 
@@ -82,8 +86,15 @@ enum ATLBuiltinOperations {
                 value: try await context.invokeContextHelper(
                     helper, receiver: receiver, arguments: arguments))
         }
-        return nil
+        return try await ATLReflectiveOperations.evaluate(
+            methodName: methodName, receiver: receiver, arguments: arguments, context: context)
     }
+
+    /// The largest number of integers that `includingRange` adds in one call.
+    ///
+    /// A longer range is reported as an error rather than built, so that a
+    /// transformation cannot exhaust the memory of the process with one call.
+    nonisolated static let maximumRangeLength = 1_000_000
 
     // MARK: - Dispatch
 
@@ -117,6 +128,20 @@ enum ATLBuiltinOperations {
 
     // MARK: - Collections
 
+    /// Evaluates a collection operation without iterator variables.
+    ///
+    /// The result has the kind of the receiver, with one exception:
+    /// `symmetricDifference` is a set operation, so on a Sequence or a Bag
+    /// receiver it yields a Set (an ordered set receiver yields an ordered set).
+    ///
+    /// - Parameters:
+    ///   - operation: The operation.
+    ///   - receiver: The receiver; a single value acts as a one-element collection
+    ///     and the undefined value as an empty one.
+    ///   - arguments: The evaluated arguments.
+    /// - Returns: The result, or `nil` when the operation does not take that many
+    ///   arguments or does not apply to the receiver.
+    /// - Throws: ``ATLExecutionError`` when an argument is invalid.
     private static func collectionOperation(
         _ operation: ATLOperation, _ receiver: (any EcoreValue)?, _ arguments: [(any EcoreValue)?]
     ) throws -> ATLBuiltinResult? {
@@ -195,9 +220,129 @@ enum ATLBuiltinOperations {
             return result(ATLCollections.make(kind: kind, flattened(items)))
         case (.reverse, 0):
             return result(ATLCollections.make(kind: kind, Array(items.reversed())))
+        case (.symmetricDifference, 1):
+            let other = ATLCollections.elements(of: arguments[0])
+            let difference =
+                items.filter { !ATLValues.contains(other, $0) }
+                + other.filter { !ATLValues.contains(items, $0) }
+            return result(
+                ATLCollections.make(
+                    kind: kind.isUnique ? kind : .set, ATLValues.removingDuplicates(difference)))
+        case (.includingAll, 1):
+            let additions = ATLCollections.elements(of: arguments[0])
+            return result(ATLCollections.make(kind: kind, including(additions, in: items, kind)))
+        case (.includingAll, 2):
+            let additions = ATLCollections.elements(of: arguments[0])
+            return result(try inserting(additions, into: items, at: arguments[1], kind: kind))
+        case (.includingRange, 2):
+            let range = try integerRange(arguments[0], arguments[1])
+            return result(ATLCollections.make(kind: kind, including(range, in: items, kind)))
+        case (.excludingAll, 1):
+            let removals = ATLCollections.elements(of: arguments[0])
+            return result(
+                ATLCollections.make(kind: kind, items.filter { !ATLValues.contains(removals, $0) }))
         default:
             return nil
         }
+    }
+
+    /// Appends elements to the elements of a collection.
+    ///
+    /// A collection that permits duplicates receives every addition. A set or an
+    /// ordered set receives only the additions it does not already hold, so that
+    /// it stays free of duplicates and keeps the position of its existing elements.
+    ///
+    /// - Parameters:
+    ///   - additions: The elements to append, in order.
+    ///   - items: The elements of the receiving collection.
+    ///   - kind: The kind of the receiving collection.
+    /// - Returns: The elements of the extended collection.
+    private static func including(
+        _ additions: [any EcoreValue], in items: [any EcoreValue], _ kind: ATLCollectionKind
+    ) -> [any EcoreValue] {
+        guard kind.isUnique else { return items + additions }
+        var result = items
+        for element in additions where !ATLValues.contains(result, element) {
+            result.append(element)
+        }
+        return result
+    }
+
+    /// Appends a range of integers to the elements of a collection.
+    ///
+    /// A set or an ordered set receives only the integers it does not already
+    /// hold, compared numerically as ``ATLValues/areEqual(_:_:)`` compares them.
+    ///
+    /// - Parameters:
+    ///   - range: The integers to append, in ascending order and without duplicates.
+    ///   - items: The elements of the receiving collection.
+    ///   - kind: The kind of the receiving collection.
+    /// - Returns: The elements of the extended collection.
+    private static func including(
+        _ range: ClosedRange<Int>?, in items: [any EcoreValue], _ kind: ATLCollectionKind
+    ) -> [any EcoreValue] {
+        guard let range else { return items }
+        guard kind.isUnique else { return items + range.map { $0 as any EcoreValue } }
+        let held = Set(
+            items.compactMap { item -> Int? in
+                if let integer = item as? Int { return integer }
+                return (item as? Double).flatMap { Int(exactly: $0) }
+            })
+        return items + range.filter { !held.contains($0) }.map { $0 as any EcoreValue }
+    }
+
+    /// The range of integers from a lower to an upper bound, both included.
+    ///
+    /// - Parameters:
+    ///   - lower: The first integer of the range.
+    ///   - upper: The last integer of the range.
+    /// - Returns: The range, or `nil` when `upper` is less than `lower`.
+    /// - Throws: ``ATLExecutionError`` when a bound is not an Integer or the range holds
+    ///   more than ``maximumRangeLength`` integers.
+    private static func integerRange(_ lower: (any EcoreValue)?, _ upper: (any EcoreValue)?) throws
+        -> ClosedRange<Int>?
+    {
+        let low = try integer(lower, .includingRange)
+        let high = try integer(upper, .includingRange)
+        guard low <= high else { return nil }
+        let (span, overflow) = high.subtractingReportingOverflow(low)
+        guard !overflow, span < maximumRangeLength else {
+            throw ATLExecutionError.runtimeError(
+                "\(ATLOperation.includingRange.rawValue)(\(low), \(high)) would add more than \(maximumRangeLength) integers")
+        }
+        return low...high
+    }
+
+    /// Inserts elements into a collection at a one-based position.
+    ///
+    /// The elements are inserted in order before the element at `position`; the
+    /// position after the last element appends them. A set or an ordered set
+    /// receives only the additions it does not already hold.
+    ///
+    /// - Parameters:
+    ///   - additions: The elements to insert, in order.
+    ///   - items: The elements of the receiving collection.
+    ///   - position: The one-based position of the first inserted element.
+    ///   - kind: The kind of the receiving collection.
+    /// - Returns: The extended collection, of the receiver's kind.
+    /// - Throws: ``ATLExecutionError`` when the position is not an Integer within
+    ///   `1...(items.count + 1)`.
+    private static func inserting(
+        _ additions: [any EcoreValue], into items: [any EcoreValue], at position: (any EcoreValue)?,
+        kind: ATLCollectionKind
+    ) throws -> any EcoreValue {
+        let index = try integer(position, .includingAll)
+        guard (1...(items.count + 1)).contains(index) else {
+            throw ATLExecutionError.runtimeError(
+                "includingAll() index \(index) is outside 1...\(items.count + 1)")
+        }
+        let inserted =
+            kind.isUnique
+            ? including(additions, in: [], kind).filter { !ATLValues.contains(items, $0) }
+            : additions
+        var result = items
+        result.insert(contentsOf: inserted, at: index - 1)
+        return ATLCollections.make(kind: kind, result)
     }
 
     private static func ordered(
@@ -297,7 +442,9 @@ enum ATLBuiltinOperations {
     private static func numberOperation(
         _ operation: ATLOperation, _ receiver: (any EcoreValue)?, _ arguments: [(any EcoreValue)?]
     ) throws -> ATLBuiltinResult? {
-        guard receiver is Int || receiver is Double else { return nil }
+        guard let real = (receiver as? Int).map(Double.init) ?? (receiver as? Double) else {
+            return nil
+        }
 
         switch (operation, arguments.count) {
         case (.abs, 0):
@@ -318,8 +465,53 @@ enum ATLBuiltinOperations {
                 ? !ATLValues.isOrderedBefore(receiver, arguments[0])
                 : ATLValues.isOrderedBefore(receiver, arguments[0])
             return result(receiverWins ? receiver : arguments[0])
+        case (.div, 1):
+            return result(try ATLOperatorSemantics.integerDivide(receiver, arguments[0]))
+        case (.longValue, 0):
+            if let value = receiver as? Int { return result(value) }
+            return result(try truncated(real))
         default:
-            return nil
+            guard arguments.isEmpty, let function = realFunction(operation) else { return nil }
+            return result(function(real))
+        }
+    }
+
+    /// Converts a real to an integer by discarding its fractional part.
+    ///
+    /// - Parameter value: The real to convert.
+    /// - Returns: The integer part of `value`.
+    /// - Throws: ``ATLExecutionError/runtimeError(_:)`` when `value` is not a number or
+    ///   lies outside the range of Integer.
+    private static func truncated(_ value: Double) throws -> Int {
+        guard let integer = Int(exactly: value.rounded(.towardZero)) else {
+            throw ATLExecutionError.runtimeError(
+                "\(ATLOperation.longValue.rawValue)() cannot represent \(value) as an Integer")
+        }
+        return integer
+    }
+
+    /// The function computed by a Real operation of the ATL standard library.
+    ///
+    /// The functions follow the Java `Math` library that ATL builds on: `log` is the
+    /// natural logarithm, the trigonometric functions use radians, and arguments
+    /// outside a function's domain yield not-a-number.
+    ///
+    /// - Parameter operation: The operation.
+    /// - Returns: The function, or `nil` when `operation` is not a Real function.
+    private static func realFunction(_ operation: ATLOperation) -> ((Double) -> Double)? {
+        switch operation {
+        case .sqrt: return { $0.squareRoot() }
+        case .exp: return { exp($0) }
+        case .log: return { log($0) }
+        case .sin: return { sin($0) }
+        case .cos: return { cos($0) }
+        case .tan: return { tan($0) }
+        case .asin: return { asin($0) }
+        case .acos: return { acos($0) }
+        case .atan: return { atan($0) }
+        case .toDegrees: return { $0 * 180 / .pi }
+        case .toRadians: return { $0 * .pi / 180 }
+        default: return nil
         }
     }
 
@@ -711,5 +903,309 @@ enum ATLTypeOperations {
             return eClass
         }
         return ATLTypeMatching.typeName(of: value)
+    }
+}
+
+/// The reflective, console and creation operations of the ATL standard library.
+///
+/// The raw value is the operation name as written in ATL expressions.
+enum ATLReflectiveOperation: String {
+    /// `refImmediateComposite()`: the element that directly contains the receiver.
+    case refImmediateComposite
+
+    /// `refGetValue(name)`: the value of the named feature of the receiver.
+    case refGetValue
+
+    /// `refSetValue(name, value)`: sets the named feature of a target element.
+    case refSetValue
+
+    /// `refUnsetValue(name)`: resets the named feature of a target element.
+    case refUnsetValue
+
+    /// `refInvokeOperation(name, arguments)`: calls the named helper on the receiver.
+    case refInvokeOperation
+
+    /// `debug(message)`: writes the message and the receiver to standard error.
+    case debug
+
+    /// `println()`: writes a string to standard output.
+    case println
+
+    /// `MM!Class.newInstance()`: creates an element in a target model.
+    case newInstance
+}
+
+/// The destinations of the text written by the console operations of a transformation.
+///
+/// `debug` writes to the error destination and `println` to the output destination,
+/// so that diagnostic text never mixes with text a transformation generates.
+struct ATLConsole {
+    /// Writes one line of text to the output destination.
+    let writeOutput: @MainActor (String) -> Void
+
+    /// Writes one line of text to the error destination.
+    let writeError: @MainActor (String) -> Void
+
+    /// The console that writes to the standard output and standard error of the process.
+    static var system: ATLConsole { writing(errorsTo: .standardError) }
+
+    /// A console that prints output lines and writes error lines to a file handle.
+    ///
+    /// Output lines are printed, so that they keep their order with other text the
+    /// process prints. A line that cannot be written to the error destination, for
+    /// example because it has been closed, is dropped.
+    ///
+    /// - Parameter errors: The destination of the error lines.
+    /// - Returns: The console.
+    static func writing(errorsTo errors: FileHandle) -> ATLConsole {
+        ATLConsole(
+            writeOutput: { print($0) },
+            writeError: { try? errors.write(contentsOf: Data(($0 + "\n").utf8)) })
+    }
+}
+
+/// Evaluation of the reflective operations that ATL defines for every value.
+///
+/// These operations read and change model elements by feature name, navigate
+/// the containment structure, invoke helpers by name, write to the console and
+/// create target elements. Writing operations apply only to target elements,
+/// because source models are read-only in ATL.
+@MainActor
+enum ATLReflectiveOperations {
+
+    /// Evaluates a reflective operation.
+    ///
+    /// The method forms `eContainer()`, `eContainingFeature()`, `eContents()` and
+    /// `eAllContents()` of the containment properties are evaluated here as well.
+    ///
+    /// - Parameters:
+    ///   - methodName: The operation name.
+    ///   - receiver: The evaluated receiver, or `nil` for the undefined value.
+    ///   - arguments: The evaluated arguments.
+    ///   - context: The execution context.
+    /// - Returns: The result, or `nil` when the operation does not apply to the receiver
+    ///   and the number of arguments.
+    /// - Throws: ``ATLExecutionError`` when an argument has the wrong type, a source
+    ///   element would be changed, or the operation itself fails.
+    static func evaluate(
+        methodName: String,
+        receiver: (any EcoreValue)?,
+        arguments: [(any EcoreValue)?],
+        context: ATLExecutionContext
+    ) async throws -> ATLBuiltinResult? {
+        if arguments.isEmpty, let property = EObjectNavigationProperty(rawValue: methodName),
+            let object = receiver as? any EObject
+        {
+            return result(try await context.navigate(from: object, property: property.rawValue))
+        }
+        guard let operation = ATLReflectiveOperation(rawValue: methodName) else { return nil }
+
+        switch (operation, arguments.count) {
+        case (.debug, 1):
+            let message = try string(arguments[0], operation)
+            context.console.writeError("\(message): \(render(receiver))")
+            return result(receiver)
+        case (.println, 0):
+            guard let text = receiver as? String else { return nil }
+            context.console.writeOutput(text)
+            return result(text)
+        case (.newInstance, 0):
+            guard let typeName = receiver as? String else { return nil }
+            return result(try await newInstance(of: typeName, context: context))
+        case (.refInvokeOperation, 2):
+            guard let receiver else { return nil }
+            let name = try string(arguments[0], operation)
+            return result(
+                try await invoke(
+                    name, on: receiver, arguments: ATLCollections.elements(of: arguments[1]),
+                    context: context))
+        default:
+            break
+        }
+
+        guard let object = receiver as? any EObject else { return nil }
+        switch (operation, arguments.count) {
+        case (.refImmediateComposite, 0):
+            return result(
+                try await context.navigate(
+                    from: object, property: EObjectNavigationProperty.eContainer.rawValue))
+        case (.refGetValue, 1):
+            let name = try string(arguments[0], operation)
+            return result(try await context.navigate(from: object, property: name))
+        case (.refSetValue, 2):
+            let name = try string(arguments[0], operation)
+            let target = try await writableTarget(object, feature: name, operation, context)
+            try await context.assignFeature(on: target, feature: name, value: arguments[1])
+            return result(object)
+        case (.refUnsetValue, 1):
+            let name = try string(arguments[0], operation)
+            let target = try await writableTarget(object, feature: name, operation, context)
+            try await context.assignFeature(
+                on: target, feature: name, value: unsetValue(of: name, in: target))
+            return result(object)
+        default:
+            return nil
+        }
+    }
+
+    /// Renders a value as the console operations write it.
+    ///
+    /// Strings are quoted, the undefined value is written as `OclUndefined`,
+    /// collections are written as collection literals such as `Sequence{1, 2}`,
+    /// and model elements by their class followed by their quoted name, if they
+    /// have one.
+    ///
+    /// - Parameter value: The value to render, or `nil` for the undefined value.
+    /// - Returns: The text that represents the value.
+    static func render(_ value: (any EcoreValue)?) -> String {
+        let quote = ATLLanguage.stringDelimiter
+        if let kind = ATLCollections.kind(of: value) {
+            let elements = ATLCollections.elements(of: value).map { render($0) }
+            return "\(kind.rawValue){\(elements.joined(separator: ", "))}"
+        }
+        switch value {
+        case nil:
+            return ATLLanguage.UndefinedLiteral.oclUndefined
+        case let text as String:
+            return "\(quote)\(text)\(quote)"
+        case let object as any EObject:
+            let classifier: any EClassifier = object.eClass
+            guard let name = elementName(of: object) else { return classifier.name }
+            return "\(classifier.name) \(quote)\(name)\(quote)"
+        case let value?:
+            return "\(value)"
+        }
+    }
+
+    // MARK: - Implementation
+
+    /// Wraps the value of an operation that applies.
+    ///
+    /// - Parameter value: The value, or `nil` for the undefined value.
+    /// - Returns: The result that marks the operation as evaluated.
+    private static func result(_ value: (any EcoreValue)?) -> ATLBuiltinResult {
+        ATLBuiltinResult(value: value)
+    }
+
+    /// The String value of an argument.
+    ///
+    /// - Parameters:
+    ///   - value: The argument.
+    ///   - operation: The operation the argument is passed to.
+    /// - Returns: The string.
+    /// - Throws: ``ATLExecutionError/typeError(_:)`` when the argument is not a String.
+    private static func string(_ value: (any EcoreValue)?, _ operation: ATLReflectiveOperation)
+        throws -> String
+    {
+        guard let string = value as? String else {
+            throw ATLExecutionError.typeError("\(operation.rawValue)() requires a String argument")
+        }
+        return string
+    }
+
+    /// The name of a model element, if it has one.
+    ///
+    /// - Parameter object: The model element.
+    /// - Returns: The value of its name feature, or `nil` when it has none.
+    private static func elementName(of object: any EObject) -> String? {
+        if let named = object as? any ENamedElement { return named.name }
+        return (object as? DynamicEObject)?.eGet(ATLLanguage.namePropertyName) as? String
+    }
+
+    /// The current state of a target element that an operation is about to change.
+    ///
+    /// - Parameters:
+    ///   - object: The element to change.
+    ///   - feature: The name of the feature to change.
+    ///   - operation: The changing operation.
+    ///   - context: The execution context.
+    /// - Returns: The element as currently held by its target model.
+    /// - Throws: ``ATLExecutionError/invalidOperation(_:)`` when the element is not part
+    ///   of a target model, as source models are read-only.
+    private static func writableTarget(
+        _ object: any EObject, feature: String, _ operation: ATLReflectiveOperation,
+        _ context: ATLExecutionContext
+    ) async throws -> any EObject {
+        guard let target = await context.findTargetObject(object.id) else {
+            throw ATLExecutionError.invalidOperation(
+                "\(operation.rawValue)() cannot change '\(feature)': the element is not part of a target model, and source models are read-only"
+            )
+        }
+        return target
+    }
+
+    /// The value that resets a feature of an element.
+    ///
+    /// A many-valued feature is reset to an empty collection. A single-valued
+    /// attribute is reset to its default value or, without one, to the default of
+    /// its type, such as zero or `false`; any other feature is reset to the
+    /// undefined value.
+    ///
+    /// - Parameters:
+    ///   - name: The feature name.
+    ///   - object: The element that owns the feature.
+    /// - Returns: The resetting value, or `nil` when the element has no such feature.
+    private static func unsetValue(of name: String, in object: any EObject) -> (any EcoreValue)? {
+        let classifier: any EClassifier = object.eClass
+        guard let feature = (classifier as? EClass)?.getStructuralFeature(name: name) else {
+            return nil
+        }
+        return EcoreDefaultValue.value(for: feature)
+    }
+
+    /// Calls a helper by name on a receiver.
+    ///
+    /// The contextual helper whose context type is closest to the receiver's type
+    /// is preferred, including one declared for `OclAny`. Otherwise a context-free
+    /// helper of that name is called with `self` bound to the receiver.
+    ///
+    /// - Parameters:
+    ///   - name: The helper name.
+    ///   - receiver: The receiver value.
+    ///   - arguments: The arguments of the helper.
+    ///   - context: The execution context.
+    /// - Returns: The value of the helper.
+    /// - Throws: ``ATLExecutionError/helperNotFound(_:)`` when no helper of that name
+    ///   applies, or the error of the helper body.
+    private static func invoke(
+        _ name: String, on receiver: any EcoreValue, arguments: [any EcoreValue],
+        context: ATLExecutionContext
+    ) async throws -> (any EcoreValue)? {
+        let values = arguments.map { Optional($0) }
+        if let helper = context.bestContextHelper(
+            named: name, receiver: receiver, argumentCount: values.count, includingOclAny: true)
+        {
+            return try await context.invokeContextHelper(helper, receiver: receiver, arguments: values)
+        }
+        guard context.globalHelper(named: name) != nil else {
+            throw ATLExecutionError.helperNotFound(name)
+        }
+        context.pushScope()
+        defer { context.popScope() }
+        context.setVariable(ATLLanguage.selfVariable, value: receiver)
+        return try await context.callHelper(name, arguments: values)
+    }
+
+    /// Creates an element of a qualified class in the target model of its metamodel.
+    ///
+    /// When several target models share the metamodel, the element is created in
+    /// the first of them, which is the default target model of that metamodel.
+    ///
+    /// - Parameters:
+    ///   - typeName: The class qualified by its metamodel, such as `MM!Class`.
+    ///   - context: The execution context.
+    /// - Returns: The created element.
+    /// - Throws: ``ATLExecutionError`` when the type is not qualified, its metamodel is
+    ///   not the metamodel of a target model, or the class does not exist.
+    private static func newInstance(of typeName: String, context: ATLExecutionContext)
+        async throws -> any EObject
+    {
+        let components = typeName.split(separator: ATLLanguage.metamodelSeparator, maxSplits: 1)
+        guard components.count == 2 else {
+            throw ATLExecutionError.typeError(
+                "\(ATLReflectiveOperation.newInstance.rawValue)() requires a class qualified by its metamodel, such as MM\(ATLLanguage.metamodelSeparator)Class, but found '\(typeName)'"
+            )
+        }
+        return try await context.createElement(type: typeName, in: String(components[0]))
     }
 }

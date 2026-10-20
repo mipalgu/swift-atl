@@ -1,0 +1,57 @@
+-- @path Library=Library.ecore
+-- @path Catalogue=Catalogue.ecore
+
+-- Builds a catalogue from a library with the reflective operations of the
+-- ATL standard library: refGetValue reads a feature by name,
+-- refImmediateComposite finds the container of an element,
+-- refInvokeOperation calls a helper by name, and refSetValue and
+-- refUnsetValue change a feature of a target element by name.
+module ReflectiveOperations;
+create OUT : Catalogue from IN : Library;
+
+-- The label of a book, invoked reflectively by name.
+helper context Library!Book def : label(prefix : String) : String =
+	prefix + self.refGetValue('title');
+
+-- The name of the shelf that holds a book.
+helper context Library!Book def : shelfName : String =
+	self.refImmediateComposite().refGetValue('name');
+
+rule Library2Catalogue {
+	from
+		l : Library!Library
+	to
+		c : Catalogue!Catalogue (
+			name <- l.refGetValue('name'),
+			sections <- l.shelves
+		)
+}
+
+rule Shelf2Section {
+	from
+		s : Library!Shelf
+	to
+		t : Catalogue!Section (
+			name <- s.refGetValue('name'),
+			entries <- s.books
+		)
+}
+
+rule Book2Entry {
+	from
+		b : Library!Book
+	to
+		e : Catalogue!Entry (
+			title <- b.refInvokeOperation('label', Sequence{'Book: '}),
+			shelf <- b.shelfName,
+			note <- 'unchecked'
+		)
+	do {
+		-- The section and the catalogue contain the entry by now, because
+		-- their bindings have been applied before those of the entries.
+		e.refSetValue('location',
+			e.refImmediateComposite().refImmediateComposite().refGetValue('name')
+				+ '/' + e.refImmediateComposite().refGetValue('name'));
+		e.refUnsetValue('note');
+	}
+}
