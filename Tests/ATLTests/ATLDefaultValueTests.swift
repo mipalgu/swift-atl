@@ -87,17 +87,23 @@ struct DefaultValueFixture {
         }
         """
 
-    /// Runs the transformation over a source model.
+    /// Runs a transformation over a source model.
     ///
-    /// - Parameter sourceResource: The source model.
+    /// - Parameters:
+    ///   - sourceResource: The source model.
+    ///   - mode: How the virtual machine reads unset features.
+    ///   - text: The transformation to run.
     /// - Returns: The reports created by the transformation.
-    func run(over sourceResource: Resource) async throws -> [DynamicEObject] {
-        let parsed = try await ATLParser().parseContent(Self.transformation)
+    func run(
+        over sourceResource: Resource, mode: UnsetFeatureReads = .defaults,
+        transformation text: String = transformation
+    ) async throws -> [DynamicEObject] {
+        let parsed = try await ATLParser().parseContent(text)
         let module = ATLModule(
             name: parsed.name, sourceMetamodels: ["IN": source], targetMetamodels: ["OUT": target],
             helpers: parsed.helpers, matchedRules: parsed.matchedRules)
         let targetResource = Resource(uri: "test://out")
-        try await ATLVirtualMachine(module: module).execute(
+        try await ATLVirtualMachine(module: module, unsetFeatureReads: mode).execute(
             sources: ["IN": sourceResource], targets: ["OUT": targetResource])
         return await targetResource.getAllObjects().compactMap { $0 as? DynamicEObject }
     }
@@ -180,5 +186,58 @@ struct ATLDefaultValueTests {
         let elements = try #require(result.collectionElements)
         #expect(elements.first as? Double == 0.0)
         #expect(elements.last as? Bool == true)
+    }
+
+    @Test("The virtual machine reports how it reads unset features")
+    func modeProperty() {
+        let fixture = DefaultValueFixture()
+        let module = ATLModule(
+            name: "Empty", sourceMetamodels: ["IN": fixture.source],
+            targetMetamodels: ["OUT": fixture.target])
+        #expect(ATLVirtualMachine(module: module).unsetFeatureReads == .defaults)
+        #expect(
+            ATLVirtualMachine(module: module, unsetFeatureReads: .undefined).unsetFeatureReads
+                == .undefined)
+        #expect(
+            ATLVirtualMachine(module: module, enableDebugging: true, unsetFeatureReads: .defaults)
+                .unsetFeatureReads == .defaults)
+    }
+
+    @Test("The undefined mode reads an unset attribute as OclUndefined")
+    func undefinedModeReadsUndefined() async throws {
+        let fixture = DefaultValueFixture()
+        var item = DynamicEObject(eClass: fixture.item)
+        item.eSet("name", value: "built")
+        let resource = Resource(uri: "test://cfg")
+        await resource.add(item)
+        let reports = try await fixture.run(
+            over: resource, mode: .undefined,
+            transformation: """
+                module Undefined;
+                create OUT : Out from IN : Cfg;
+                rule Item2Report {
+                    from i : Cfg!Item
+                    to r : Out!Report (
+                        name <- i.name,
+                        open <- i.flag.oclIsUndefined(),
+                        noteMissing <- i.note.oclIsUndefined()
+                    )
+                }
+                """)
+        let report = try #require(reports.first)
+        #expect(report.eGet("open") as? Bool == true)
+        #expect(report.eGet("noteMissing") as? Bool == true)
+    }
+
+    @Test("The undefined mode rejects a guard that negates an unset Boolean")
+    func undefinedModeGuard() async throws {
+        let fixture = DefaultValueFixture()
+        var item = DynamicEObject(eClass: fixture.item)
+        item.eSet("name", value: "built")
+        let resource = Resource(uri: "test://cfg")
+        await resource.add(item)
+        await #expect(throws: ATLExecutionError.self) {
+            try await fixture.run(over: resource, mode: .undefined)
+        }
     }
 }

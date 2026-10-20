@@ -75,6 +75,13 @@ public final class ATLVirtualMachine {
     /// Debug mode flag for systematic tracing.
     private var debug: Bool = false
 
+    /// How transformations executed by this machine read features that the model leaves unset.
+    ///
+    /// ``UnsetFeatureReads/defaults`` gives the default value of the feature, as the
+    /// Eclipse Modeling Framework does. ``UnsetFeatureReads/undefined`` gives `OclUndefined`.
+    /// The mode is fixed when the machine is created.
+    public let unsetFeatureReads: UnsetFeatureReads
+
     /// The monitor of the run in progress, if any.
     private var monitor: ATLRunMonitor?
 
@@ -85,11 +92,19 @@ public final class ATLVirtualMachine {
     /// - Parameters:
     ///   - module: The ATL module to execute
     ///   - enableDebugging: Whether to enable debug output for systematic tracing
-    public init(module: ATLModule, enableDebugging: Bool = false) {
+    ///   - unsetFeatureReads: How navigation reads a feature that the model leaves unset.
+    ///     The default, ``UnsetFeatureReads/defaults``, gives the feature's default value as
+    ///     the Eclipse Modeling Framework does; ``UnsetFeatureReads/undefined`` gives
+    ///     `OclUndefined` instead.
+    public init(
+        module: ATLModule, enableDebugging: Bool = false,
+        unsetFeatureReads: UnsetFeatureReads = .defaults
+    ) {
         self.module = module
+        self.unsetFeatureReads = unsetFeatureReads
 
         // Create execution engine with empty models initially
-        let executionEngine = ECoreExecutionEngine(models: [:])
+        let executionEngine = ECoreExecutionEngine(models: [:], unsetFeatureReads: unsetFeatureReads)
 
         executionContext = ATLExecutionContext(
             module: module,
@@ -151,7 +166,9 @@ public final class ATLVirtualMachine {
     /// Navigation reads an unset single-valued attribute as its default value
     /// literal or, without one, as the default of its type (`false` or zero), as
     /// the Eclipse Modeling Framework does; unset strings and references read as
-    /// `OclUndefined`.
+    /// `OclUndefined`. A machine created with ``UnsetFeatureReads/undefined``
+    /// instead reads every unset feature as `OclUndefined`; see
+    /// ``unsetFeatureReads``.
     ///
     /// A cancelled run throws `CancellationError` and does not report the
     /// finished phase. The target models are left partly populated with the
@@ -190,8 +207,8 @@ public final class ATLVirtualMachine {
         try executionContext.setModuleParameters(parameters)
         executionContext.clearAttributeHelperCache()
 
-        // Read unset attributes as their defaults, as EMF does, then register the models
-        await executionContext.executionEngine.enableDefaultValues()
+        // Apply the unset feature mode, then register the models
+        await executionContext.executionEngine.setUnsetFeatureReads(unsetFeatureReads)
         for (alias, resource) in sources {
             await executionContext.addSource(alias, resource: resource)
         }
