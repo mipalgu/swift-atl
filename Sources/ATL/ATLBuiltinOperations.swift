@@ -8,6 +8,15 @@
 import ECore
 import EMFBase
 import Foundation
+#if canImport(Glibc)
+import Glibc
+#elseif canImport(Musl)
+import Musl
+#elseif canImport(WASILibc)
+import WASILibc
+#elseif canImport(Darwin)
+import Darwin
+#endif
 
 /// The built-in operations that are evaluated without iterator variables.
 ///
@@ -962,10 +971,10 @@ struct ATLConsole {
 
 /// A text output stream that writes to the standard error of the process.
 ///
-/// The text is written through the C library, which every platform provides,
-/// including WebAssembly, where file handles cannot be created. Text that
-/// standard error cannot take, for example because it has been closed, is
-/// dropped instead of stopping the transformation.
+/// The text is written to the standard error descriptor through the C library,
+/// which every platform provides, including WebAssembly, where file handles
+/// cannot be created. Text that standard error cannot take, for example because
+/// it has been closed, is dropped instead of stopping the transformation.
 struct ATLStandardErrorStream: TextOutputStream {
     /// Writes text to standard error.
     ///
@@ -974,10 +983,30 @@ struct ATLStandardErrorStream: TextOutputStream {
         #if os(Windows)
         try? FileHandle.standardError.write(contentsOf: Data(string.utf8))
         #else
-        fputs(string, stderr)
+        writeToStandardErrorDescriptor(Array(string.utf8))
         #endif
     }
 }
+
+#if !os(Windows)
+/// Writes bytes to the standard error descriptor of the process.
+///
+/// The bytes are written in as many calls as the descriptor accepts. The
+/// remainder is dropped when a call writes nothing or fails, so that a closed
+/// or unwritable standard error never stops the caller.
+///
+/// - Parameter bytes: The bytes to write.
+private func writeToStandardErrorDescriptor(_ bytes: [UInt8]) {
+    var remaining = bytes[...]
+    while !remaining.isEmpty {
+        let written = remaining.withUnsafeBytes { buffer in
+            write(STDERR_FILENO, buffer.baseAddress, buffer.count)
+        }
+        guard written > 0 else { return }
+        remaining = remaining.dropFirst(written)
+    }
+}
+#endif
 
 /// Evaluation of the reflective operations that ATL defines for every value.
 ///
