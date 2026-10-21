@@ -1,13 +1,12 @@
-/*
- * ATLDebugTests.swift
- *
- * Debug tests for isolating ATL parsing issues.
- * These tests help identify specific parsing failures in ATL syntax.
- *
- * Created by Swift Modelling Framework
- * Copyright © 2024 Swift Modelling. All rights reserved.
- */
-
+//
+//  ATLDebugTests.swift
+//  ATLTests
+//
+//  Created by Rene Hexel on 7/12/2025.
+//  Copyright © 2025 Rene Hexel. All rights reserved.
+//
+//  Tests that isolate individual ATL parsing constructs.
+//
 import Foundation
 import Testing
 

@@ -2,7 +2,7 @@
 //  ATLExpressionRoundTripTests.swift
 //  ATL
 //
-//  Created by Claude on 10/12/2025.
+//  Created by Rene Hexel on 10/12/2025.
 //  Copyright © 2025 Rene Hexel. All rights reserved.
 //
 //  Tests round-trip serialization/parsing of ATL/OCL expressions.
