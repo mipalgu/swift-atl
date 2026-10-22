@@ -78,6 +78,9 @@ public final class ATLExecutionContext: Sendable {
     /// Helper functions registered for this context.
     var helpers: [String: any ATLHelperType] = [:]
 
+    /// Helpers implemented in Swift, which take precedence over module helpers.
+    var nativeHelpers: [ATLNativeHelper] = []
+
     /// Values of attribute helpers that have been computed, keyed by helper and receiver.
     var attributeHelperCache: [ATLAttributeCacheKey: ATLCachedValue] = [:]
 
@@ -341,6 +344,10 @@ public final class ATLExecutionContext: Sendable {
             return try await resolveTemp(arguments)
         }
 
+        if let native = nativeHelper(named: name, receiver: nil, argumentCount: arguments.count) {
+            return try await invokeNativeHelper(native, receiver: nil, arguments: arguments)
+        }
+
         guard let helper = globalHelper(named: name) else {
             throw ATLExecutionError.helperNotFound(name)
         }
@@ -373,8 +380,15 @@ public final class ATLExecutionContext: Sendable {
 
     /// Register a helper function.
     ///
+    /// A ``ATLNativeHelper`` is added to the native helpers, which take precedence
+    /// over module helpers.
+    ///
     /// - Parameter helper: Helper to register
     public func registerHelper(_ helper: any ATLHelperType) {
+        if let native = helper as? ATLNativeHelper {
+            addNativeHelper(native)
+            return
+        }
         helpers[helper.name] = helper
     }
 
@@ -393,6 +407,10 @@ public final class ATLExecutionContext: Sendable {
     public func dispatchThisModuleMethod(_ name: String, arguments: [(any EcoreValue)?]) async throws -> (any EcoreValue)? {
         if name == ATLReservedNames.resolveTemp {
             return try await resolveTemp(arguments)
+        }
+
+        if let native = nativeHelper(named: name, receiver: nil, argumentCount: arguments.count) {
+            return try await invokeNativeHelper(native, receiver: nil, arguments: arguments)
         }
 
         // Try called rules first via the virtual machine
@@ -415,6 +433,9 @@ public final class ATLExecutionContext: Sendable {
     public func dispatchThisModuleAttribute(_ name: String) async throws -> (any EcoreValue)? {
         if let parameter = try moduleParameterValue(named: name) {
             return parameter.value
+        }
+        if let native = nativeHelper(named: name, receiver: nil, argumentCount: 0) {
+            return try await invokeNativeHelper(native, receiver: nil, arguments: [])
         }
         guard let helper = globalHelper(named: name) as? ATLHelperWrapper else {
             if helpers[name] != nil || module.helperOverloads[name] != nil {

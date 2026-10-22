@@ -116,6 +116,20 @@ Reflection and containment: `refImmediateComposite()` returns the object that di
 
 Contextual helpers are keyed by context type and name. A call dispatches on the dynamic type of the receiver, and the most specific context type wins, so `helper context A def : f()` and `helper context B def : f()` coexist. Helpers declared without a parameter list (`def : name : Type = ...`) are attributes whose value is computed once per receiver.
 
+### Native helpers
+
+A host application can supply native helpers, implemented as closures rather than in ATL. A helper with a context type is called on a receiver (`s.render('x')`); one without is called by name (`greet('a')` or `thisModule.greet('a')`). Helpers are found by name and number of arguments, and contextual ones by the dynamic type of the receiver. A native helper takes precedence over a module helper of the same name, so a host can override it. An error thrown by the body is reported as an execution error that names the helper.
+
+```swift
+let greet = ATLNativeHelper(
+    name: "greet", parameterTypes: ["String"], returnType: "String"
+) { _, arguments in
+    "hello \(arguments.first.flatMap { $0 as? String } ?? "")"
+}
+let machine = ATLVirtualMachine(module: module, nativeHelpers: [greet])
+machine.register(otherHelper)  // helpers can also be added later
+```
+
 ### Binding metamodels
 
 A metamodel named in the module header is bound, in order of precedence, by:

@@ -96,9 +96,12 @@ public final class ATLVirtualMachine {
     ///     The default, ``UnsetFeatureReads/defaults``, gives the feature's default value as
     ///     the Eclipse Modeling Framework does; ``UnsetFeatureReads/undefined`` gives
     ///     `OclUndefined` instead.
+    ///   - nativeHelpers: Helpers implemented in Swift that the transformation can call.
+    ///     They take precedence over module helpers of the same name; see ``ATLNativeHelper``.
     public init(
         module: ATLModule, enableDebugging: Bool = false,
-        unsetFeatureReads: UnsetFeatureReads = .defaults
+        unsetFeatureReads: UnsetFeatureReads = .defaults,
+        nativeHelpers: [ATLNativeHelper] = []
     ) {
         self.module = module
         self.unsetFeatureReads = unsetFeatureReads
@@ -114,6 +117,17 @@ public final class ATLVirtualMachine {
         debug = enableDebugging
         // Wire back-reference so helpers and expressions can invoke called rules
         executionContext.virtualMachine = self
+        for helper in nativeHelpers { executionContext.addNativeHelper(helper) }
+    }
+
+    /// Registers a helper implemented in Swift.
+    ///
+    /// The helper replaces an earlier native helper with the same name, context type and
+    /// number of parameters, and takes precedence over module helpers of that name.
+    ///
+    /// - Parameter helper: The helper that transformations executed by this machine can call.
+    public func register(_ helper: ATLNativeHelper) {
+        executionContext.addNativeHelper(helper)
     }
 
     // MARK: - Debug Configuration

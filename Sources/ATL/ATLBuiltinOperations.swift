@@ -70,6 +70,15 @@ enum ATLBuiltinOperations {
         context: ATLExecutionContext
     ) async throws -> ATLBuiltinResult? {
         if let receiver,
+            let native = context.nativeHelper(
+                named: methodName, receiver: receiver, argumentCount: arguments.count)
+        {
+            return ATLBuiltinResult(
+                value: try await context.invokeNativeHelper(
+                    native, receiver: receiver, arguments: arguments))
+        }
+
+        if let receiver,
             let helper = context.bestContextHelper(
                 named: methodName, receiver: receiver, argumentCount: arguments.count,
                 includingOclAny: false)
@@ -1216,6 +1225,11 @@ enum ATLReflectiveOperations {
         context: ATLExecutionContext
     ) async throws -> (any EcoreValue)? {
         let values = arguments.map { Optional($0) }
+        if let native = context.nativeHelper(
+            named: name, receiver: receiver, argumentCount: values.count)
+        {
+            return try await context.invokeNativeHelper(native, receiver: receiver, arguments: values)
+        }
         if let helper = context.bestContextHelper(
             named: name, receiver: receiver, argumentCount: values.count, includingOclAny: true)
         {

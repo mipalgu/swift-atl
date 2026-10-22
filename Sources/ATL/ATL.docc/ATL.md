@@ -75,6 +75,7 @@ let tableModel = result.targetModels["OUT"]
 - ``ATLCalledRule``
 - ``ATLLazyRule``
 - ``ATLHelper``
+- ``ATLNativeHelper``
 
 ### Patterns and Bindings
 

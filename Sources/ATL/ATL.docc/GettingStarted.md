@@ -177,6 +177,20 @@ helper context MM!Transition def: owner : MM!Machine =
     self.refImmediateComposite();
 ```
 
+## Using Native Helpers
+
+A host application can supply native helpers, implemented as closures rather than in ATL. A helper with a context type is called on a receiver (`s.render('x')`); one without is called by name (`greet('a')` or `thisModule.greet('a')`). Helpers are found by name and number of arguments, and contextual ones by the dynamic type of the receiver. A native helper takes precedence over a module helper of the same name, so a host can override it. An error thrown by the body is reported as an execution error that names the helper. See ``ATLNativeHelper``.
+
+```swift
+let greet = ATLNativeHelper(
+    name: "greet", parameterTypes: ["String"], returnType: "String"
+) { _, arguments in
+    "hello \(arguments.first.flatMap { $0 as? String } ?? "")"
+}
+let machine = ATLVirtualMachine(module: module, nativeHelpers: [greet])
+machine.register(otherHelper)  // helpers can also be added later
+```
+
 ## Using Called Rules
 
 Called rules are invoked explicitly rather than matched:
