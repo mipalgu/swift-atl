@@ -178,8 +178,10 @@ enum ATLValueConversion {
     ///
     /// Set and ordered set values become plain arrays, because models store
     /// collections as arrays. Values of many-valued attributes are stored as
-    /// typed arrays (`[String]`, `[Int]`, `[Double]` or `[Bool]`), and a single
-    /// value becomes a one-element array. For attributes typed by an
+    /// typed arrays (`[String]`, `[Int]`, `[Double]` or `[Bool]`). A collection
+    /// assigned to a many-valued attribute contributes its elements, nested
+    /// collections are flattened by one level, and a single value becomes a
+    /// one-element array. For attributes typed by an
     /// enumeration, the value must name one of the enumeration's literals, by
     /// name or by literal text (an integer is mapped to the literal with that
     /// value); the literal name is stored. Integers assigned to real attributes
@@ -204,11 +206,9 @@ enum ATLValueConversion {
         if attribute.isMany {
             if let enumeration {
                 return EcoreValueArray(
-                    try (prepared as? EcoreValueArray)?.values.map {
-                        try literal($0, in: enumeration)
-                    } ?? [literal(prepared, in: enumeration)])
+                    try flattened(prepared).map { try literal($0, in: enumeration) })
             }
-            let elements = (prepared as? EcoreValueArray)?.values ?? [prepared]
+            let elements = flattened(prepared)
             return try manyValued(
                 elements.map { try convert($0, for: attribute, enumeration: enumeration) },
                 of: attribute)
@@ -237,6 +237,18 @@ enum ATLValueConversion {
             return (value as? ATLCollectionValue)?.asEcoreValueArray ?? value as? (any EcoreValue)
         }
         return try prepare(value, for: feature)
+    }
+
+    /// Lists the elements a value contributes to a many-valued feature.
+    ///
+    /// A collection, including a typed array such as `[String]`, contributes its
+    /// elements, and a collection nested within it (as produced by `collect`)
+    /// contributes its elements in turn, so that nesting is flattened by one
+    /// level. A single value contributes itself.
+    private static func flattened(_ value: any EcoreValue) -> [any EcoreValue] {
+        ATLCollections.elements(of: value).flatMap { element -> [any EcoreValue] in
+            ATLCollections.isCollection(element) ? ATLCollections.elements(of: element) : [element]
+        }
     }
 
     private static func convert(
