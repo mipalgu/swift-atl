@@ -2,7 +2,7 @@
 //  ATLNativeHelper.swift
 //  ATL
 //
-//  Created by Rene Hexel on 24/10/2026.
+//  Created by Rene Hexel on 23/10/2026.
 //  Copyright © 2026 Rene Hexel. All rights reserved.
 //
 import EMFBase
