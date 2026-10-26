@@ -219,6 +219,24 @@ rule Class2Table {
 }
 ```
 
+## Running a Query
+
+A query unit computes a value from its input models instead of creating a target
+model. Parse it as a module and evaluate it with
+``ATLVirtualMachine/evaluateQuery(sources:parameters:)``. A query that writes its
+result with `writeTo` needs a file output policy, because writing files is disabled
+by default:
+
+```swift
+let query = try await ATLParser().parse(URL(fileURLWithPath: "LibraryGraph.atl"))
+let vm = ATLVirtualMachine(
+    module: query, fileOutput: .confined(to: URL(fileURLWithPath: "output")))
+let written = try await vm.evaluateQuery(sources: ["Library": libraryModel])
+```
+
+See <doc:UnderstandingATL> for how input models are named and how file paths are
+resolved.
+
 ## Debugging Transformations
 
 Enable debugging to trace execution:

@@ -95,6 +95,9 @@ struct ATLDirectives {
     /// Metamodel names bound to namespace URIs.
     var namespaceURIs: [String: String] = [:]
 
+    /// The metamodel names bound by `@path` or `@nsURI` directives, in order of first appearance.
+    var metamodelNames: [String] = []
+
     /// The declared module parameters in declaration order.
     var parameters: [ATLModuleParameter] = []
 
@@ -134,6 +137,7 @@ struct ATLDirectives {
         let name = String(components[0]).trimmingCharacters(in: .whitespacesAndNewlines)
         let value = String(components[1]).trimmingCharacters(in: .whitespacesAndNewlines)
         self[keyPath: keyPath][name] = value
+        if !metamodelNames.contains(name) { metamodelNames.append(name) }
     }
 
     private mutating func recordParameter(_ body: String) {
