@@ -85,6 +85,17 @@ public final class ATLVirtualMachine {
     /// The monitor of the run in progress, if any.
     private var monitor: ATLRunMonitor?
 
+    /// Where the `writeTo` and `writeToWithCharset` string operations may write files.
+    ///
+    /// Writing files is disabled by default (``ATLFileOutputPolicy/disabled``), so a
+    /// transformation or query that calls either operation fails with an execution
+    /// error until the host enables file output, for example with
+    /// ``ATLFileOutputPolicy/confined(to:)``. The policy applies to every later run.
+    public var fileOutput: ATLFileOutputPolicy {
+        get { executionContext.fileOutput }
+        set { executionContext.fileOutput = newValue }
+    }
+
     // MARK: - Initialisation
 
     /// Creates a new ATL virtual machine for the specified module.
@@ -98,10 +109,13 @@ public final class ATLVirtualMachine {
     ///     `OclUndefined` instead.
     ///   - nativeHelpers: Helpers implemented in Swift that the transformation can call.
     ///     They take precedence over module helpers of the same name; see ``ATLNativeHelper``.
+    ///   - fileOutput: Where the `writeTo` and `writeToWithCharset` operations may write
+    ///     files. The default, ``ATLFileOutputPolicy/disabled``, rejects every write.
     public init(
         module: ATLModule, enableDebugging: Bool = false,
         unsetFeatureReads: UnsetFeatureReads = .defaults,
-        nativeHelpers: [ATLNativeHelper] = []
+        nativeHelpers: [ATLNativeHelper] = [],
+        fileOutput: ATLFileOutputPolicy = .disabled
     ) {
         self.module = module
         self.unsetFeatureReads = unsetFeatureReads
@@ -117,6 +131,7 @@ public final class ATLVirtualMachine {
         debug = enableDebugging
         // Wire back-reference so helpers and expressions can invoke called rules
         executionContext.virtualMachine = self
+        executionContext.fileOutput = fileOutput
         for helper in nativeHelpers { executionContext.addNativeHelper(helper) }
     }
 
@@ -281,6 +296,76 @@ public final class ATLVirtualMachine {
                 print("[ATL] Transformation failed: \(error)")
             }
 
+            throw error
+        }
+    }
+
+    // MARK: - Query Evaluation
+
+    /// Evaluates the query of a query unit and returns its value.
+    ///
+    /// The input models are bound as the source models of a module are: each model
+    /// is given under the name that the unit declares for it. A parsed query unit
+    /// declares one model for each metamodel named by its `-- @path` or `-- @nsURI`
+    /// directives, under the name of the metamodel; use
+    /// ``ATLModule/declaringSourceModels(_:metamodels:)`` before creating the machine
+    /// to give the models other names. The helpers of the unit are available to the
+    /// query, directly and through `thisModule`, and the declared `-- @param`
+    /// parameters are available as `thisModule.<name>`.
+    ///
+    /// The value is that of the query expression. A query that ends with
+    /// `writeTo(path)` therefore yields `true`, as in Eclipse ATL, and writes its
+    /// file as ``fileOutput`` permits.
+    ///
+    /// - Parameters:
+    ///   - sources: The input models indexed by the model names the unit declares.
+    ///   - parameters: Values for the parameters declared with `-- @param`, by name.
+    /// - Returns: The value of the query, or `nil` for `OclUndefined`.
+    /// - Throws: ``ATLExecutionError/invalidOperation(_:)`` when the unit is not a query,
+    ///   a declared model is missing or a model is not declared, and any execution
+    ///   error of the query expression.
+    public func evaluateQuery(
+        sources: OrderedDictionary<String, Resource>,
+        parameters: [String: any EcoreValue] = [:]
+    ) async throws -> (any EcoreValue)? {
+        guard let body = module.queryBody else {
+            throw ATLExecutionError.invalidOperation(
+                "Module '\(module.name)' is not a query unit; execute it as a transformation")
+        }
+        if let undeclared = sources.keys.first(where: { module.sourceMetamodels[$0] == nil }) {
+            let declared = module.sourceMetamodels.keys.joined(separator: ", ")
+            throw ATLExecutionError.invalidOperation(
+                "Query '\(module.name)' does not declare an input model '\(undeclared)' (declared: \(declared.isEmpty ? "none" : declared))"
+            )
+        }
+        if debug {
+            print("[ATL] Evaluating query: \(module.name)")
+            print("[ATL] Input models: \(sources.keys.joined(separator: ", "))")
+        }
+
+        statistics.reset()
+        let startTime = Date()
+        try validateModelAliases(sources: sources, targets: [:])
+        try executionContext.setModuleParameters(parameters)
+        executionContext.clearAttributeHelperCache()
+        await executionContext.executionEngine.setUnsetFeatureReads(unsetFeatureReads)
+        for (alias, resource) in sources {
+            await executionContext.addSource(alias, resource: resource)
+        }
+
+        do {
+            executionContext.resetTransformationState()
+            let value = try await body.evaluate(in: executionContext)
+            statistics.executionTime = Date().timeIntervalSince(startTime)
+            statistics.successful = true
+            return value
+        } catch {
+            statistics.executionTime = Date().timeIntervalSince(startTime)
+            statistics.successful = false
+            statistics.lastError = error
+            if debug {
+                print("[ATL] Query failed: \(error)")
+            }
             throw error
         }
     }
@@ -748,6 +833,8 @@ public final class ATLVirtualMachine {
     // MARK: - Validation
 
     /// Validates that model aliases match module specifications.
+    ///
+    /// A query unit has no target models, so only its source models are validated.
     ///
     /// - Parameters:
     ///   - sources: Source models to validate

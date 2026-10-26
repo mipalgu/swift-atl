@@ -924,7 +924,7 @@ enum ATLTypeOperations {
     }
 }
 
-/// The reflective, console and creation operations of the ATL standard library.
+/// The reflective, console, file and creation operations of the ATL standard library.
 ///
 /// The raw value is the operation name as written in ATL expressions.
 enum ATLReflectiveOperation: String {
@@ -949,8 +949,33 @@ enum ATLReflectiveOperation: String {
     /// `println()`: writes a string to standard output.
     case println
 
+    /// `writeTo(path)`: writes a string to a file in UTF-8 and returns `true`.
+    case writeTo
+
+    /// `writeToWithCharset(path, charset)`: writes a string to a file in a charset and returns `true`.
+    case writeToWithCharset
+
     /// `MM!Class.newInstance()`: creates an element in a target model.
     case newInstance
+}
+
+/// The text that represents ATL values.
+///
+/// Hosts use it to show the value of a query or an expression as ATL writes it.
+public enum ATLValueText {
+    /// Renders a value as the console operations of ATL write it.
+    ///
+    /// Strings are quoted, the undefined value is written as `OclUndefined`,
+    /// collections are written as collection literals such as `Sequence{1, 2}`,
+    /// and model elements by their class followed by their quoted name, if they
+    /// have one.
+    ///
+    /// - Parameter value: The value to render, or `nil` for the undefined value.
+    /// - Returns: The text that represents the value.
+    @MainActor
+    public static func render(_ value: (any EcoreValue)?) -> String {
+        ATLReflectiveOperations.render(value)
+    }
 }
 
 /// The destinations of the text written by the console operations of a transformation.
@@ -1020,7 +1045,8 @@ private func writeToStandardErrorDescriptor(_ bytes: [UInt8]) {
 /// Evaluation of the reflective operations that ATL defines for every value.
 ///
 /// These operations read and change model elements by feature name, navigate
-/// the containment structure, invoke helpers by name, write to the console and
+/// the containment structure, invoke helpers by name, write to the console, write
+/// strings to files as the ``ATLExecutionContext/fileOutput`` policy permits, and
 /// create target elements. Writing operations apply only to target elements,
 /// because source models are read-only in ATL.
 @MainActor
@@ -1062,6 +1088,19 @@ enum ATLReflectiveOperations {
             guard let text = receiver as? String else { return nil }
             context.console.writeOutput(text)
             return result(text)
+        case (.writeTo, 1):
+            guard let text = receiver as? String else { return nil }
+            let path = try string(arguments[0], operation)
+            return result(
+                try context.fileOutput.write(
+                    text, to: path, charset: nil, operation: operation.rawValue))
+        case (.writeToWithCharset, 2):
+            guard let text = receiver as? String else { return nil }
+            let path = try string(arguments[0], operation)
+            let charset = try string(arguments[1], operation)
+            return result(
+                try context.fileOutput.write(
+                    text, to: path, charset: charset, operation: operation.rawValue))
         case (.newInstance, 0):
             guard let typeName = receiver as? String else { return nil }
             return result(try await newInstance(of: typeName, context: context))

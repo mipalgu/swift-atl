@@ -1,0 +1,17 @@
+-- @path Library=Library.ecore
+
+-- Describes a library as a Graphviz graph, with an edge from each shelf to
+-- each of its books, and writes the description to library.dot.
+query LibraryGraph =
+	('digraph ' + Library!Library.allInstances()->first().name.quoted() + ' {\n'
+		+ Library!Shelf.allInstances()->iterate(s; text : String = '' | text + s.edges)
+		+ '}\n').writeTo('library.dot');
+
+-- The edges from a shelf to its books, one per line.
+helper context Library!Shelf def : edges : String =
+	self.books->iterate(b; text : String = '' |
+		text + '  ' + self.name.quoted() + ' -> ' + b.title.quoted() + ';\n');
+
+-- A string in double quotes, as Graphviz writes identifiers.
+helper context String def : quoted() : String =
+	'"' + self + '"';

@@ -42,8 +42,17 @@ public enum ATLParseError: Error, Sendable {
 /// - **Context helpers**: `helper context Type def : helperName() : Type = expression;`
 /// - **Matched rules**: `rule RuleName { from ... to ... }`
 /// - **Called rules**: `rule RuleName(params) { to ... }`
-/// - **Queries**: `query QueryName = expression;`
+/// - **Queries**: `query QueryName = expression;`, inside a module or heading a query unit
 /// - **Expressions**: literals, variables, operations, navigation
+///
+/// ## Query Units
+///
+/// A source that starts with `query Name = expression;` instead of a module header is
+/// a query unit. It may contain helpers but no `create` statement and no rules, and it
+/// is returned as an ``ATLModule`` whose ``ATLModule/kind`` is ``ATLUnitKind/query``.
+/// The metamodels named by its `-- @path` and `-- @nsURI` directives become its source
+/// metamodels, each under its own name. Inside a module, a `query` declaration is
+/// read as a context-free helper.
 ///
 /// ## Example Usage
 ///
@@ -106,6 +115,7 @@ public actor ATLParser {
         let parser = ATLSyntaxParser(tokens: tokens, filename: filename)
 
         var module = try parser.parseModule().withParameters(lexer.directives.parameters)
+            .declaringDirectiveMetamodels(lexer.directives.metamodelNames)
 
         // Bind metamodels from @nsURI directives and the registry
         let registryBinding = try bindRegistryMetamodels(
@@ -169,6 +179,7 @@ public actor ATLParser {
 
         if let parsed = module {
             var bound = parsed.withParameters(lexer.directives.parameters)
+                .declaringDirectiveMetamodels(lexer.directives.metamodelNames)
             var aliases: Set<String> = []
             if let binding = try? bindRegistryMetamodels(
                 of: bound, directives: lexer.directives, registry: metamodelRegistry,
@@ -527,6 +538,23 @@ public actor ATLParser {
     }
 }
 
+// MARK: - Query Unit Metamodels
+
+extension ATLModule {
+    /// Declares the metamodels named by directives as the source metamodels of a query unit.
+    ///
+    /// A query unit has no `from` clause, so each metamodel named by an `@path` or
+    /// `@nsURI` directive becomes a source metamodel under its own name, with a
+    /// placeholder package that the directives then bind. A module is returned unchanged.
+    ///
+    /// - Parameter names: The metamodel names in the order the directives name them.
+    /// - Returns: The unit with its directive metamodels declared.
+    fileprivate func declaringDirectiveMetamodels(_ names: [String]) -> ATLModule {
+        guard isQuery, sourceMetamodels.isEmpty, !names.isEmpty else { return self }
+        return declaringSourceModels(OrderedDictionary(uniqueKeysWithValues: names.map { ($0, $0) }))
+    }
+}
+
 // MARK: - ATL Syntax Parser
 
 /// A declaration header that the outline records for a declaration being parsed.
@@ -592,10 +620,16 @@ private class ATLSyntaxParser {
         let firstIndex = position
         var moduleName: String?
         var moduleSelection: SourceRange?
+        var queryBody: (any ATLExpression)?
+        let isQueryUnit = currentToken()?.type == .keyword("query")
 
         let headerStart = position
         do {
-            if let name = try parseModuleDeclaration() {
+            if isQueryUnit {
+                moduleName = try queryUnitName()
+                moduleSelection = tokens[headerStart + 1].range
+                queryBody = try parseQueryUnitBody()
+            } else if let name = try parseModuleDeclaration() {
                 moduleName = name
                 moduleSelection = tokens[headerStart + 1].range
             } else if recovering {
@@ -607,6 +641,9 @@ private class ATLSyntaxParser {
             guard recovering else { throw error }
             record(error, at: position)
             recoverToDeclaration(startedAt: headerStart)
+            if isQueryUnit, moduleName != nil {
+                queryBody = ATLLiteralExpression(value: nil, origin: origin(from: headerStart))
+            }
         }
 
         var sourceMetamodels: OrderedDictionary<String, EPackage> = [:]
@@ -618,7 +655,7 @@ private class ATLSyntaxParser {
         var declarationNodes: [OutlineNode] = []
 
         // Parse create statement if present
-        if currentToken()?.type == .keyword("create") {
+        if !isQueryUnit, currentToken()?.type == .keyword("create") {
             let createStart = position
             do {
                 let (source, target) = try parseCreateStatement()
@@ -643,6 +680,10 @@ private class ATLSyntaxParser {
                         $0.contextType == helper.contextType
                     }
                     helperOverloads[helper.name, default: []].append(helper)
+                } else if isQueryUnit, startsRuleDeclaration() || startsQueryOrCreate() {
+                    throw ATLParseError.invalidSyntax(
+                        "A query unit contains only its query and helpers; found \(describeDeclaration()) at \(describe(tokens[position]))"
+                    )
                 } else if startsRuleDeclaration() {
                     let rule = try parseRuleDeclaration()
                     if let matchedRule = rule as? ATLMatchedRule {
@@ -672,11 +713,11 @@ private class ATLSyntaxParser {
             }
         }
 
-        // Create default metamodels if none specified
-        if sourceMetamodels.isEmpty {
+        // Create default metamodels if none specified; a query unit declares none
+        if !isQueryUnit, sourceMetamodels.isEmpty {
             sourceMetamodels["IN"] = EPackage(name: "DefaultSource", nsURI: "http://default.source")
         }
-        if targetMetamodels.isEmpty {
+        if !isQueryUnit, targetMetamodels.isEmpty {
             targetMetamodels["OUT"] = EPackage(
                 name: "DefaultTarget", nsURI: "http://default.target")
         }
@@ -686,10 +727,11 @@ private class ATLSyntaxParser {
             outline = declarationNodes
             return nil
         }
+        let unitKind = isQueryUnit ? ATLOutlineKind.query : ATLOutlineKind.module
         outline = [
             OutlineNode(
-                id: Self.outlineIdentifier(kind: ATLOutlineKind.module, name: moduleName),
-                kind: ATLOutlineKind.module, name: moduleName, range: moduleRange,
+                id: Self.outlineIdentifier(kind: unitKind, name: moduleName),
+                kind: unitKind, name: moduleName, range: moduleRange,
                 selectionRange: moduleSelection, children: declarationNodes)
         ]
 
@@ -701,8 +743,50 @@ private class ATLSyntaxParser {
             matchedRules: matchedRules,
             calledRules: calledRules,
             helperOverloads: helperOverloads,
-            origin: SourceOrigin(moduleRange)
+            origin: SourceOrigin(moduleRange),
+            queryBody: queryBody
         )
+    }
+
+    /// Reads the name of a query unit from its `query Name` header.
+    ///
+    /// - Returns: The name of the query.
+    /// - Throws: ``ATLParseError/invalidModuleName(_:)`` when the name is missing.
+    private func queryUnitName() throws -> String {
+        consumeKeyword("query")
+        guard let nameToken = currentToken(), case .identifier(let name) = nameToken.type else {
+            throw ATLParseError.invalidModuleName("Expected query name")
+        }
+        advance()
+        return name
+    }
+
+    /// Parses the body of the query that heads a query unit: `= expression;`.
+    ///
+    /// Unlike a query inside a module, the `=` and the closing `;` are required.
+    ///
+    /// - Returns: The query expression.
+    /// - Throws: ``ATLParseError`` when the body is malformed.
+    private func parseQueryUnitBody() throws -> any ATLExpression {
+        guard consumeOperator("=") else {
+            throw ATLParseError.invalidSyntax("Expected '=' after the query name")
+        }
+        let body = try parseExpression()
+        guard consumePunctuation(";") else {
+            throw ATLParseError.invalidSyntax("Expected ';' after the query expression")
+        }
+        return body
+    }
+
+    /// Whether the current token starts a query or a `create` statement.
+    private func startsQueryOrCreate() -> Bool {
+        currentToken()?.type == .keyword("query") || currentToken()?.type == .keyword("create")
+    }
+
+    /// Describes the declaration that starts at the current token for use in messages.
+    private func describeDeclaration() -> String {
+        guard let token = currentToken() else { return "the end of the source" }
+        return "'\(token.value)'"
     }
 
     private func parseModuleDeclaration() throws -> String? {

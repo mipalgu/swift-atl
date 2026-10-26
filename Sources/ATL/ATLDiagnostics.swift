@@ -19,7 +19,7 @@ public enum ATLDiagnosticCode: String, Sendable, CaseIterable, Hashable {
     /// A declaration or expression is malformed.
     case invalidSyntax = "atl.invalidSyntax"
 
-    /// The source has no module declaration.
+    /// The source has neither a module declaration nor a query that heads a query unit.
     case missingModule = "atl.missingModule"
 
     /// The name in the module declaration is missing or malformed.
@@ -77,7 +77,7 @@ extension ATLParseError {
             .metamodelNotFound(let message):
             return message
         case .missingModule:
-            return "The source has no module declaration"
+            return "The source has no module or query declaration"
         case .invalidEncoding:
             return "The source is not valid UTF-8 text"
         }

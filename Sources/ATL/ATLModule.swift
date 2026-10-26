@@ -38,6 +38,17 @@ import OrderedCollections
 /// )
 /// ```
 ///
+/// ## Query Units
+///
+/// The same type represents an ATL query unit, which starts with
+/// `query Name = expression;` instead of a module header and contains only helpers
+/// besides its query. A query unit has a ``queryBody``, its ``kind`` is
+/// ``ATLUnitKind/query``, it has no target metamodels, and its source metamodels are
+/// the metamodels named by its `-- @path` and `-- @nsURI` directives, each under its
+/// own name. Use ``declaringSourceModels(_:metamodels:)`` to bind input models with
+/// other names, and ``ATLVirtualMachine/evaluateQuery(sources:parameters:)`` to
+/// evaluate the query.
+///
 /// - Note: ATL modules are designed as immutable value types to enable safe concurrent
 ///   processing and transformation execution across multiple actors.
 public struct ATLModule: Sendable, Equatable, Hashable {
@@ -107,6 +118,21 @@ public struct ATLModule: Sendable, Equatable, Hashable {
     /// declared in the header, which need not equal the name of the bound package.
     public let declaredMetamodelNames: [String: String]
 
+    /// The expression of the query that heads a query unit, or `nil` for a module.
+    ///
+    /// The expression is evaluated by
+    /// ``ATLVirtualMachine/evaluateQuery(sources:parameters:)``, and its value is the
+    /// result of the query.
+    public let queryBody: (any ATLExpression)?
+
+    /// The kind of unit: a transformation module or a query.
+    ///
+    /// A unit with a ``queryBody`` is a query unit; every other unit is a module.
+    public var kind: ATLUnitKind { queryBody == nil ? .module : .query }
+
+    /// Whether the unit is a query unit.
+    public var isQuery: Bool { queryBody != nil }
+
     // MARK: - Initialisation
 
     /// The source range the node was parsed from, if it was parsed.
@@ -128,10 +154,11 @@ public struct ATLModule: Sendable, Equatable, Hashable {
     ///   - parameters: The declared module parameters (default: none)
     ///   - declaredMetamodelNames: The header metamodel names by alias (default: the package names)
     ///   - origin: The source range the node was parsed from.
+    ///   - queryBody: The query expression of a query unit, or `nil` (the default) for a module.
     ///
     /// - Precondition: The module name must be a non-empty string
-    /// - Precondition: At least one source metamodel must be specified
-    /// - Precondition: At least one target metamodel must be specified
+    /// - Precondition: At least one source metamodel must be specified for a module
+    /// - Precondition: At least one target metamodel must be specified for a module
     public init(
         name: String,
         sourceMetamodels: OrderedDictionary<String, EPackage>,
@@ -142,11 +169,16 @@ public struct ATLModule: Sendable, Equatable, Hashable {
         helperOverloads: OrderedDictionary<String, [any ATLHelperType]> = [:],
         parameters: [ATLModuleParameter] = [],
         declaredMetamodelNames: [String: String]? = nil,
-        origin: SourceOrigin = .init()
+        origin: SourceOrigin = .init(),
+        queryBody: (any ATLExpression)? = nil
     ) {
         precondition(!name.isEmpty, "Module name must not be empty")
-        precondition(!sourceMetamodels.isEmpty, "At least one source metamodel must be specified")
-        precondition(!targetMetamodels.isEmpty, "At least one target metamodel must be specified")
+        precondition(
+            queryBody != nil || !sourceMetamodels.isEmpty,
+            "At least one source metamodel must be specified")
+        precondition(
+            queryBody != nil || !targetMetamodels.isEmpty,
+            "At least one target metamodel must be specified")
 
         self.name = name
         self.sourceMetamodels = sourceMetamodels
@@ -163,6 +195,7 @@ public struct ATLModule: Sendable, Equatable, Hashable {
                     + Array(targetMetamodels).map { ($0.key, $0.value.name) },
                 uniquingKeysWith: { first, _ in first })
         self.origin = origin
+        self.queryBody = queryBody
     }
 
     /// Returns a copy of this module bound to different metamodel packages.
@@ -187,7 +220,8 @@ public struct ATLModule: Sendable, Equatable, Hashable {
             helperOverloads: helperOverloads,
             parameters: parameters,
             declaredMetamodelNames: declaredMetamodelNames,
-            origin: origin
+            origin: origin,
+            queryBody: queryBody
         )
     }
 
@@ -206,7 +240,55 @@ public struct ATLModule: Sendable, Equatable, Hashable {
             helperOverloads: helperOverloads,
             parameters: parameters,
             declaredMetamodelNames: declaredMetamodelNames,
-            origin: origin
+            origin: origin,
+            queryBody: queryBody
+        )
+    }
+
+    /// Returns a copy of this unit whose source models are the given models.
+    ///
+    /// This is how the input models of a query unit are declared: a query has no
+    /// `from` clause, so its models are named when it is run, each with the name of
+    /// the metamodel it conforms to, as in `IN : Families`. Several models may conform
+    /// to the same metamodel. Type references such as `Families!Member` then resolve
+    /// to the model declared for that metamodel, `allInstances()` collects the
+    /// instances of every model of the metamodel, and `allInstancesFrom('IN')` selects
+    /// one model by name.
+    ///
+    /// The package of each metamodel is taken from `metamodels` when given there, and
+    /// otherwise from the source metamodel of this unit that has the same declared
+    /// name, such as one bound by an `@path` or `@nsURI` directive. A metamodel without
+    /// a package is represented by an empty placeholder package of that name.
+    ///
+    /// - Parameters:
+    ///   - models: The metamodel name of each source model, indexed by model name, in order.
+    ///   - metamodels: Packages to bind, indexed by metamodel name (default: none).
+    /// - Returns: The unit with its source models replaced and its target models kept.
+    public func declaringSourceModels(
+        _ models: OrderedDictionary<String, String>,
+        metamodels: [String: EPackage] = [:]
+    ) -> ATLModule {
+        var sources: OrderedDictionary<String, EPackage> = [:]
+        var declared = declaredMetamodelNames.filter { targetMetamodels[$0.key] != nil }
+        for (modelName, metamodelName) in models {
+            sources[modelName] =
+                metamodels[metamodelName]
+                ?? sourceAlias(forMetamodel: metamodelName).flatMap { sourceMetamodels[$0] }
+                ?? EPackage(name: metamodelName, nsURI: "http://\(metamodelName.lowercased())")
+            declared[modelName] = metamodelName
+        }
+        return ATLModule(
+            name: name,
+            sourceMetamodels: sources,
+            targetMetamodels: targetMetamodels,
+            helpers: helpers,
+            matchedRules: matchedRules,
+            calledRules: calledRules,
+            helperOverloads: helperOverloads,
+            parameters: parameters,
+            declaredMetamodelNames: declared,
+            origin: origin,
+            queryBody: queryBody
         )
     }
 
@@ -274,6 +356,7 @@ public struct ATLModule: Sendable, Equatable, Hashable {
             }
             && lhs.matchedRules == rhs.matchedRules
             && lhs.calledRules == rhs.calledRules
+            && lhs.queryBody.map { AnyHashable($0) } == rhs.queryBody.map { AnyHashable($0) }
     }
 
     // MARK: - Hashable
@@ -297,7 +380,23 @@ public struct ATLModule: Sendable, Equatable, Hashable {
         }
         hasher.combine(matchedRules)
         hasher.combine(calledRules.keys.sorted())
+        hasher.combine(queryBody.map { AnyHashable($0) })
     }
+}
+
+// MARK: - Unit Kind
+
+/// The kinds of ATL units.
+///
+/// An ATL source file holds one unit. A module, headed by `module Name;` and a
+/// `create` statement, transforms source models into target models. A query, headed
+/// by `query Name = expression;`, computes a single value from its input models.
+public enum ATLUnitKind: String, Sendable, Hashable, CaseIterable {
+    /// A transformation module.
+    case module
+
+    /// A query unit.
+    case query
 }
 
 // MARK: - Semantic Equality Helpers
