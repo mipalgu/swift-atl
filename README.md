@@ -104,13 +104,13 @@ try await xmiResource.save()
 
 Collections: `any`, `count`, `sum`, `at`, `append`, `prepend`, `insertAt`, `subSequence`, `subOrderedSet`, `including`, `includingAll`, `includingRange`, `excluding`, `excludingAll`, `union`, `intersection`, `symmetricDifference`, `indexOf`, `lastIndexOf`, `includesAll`, `excludesAll`, `isUnique`, `one`, `exists` and `forAll` (with several iterator variables), `sortedBy`, `flatten`, `reverse`, `max`, `min`, and the conversions `asSet`, `asOrderedSet`, `asSequence` and `asBag`. `first()` and `last()` return `OclUndefined` on an empty collection. Single values behave as one-element collections.
 
-Strings: `concat`, `substring`, `toInteger`, `toReal`, `toUpper`, `toLower`, `toSequence`, `trim`, `startsWith`, `endsWith`, `indexOf`, `lastIndexOf`, `split`, `replaceAll` and `regexReplaceAll` (positions are 1-based). `'text'.println()` prints the string to standard output.
+Strings: `concat`, `substring`, `toInteger`, `toReal`, `toUpper`, `toLower`, `toSequence`, `trim`, `startsWith`, `endsWith`, `indexOf`, `lastIndexOf`, `split`, `replaceAll` and `regexReplaceAll` (positions are 1-based). `'text'.println()` prints the string to standard output, and `'text'.writeTo('out.txt')` and `'text'.writeToWithCharset('out.txt', 'ISO-8859-1')` write it to a file when the host permits it (see [Writing files](#writing-files)).
 
 Numbers: the method form `div(n)`, `longValue()`, and the Real functions `sqrt`, `exp`, `log`, `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `toDegrees` and `toRadians`.
 
 Types: `oclIsKindOf` and `oclIsTypeOf` (over the complete supertype closure), `oclAsType`, `oclType`, `oclIsUndefined`, `MM!Class.allInstances()` and `MM!Class.allInstancesFrom('IN')`.
 
-Reflection and containment: `refImmediateComposite()` returns the object that directly contains the receiver (or `OclUndefined`); `refGetValue(name)` returns the value of the named feature; `refSetValue(name, value)` sets a feature of a target element and returns the element; `refUnsetValue(name)` resets a feature of a target element; `refInvokeOperation(name, args)` invokes the helper of that name with a sequence of arguments; `eContainer()`, `eContainingFeature()`, `eContents()` and `eAllContents()` offer the EMF spellings of container navigation (the property forms such as `obj.eContainer` also work); and `MM!Class.newInstance()` creates an element of that class in the target model bound to `MM`. Source models are read-only, so setting or unsetting a feature of a source element is an error. `debug(message)` prints `message: value` to standard error and returns the value. `writeTo` is deliberately not supported, because a transformation must not write arbitrary files.
+Reflection and containment: `refImmediateComposite()` returns the object that directly contains the receiver (or `OclUndefined`); `refGetValue(name)` returns the value of the named feature; `refSetValue(name, value)` sets a feature of a target element and returns the element; `refUnsetValue(name)` resets a feature of a target element; `refInvokeOperation(name, args)` invokes the helper of that name with a sequence of arguments; `eContainer()`, `eContainingFeature()`, `eContents()` and `eAllContents()` offer the EMF spellings of container navigation (the property forms such as `obj.eContainer` also work); and `MM!Class.newInstance()` creates an element of that class in the target model bound to `MM`. Source models are read-only, so setting or unsetting a feature of a source element is an error. `debug(message)` prints `message: value` to standard error and returns the value.
 
 ### Helpers
 
@@ -165,6 +165,48 @@ try await ATLVirtualMachine(module: module).execute(
 
 A missing required parameter, an undeclared parameter or a value of the wrong type is reported as an `ATLExecutionError`. `ATLModule.parameterValues(fromText:)` converts textual values, for example from a command line, to the declared types.
 
+### Queries
+
+A query unit computes a single value from its input models instead of creating target models. It starts with `query Name = expression;` instead of a module header and contains only helpers besides its query (no rules and no `create` statement). Its metamodels are named by `-- @path` or `-- @nsURI` directives, as in Eclipse ATL.
+
+```
+-- @path Library=Library.ecore
+query BookCount = Library!Book.allInstances()->size().toString() + ' ' + thisModule.unit;
+
+helper def : unit : String = 'books';
+```
+
+`ATLParser` returns a query unit as an `ATLModule` whose `kind` is `.query` and whose `queryBody` holds the query expression. `ATLVirtualMachine.evaluateQuery(sources:parameters:)` binds the input models, evaluates the query and returns its value. Each metamodel named by a directive is declared as an input model of the same name; `declaringSourceModels(_:metamodels:)` gives the models other names, as `IN : Library` would in a module header, and can supply metamodel packages that no directive names:
+
+```swift
+let query = try await ATLParser().parse(queryURL)
+let value = try await ATLVirtualMachine(module: query).evaluateQuery(sources: ["Library": library])
+
+// Name the model IN, so that the query can use allInstancesFrom('IN')
+let renamed = query.declaringSourceModels(["IN": "Library"])
+let count = try await ATLVirtualMachine(module: renamed).evaluateQuery(sources: ["IN": library])
+```
+
+Helpers, `thisModule` and `-- @param` parameters work in queries as they do in modules. A query whose value is a string often ends with `writeTo`, in which case its value is `true`, as in Eclipse ATL.
+
+### Writing files
+
+`writeTo(path)` writes a string to a file in UTF-8 and returns `true`; `writeToWithCharset(path, charset)` writes it in the named charset. Both replace an existing file, create missing intermediate directories and write the string exactly, without adding a line break. They work in queries, helpers, bindings and `do` blocks alike.
+
+Writing files is disabled by default: a transformation or query that calls either operation fails with an `ATLExecutionError` until the host enables file output on the virtual machine with an `ATLFileOutputPolicy`:
+
+```swift
+// Write only inside the output directory
+let vm = ATLVirtualMachine(module: query, fileOutput: .confined(to: outputDirectory))
+
+// Trusted code only: relative paths resolve against the directory, absolute paths are accepted
+vm.fileOutput = .unrestricted(relativeTo: outputDirectory)
+```
+
+A confined policy resolves relative paths against its directory and rejects absolute paths and every path that leads outside the directory, whether through `..` components or through symbolic links, with an error that names the path. Confinement protects against the transformation itself, not against other processes that can change the output directory while the transformation runs, so the output directory should not be writable by untrusted users. Eclipse ATL resolves relative paths against the workspace or the working directory of the Java process instead, and accepts any path.
+
+The charsets `UTF-8`, `UTF-16` (big-endian with a byte order mark, as Java writes it), `UTF-16BE`, `UTF-16LE`, `UTF-32`, `UTF-32BE`, `UTF-32LE`, `ISO-8859-1` and `US-ASCII` are supported, and their names are matched without regard to case. An unknown charset, or a string that the charset cannot represent, is reported as an error rather than written with substitute characters.
+
 ### Execution semantics
 
 A transformation runs in two phases. All matched rules first create their target elements (and `entrypoint` called rules run), then every binding and `do` block is applied, then failed bindings are retried and `endpoint` rules run. Rule order therefore never matters for references.
@@ -196,6 +238,7 @@ The `swift-atl` command-line tool is available in the [swift-modelling](https://
 - **analyse**: Analyse complexity metrics and transformation patterns
 - **compile**: Compile ATL transformations to optimised format (planned)
 - **transform**: Execute model transformations (in development)
+- **query**: Evaluate ATL queries and write the files they produce
 - **generate**: Generate code from models (planned)
 
 To use the CLI tool, install the [swift-modelling](https://github.com/mipalgu/swift-modelling) package.
@@ -206,6 +249,7 @@ To use the CLI tool, install the [swift-modelling](https://github.com/mipalgu/sw
 
 - [x] **ATL Parser**: Complete syntax support for all ATL constructs (96/96 tests passing)
 - [x] **Module System**: Full ATL module support with source/target metamodels
+- [x] **Query Units**: `query Name = expression;` with helpers, evaluated to a value
 - [x] **Matched Rules**: Pattern matching with guards and multiple target patterns
 - [x] **Called Rules**: Parameterised transformation rules
 - [x] **Lazy Rules**: Deferred rule execution with lazy binding resolution
@@ -258,6 +302,7 @@ To use the CLI tool, install the [swift-modelling](https://github.com/mipalgu/sw
 - [x] **Imperative Blocks**: `do { }` sections with `target.feature <- value;`, variable declarations and assignments, `if`/`else`, `for` and expression statements
 - [x] **Reflective Operations**: `refImmediateComposite`, `refGetValue`, `refSetValue`, `refUnsetValue`, `refInvokeOperation` and the `eContainer`, `eContainingFeature`, `eContents` and `eAllContents` method forms
 - [x] **Read-only Source Models**: Setting or unsetting a feature of a source element is an error; only target elements can be modified
+- [x] **File Output**: `writeTo` and `writeToWithCharset`, disabled unless the host enables them, and confined to an output directory by default
 
 
 ## Architecture

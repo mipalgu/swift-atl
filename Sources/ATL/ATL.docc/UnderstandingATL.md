@@ -34,6 +34,9 @@ rule MyRule {                               -- Rule
 }
 ```
 
+A query unit has no module declaration and no rules. It computes a single value from
+its input models, as described under Queries below.
+
 ## Rule Types
 
 ATL supports three types of rules:
@@ -361,8 +364,86 @@ rule Machine2Scaled {
 `MM`, for use in called rules and `do` blocks.
 
 `debug(message)` prints `message: value` to standard error and returns the value, which
-makes it convenient for inspecting an expression in place. `writeTo` is intentionally not
-supported, since a transformation must not write arbitrary files.
+makes it convenient for inspecting an expression in place.
+
+## Queries
+
+A query unit computes a single value from its input models. It starts with
+`query Name = expression;` instead of a module header, and contains only helpers besides
+its query: it has no `create` statement and no rules. The metamodels are named by
+`-- @path` or `-- @nsURI` directives:
+
+```atl
+-- @path Library=Library.ecore
+query BookCount =
+    Library!Book.allInstances()->select(b | b.isLong)->size().toString();
+
+helper context Library!Book def : isLong : Boolean = self.pages > 400;
+```
+
+The parser returns a query unit as an ``ATLModule`` whose ``ATLModule/kind`` is
+``ATLUnitKind/query`` and whose ``ATLModule/queryBody`` holds the query expression.
+``ATLVirtualMachine/evaluateQuery(sources:parameters:)`` binds the input models,
+evaluates the query and returns its value:
+
+```swift
+let query = try await ATLParser().parse(queryURL)
+let vm = ATLVirtualMachine(module: query)
+let count = try await vm.evaluateQuery(sources: ["Library": libraryModel])
+```
+
+A query has no `from` clause, so each metamodel named by a directive is declared as an
+input model with the name of the metamodel. ``ATLModule/declaringSourceModels(_:metamodels:)``
+declares models with other names, as `IN : Library` would in a module header, and can
+supply metamodel packages that no directive names. Type references such as
+`Library!Book` resolve through the metamodel name, `allInstances()` collects the
+instances in every model of that metamodel, and `allInstancesFrom('IN')` selects one
+model by name.
+
+Helpers, `thisModule` and `-- @param` parameters work in a query as they do in a
+module. In Eclipse ATL the value of a query is returned to the program that launched
+it, and the Eclipse launcher discards it; a query that produces text therefore usually
+ends with `writeTo`.
+
+## Writing Files
+
+`writeTo(path)` writes a string to a file in UTF-8 and returns `true`, and
+`writeToWithCharset(path, charset)` writes it in the named charset. Both replace an
+existing file, create missing intermediate directories, and write the string exactly,
+without adding a line break. They can be called anywhere a string is available: in a
+query, a helper, a binding or a `do` block.
+
+```atl
+query Graph =
+    ('digraph {\n' + Library!Shelf.allInstances()->iterate(s; text : String = '' |
+        text + '  "' + s.name + '";\n') + '}\n').writeTo('library.dot');
+```
+
+Because a transformation can come from anywhere, writing files is disabled by default.
+Both operations then fail with an ``ATLExecutionError`` until the host enables file
+output with an ``ATLFileOutputPolicy``:
+
+- ``ATLFileOutputPolicy/disabled`` (the default) rejects every write.
+- ``ATLFileOutputPolicy/confined(to:)`` resolves relative paths against a directory
+  and rejects absolute paths and every path that leads outside the directory, whether
+  through `..` components or through symbolic links. The error names the path.
+  Confinement protects against the transformation itself, not against other processes that can change the output directory while the transformation runs,
+  so the output directory should not be writable by untrusted users.
+- ``ATLFileOutputPolicy/unrestricted(relativeTo:)`` resolves relative paths against
+  a directory and accepts every other path. Use it only for trusted transformations.
+
+```swift
+let vm = ATLVirtualMachine(module: query, fileOutput: .confined(to: outputDirectory))
+```
+
+Eclipse ATL resolves a relative path against the workspace, or against the working
+directory of the Java process when it runs outside Eclipse, and accepts any path.
+
+`writeToWithCharset` accepts `UTF-8`, `UTF-16` (big-endian with a byte order mark, as
+Java writes it), `UTF-16BE`, `UTF-16LE`, `UTF-32`, `UTF-32BE`, `UTF-32LE`, `ISO-8859-1`
+and `US-ASCII`, matched without regard to case. An unknown charset, or a string that the
+charset cannot represent, is reported as an error instead of being written with
+substitute characters.
 
 ## Best Practices
 

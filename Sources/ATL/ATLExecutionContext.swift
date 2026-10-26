@@ -104,6 +104,11 @@ public final class ATLExecutionContext: Sendable {
     /// By default, `println` writes to standard output and `debug` to standard error.
     var console: ATLConsole = .system
 
+    /// Where the `writeTo` and `writeToWithCharset` string operations may write files.
+    ///
+    /// The default, ``ATLFileOutputPolicy/disabled``, makes both operations fail.
+    public var fileOutput: ATLFileOutputPolicy = .disabled
+
     /// Back-reference to the owning virtual machine for called rule dispatch.
     public weak var virtualMachine: ATLVirtualMachine?
 
@@ -299,7 +304,8 @@ public final class ATLExecutionContext: Sendable {
 
         // First try ECore navigation for actual properties
         do {
-            return try await executionEngine.navigate(from: eObject, property: property)
+            let value = try await executionEngine.navigate(from: eObject, property: property)
+            return Self.collection(value, ifManyValued: property, of: eObject)
         } catch {
             // If ECore navigation fails, try the contextual helper selected by the receiver's type
             if let helper = bestContextHelper(
@@ -321,6 +327,26 @@ public final class ATLExecutionContext: Sendable {
             // Neither property nor helper found, rethrow original error
             throw error
         }
+    }
+
+    /// Presents the value of a many-valued feature as a collection.
+    ///
+    /// A many-valued feature always yields a collection in ATL, even when it holds a
+    /// single element, which a loaded model may store as a single value.
+    ///
+    /// - Parameters:
+    ///   - value: The navigated value.
+    ///   - property: The name of the navigated feature.
+    ///   - object: The element the feature was navigated from.
+    /// - Returns: The value, wrapped in a one-element sequence for a many-valued feature.
+    private static func collection(
+        _ value: (any EcoreValue)?, ifManyValued property: String, of object: any EObject
+    ) -> (any EcoreValue)? {
+        guard let value, !ATLCollections.isCollection(value),
+            let feature = (object.eClass as? EClass)?.getStructuralFeature(name: property)
+        else { return value }
+        let isMany = (feature as? EReference)?.isMany ?? (feature as? EAttribute)?.isMany ?? false
+        return isMany ? EcoreValueArray([value]) : value
     }
 
     // MARK: - Helper Management
