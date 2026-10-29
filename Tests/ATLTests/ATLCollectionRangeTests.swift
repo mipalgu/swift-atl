@@ -56,7 +56,7 @@ struct ATLCollectionRangeParsingTests {
 
     /// Parses a query unit and returns its body.
     private func body(_ expression: String) async throws -> any ATLExpression {
-        let unit = try await ATLParser().parseContent("query Q = \(expression);")
+        let unit = try await ATLParser(options: .standard).parseContent("query Q = \(expression);")
         return try #require(unit.queryBody)
     }
 
@@ -100,7 +100,7 @@ struct ATLCollectionRangeParsingTests {
     @Test("A range records the source text it was parsed from")
     func origin() async throws {
         let source = "query Q = Sequence{0, 2..4};"
-        let unit = try await ATLParser().parseContent(source)
+        let unit = try await ATLParser(options: .standard).parseContent(source)
         let literal = try #require(unit.queryBody as? ATLCollectionLiteralExpression)
         let range = try #require(literal.elements.last as? ATLCollectionRangeExpression)
         #expect(ATLDiagnosingParserTests.slice(range.origin.range, of: source) == "2..4")
@@ -156,7 +156,7 @@ struct ATLCollectionRangeParsingTests {
     @Test("Diagnosing a malformed range points at the offending token")
     func diagnosing() async throws {
         let source = "query Q = Sequence{1..};"
-        let result = await ATLParser().parseDiagnosing(source, name: "Q.atl")
+        let result = await ATLParser(options: .standard).parseDiagnosing(source, name: "Q.atl")
         let diagnostic = try #require(result.diagnostics.first)
         #expect(diagnostic.message.contains("last value of the range"))
         #expect(ATLDiagnosingParserTests.slice(diagnostic.range, of: source) == "}")
@@ -188,7 +188,7 @@ struct ATLCollectionRangeEvaluationTests {
             ("let n : Integer = 4 in Sequence{n - 1..n}", [3, 4]),
         ])
     func expansion(expression: String, expected: [Int]) async throws {
-        let value = try await LanguageHarness.evaluate(expression)
+        let value = try await LanguageHarness.evaluate(expression, options: .standard)
         #expect(value.integers == expected)
         #expect(value.collectionElements?.count == expected.count)
     }
@@ -197,7 +197,7 @@ struct ATLCollectionRangeEvaluationTests {
         "A range literal has the kind it is written with",
         arguments: ATLCollectionKind.allCases)
     func kinds(kind: ATLCollectionKind) async throws {
-        let value = try await LanguageHarness.evaluate("\(kind.rawValue){1..2}")
+        let value = try await LanguageHarness.evaluate("\(kind.rawValue){1..2}", options: .standard)
         #expect(value.integers == [1, 2])
         if kind.isUnique {
             #expect((value as? ATLCollectionValue)?.kind == kind)
@@ -209,7 +209,7 @@ struct ATLCollectionRangeEvaluationTests {
     @Test("A range matches the equivalent includingRange operation")
     func matchesIncludingRange() async throws {
         let value = try await LanguageHarness.evaluate(
-            "Sequence{0, 2..4} = Sequence{0}->includingRange(2, 4)")
+            "Sequence{0, 2..4} = Sequence{0}->includingRange(2, 4)", options: .standard)
         #expect(value as? Bool == true)
     }
 
@@ -225,7 +225,7 @@ struct ATLCollectionRangeEvaluationTests {
         ])
     func nonIntegerBounds(expression: String) async {
         do {
-            _ = try await LanguageHarness.evaluate(expression)
+            _ = try await LanguageHarness.evaluate(expression, options: .standard)
             Issue.record("'\(expression)' should not evaluate")
         } catch ATLExecutionError.typeError(let message) {
             #expect(message.contains("Integer"), "\(message)")
@@ -238,10 +238,11 @@ struct ATLCollectionRangeEvaluationTests {
     func tooLong() async {
         await #expect(throws: ATLExecutionError.self) {
             _ = try await LanguageHarness.evaluate(
-                "Sequence{1..\(ATLBuiltinOperations.maximumRangeLength + 1)}")
+                "Sequence{1..\(ATLBuiltinOperations.maximumRangeLength + 1)}", options: .standard)
         }
         await #expect(throws: ATLExecutionError.self) {
-            _ = try await LanguageHarness.evaluate("Sequence{-9223372036854775807..9223372036854775807}")
+            _ = try await LanguageHarness.evaluate(
+                "Sequence{-9223372036854775807..9223372036854775807}", options: .standard)
         }
     }
 
@@ -258,7 +259,8 @@ struct ATLCollectionRangeEvaluationTests {
     func helper() async throws {
         let value = try await LanguageHarness.evaluate(
             "thisModule.upTo(4)->sum()",
-            declarations: "helper def : upTo(n : Integer) : Sequence(Integer) = Sequence{1..n};")
+            declarations: "helper def : upTo(n : Integer) : Sequence(Integer) = Sequence{1..n};",
+            options: .standard)
         #expect(value as? Int == 10)
     }
 
@@ -274,7 +276,7 @@ struct ATLCollectionRangeEvaluationTests {
             }
             """
         let registry = ATLMetamodelRegistry(packages: [fixture.package])
-        let module = try await ATLParser().parseContent(source, metamodelRegistry: registry)
+        let module = try await ATLParser(options: .standard).parseContent(source, metamodelRegistry: registry)
 
         let input = Resource(uri: "test://in")
         await input.add(fixture.make(fixture.circle, ["name": "ab"]))
@@ -298,7 +300,7 @@ struct ATLCollectionRangeQueryTests {
 
     /// Evaluates a query without input models.
     private func evaluate(_ source: String) async throws -> (any EcoreValue)? {
-        let unit = try await ATLParser().parseContent(source)
+        let unit = try await ATLParser(options: .standard).parseContent(source)
         return try await ATLVirtualMachine(module: unit).evaluateQuery(sources: [:])
     }
 
@@ -343,7 +345,7 @@ struct ATLCollectionRangeRoundTripTests {
         "A collection literal with ranges survives a round trip",
         arguments: ATLCollectionKind.allCases)
     func roundTrip(kind: ATLCollectionKind) async throws {
-        let unit = try await ATLParser().parseContent(
+        let unit = try await ATLParser(options: .standard).parseContent(
             "query Q = \(kind.rawValue){0, 2..thisModule.n + 1, 9};")
         let original = try #require(unit.queryBody as? ATLCollectionLiteralExpression)
 

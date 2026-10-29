@@ -72,11 +72,11 @@ import ATL
 import ECore
 
 // Parse ATL transformation
-let parser = ATLParser()
-let module = try await parser.parseFile(url: transformationURL)
+let parser = ATLParser(options: .standard)
+let module = try await parser.parse(transformationURL)
 
 // Create resource and load module
-let resource = ATLResource(uri: "file:///path/to/transform.atl")
+let resource = ATLResource(uri: "file:///path/to/transform.atl", options: .standard)
 try await resource.load()
 
 // Access parsed module
@@ -87,7 +87,7 @@ if let atlModule = resource.module {
 }
 
 // Save to XMI format
-let xmiResource = ATLResource(uri: "file:///path/to/output.xmi", module: module)
+let xmiResource = ATLResource(uri: "file:///path/to/output.xmi", module: module, options: .standard)
 try await xmiResource.save()
 ```
 
@@ -98,7 +98,7 @@ try await xmiResource.save()
 - Strings support the escapes `\'`, `\"`, `\\`, `\n`, `\r`, `\t`, `\b`, `\f`, `\uXXXX` and octal escapes. Any other backslash sequence is kept as written, so regular expressions such as `'\s+'` need no doubling.
 - Real literals (`3.14`, `1e-3`), enumeration literals (`#Editable`), `OclUndefined` (and `null`) are supported. An enumeration literal evaluates to the literal name, which is how enumeration-typed attributes of dynamic objects are stored. Binding it to an attribute checks that the enumeration declares the literal.
 - `Sequence{}`, `OrderedSet{}`, `Set{}` and `Bag{}` literals keep their elements, not descriptions of them. Sets and ordered sets remain duplicate-free through `union`, `including`, `append` and friends.
-- Collection literals accept OCL integer ranges `first..last`, alone or mixed with items: `Sequence{0, 2..4, 9}` holds `0, 2, 3, 4, 9`. Both bounds may be expressions but must be Integers; a range whose first value exceeds its last is empty, and sets keep each integer once. Ranges are an OCL feature that the Eclipse ATL compilers do not accept, so transformations that use them do not run on Eclipse ATL; `includingRange` is the portable alternative.
+- Collection literals accept OCL integer ranges `first..last`, alone or mixed with items: `Sequence{0, 2..4, 9}` holds `0, 2, 3, 4, 9`. Both bounds may be expressions but must be Integers; a range whose first value exceeds its last is empty, and sets keep each integer once. Ranges are an OCL feature that the Eclipse ATL compilers do not accept, so transformations that use them do not run on Eclipse ATL; `includingRange` is the portable alternative. Parsing with `ATLOptions(collectionRangeSyntax: .eclipse)` rejects ranges as Eclipse ATL does (see [Compatibility with 0.6](#compatibility-with-06)).
 - Infix `implies`, `xor`, `div` and `mod` follow OCL precedence: `implies` binds weakest, then `or` and `xor`, then `and`. Logical operators use three-valued logic with `OclUndefined`.
 
 ### Built-in operations
@@ -141,7 +141,7 @@ A metamodel named in the module header is bound, in order of precedence, by:
 
 ```swift
 let registry = ATLMetamodelRegistry(packages: [ecorePackage, genModelPackage])
-let module = try await ATLParser().parse(url, metamodelRegistry: registry)
+let module = try await ATLParser(options: .standard).parse(url, metamodelRegistry: registry)
 ```
 
 A registry can also be built from a table of namespace URIs, or given a resolver closure for URIs it does not hold. Type references such as `Ecore!EClass` use the name from the module header, which need not equal the name of the bound package.
@@ -180,7 +180,7 @@ helper def : unit : String = 'books';
 `ATLParser` returns a query unit as an `ATLModule` whose `kind` is `.query` and whose `queryBody` holds the query expression. `ATLVirtualMachine.evaluateQuery(sources:parameters:)` binds the input models, evaluates the query and returns its value. Each metamodel named by a directive is declared as an input model of the same name; `declaringSourceModels(_:metamodels:)` gives the models other names, as `IN : Library` would in a module header, and can supply metamodel packages that no directive names:
 
 ```swift
-let query = try await ATLParser().parse(queryURL)
+let query = try await ATLParser(options: .standard).parse(queryURL)
 let value = try await ATLVirtualMachine(module: query).evaluateQuery(sources: ["Library": library])
 
 // Name the model IN, so that the query can use allInstancesFrom('IN')
@@ -225,7 +225,7 @@ A transformation runs in two phases. All matched rules first create their target
 
 ### Editor support
 
-`ATLSyntax.tokens(in:)` classifies the tokens of ATL source text, including comments and unreadable text, without ever failing. `ATLParser.parseDiagnosing(_:name:metamodelRegistry:)` parses source text without throwing: it recovers at declaration and binding level, and returns the module read so far, diagnostics with source ranges and stable `ATLDiagnosticCode` values, an outline of the module and the tokens. Parsed syntax tree nodes carry a `SourceOrigin` with their range in the source text, which does not take part in equality.
+`ATLSyntax.tokens(in:options:)` classifies the tokens of ATL source text, including comments and unreadable text, without ever failing. `ATLParser.parseDiagnosing(_:name:metamodelRegistry:)` parses source text without throwing: it recovers at declaration and binding level, and returns the module read so far, diagnostics with source ranges and stable `ATLDiagnosticCode` values, an outline of the module and the tokens. Parsed syntax tree nodes carry a `SourceOrigin` with their range in the source text, which does not take part in equality.
 
 The ATL constructs that are not supported (libraries and `uses`, refining mode, `nodefault` rules, iterated target patterns with `foreach` or `distinct`, and `extends` on lazy or called rules) are reported as `unsupportedConstruct` errors at the offending token. Text that cannot start a declaration is reported as an unexpected token by both parsers.
 
@@ -335,6 +335,17 @@ Swift ATL targets compatibility with:
 - **[Eclipse ATL](https://eclipse.dev/atl/)**: Syntax-compatible with Eclipse ATL transformations
 - **Eclipse ATL XMI**: Full round-trip compatibility with Eclipse ATL XMI format
 - **[swift-ecore](https://github.com/mipalgu/swift-ecore)**: Integrated with ECore metamodel framework
+
+### Compatibility with 0.6
+
+The APIs that take an `ATLOptions` value (`ATLParser(options:enableDebugging:)`, `ATLResource(uri:options:)`, `ATLResource(uri:module:options:)`, `ATLXMISerializer(options:)`, `ATLExpressionXMISerializer(options:)` and `ATLSyntax.tokens(in:options:)`) default to the current behaviour, `ATLOptions.standard`, which `ATLOptions()` also gives. The APIs of swift-atl 0.6, which take no options, keep the 0.6 behaviour by using `ATLOptions.legacy`. `ATLParser(enableDebugging:)`, `ATLResource(uri:)`, `ATLResource(uri:module:)` and `ATLSyntax.tokens(in:)` now behave differently from the default and are deprecated in favour of the variants that take options.
+
+| Behaviour | Default | Option | 0.6 behaviour |
+| :-- | :-- | :-- | :-- |
+| Integer ranges in collection literals, such as `Sequence{1..3}` | Accepted (`.ocl`) | `collectionRangeSyntax` (`ATLCollectionRangeSyntax`) | `.eclipse`: rejected, as in Eclipse ATL, and `..` is two `.` tokens |
+| Collection ranges in XMI | `.collectionRange`: an OCL `CollectionRange` part that reads back unchanged | `collectionRangeEncoding` (`ATLCollectionRangeEncoding`) | No ranges could be written; `.portable` writes them with expressions that 0.6 reads |
+
+With `.eclipse`, a range is reported as a syntax error whose message names the portable alternatives: listing the integers, as in `Sequence{1, 2, 3}`, or calling `includingRange`, as in `Sequence{}->includingRange(1, 3)`, which the Eclipse ATL EMFTVM provides. With `.portable`, a range whose bounds are integer literals is written as its integers, and any other range as a call of `includingRange`, with the items after it added by `includingAll`; both operations exist in swift-atl 0.6 and in the Eclipse ATL EMFTVM, which however reports an error for an empty range. To keep the 0.6 behaviour with the new APIs, pass `.legacy`, for example `ATLParser(options: .legacy)`. Parse errors now also describe themselves through `localizedDescription` instead of naming their case number.
 
 ## References
 

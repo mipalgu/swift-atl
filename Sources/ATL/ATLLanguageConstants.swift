@@ -52,6 +52,18 @@ enum ATLLanguage {
     /// The separator between the first and the last value of a collection range, as in `Sequence{1..3}`.
     static let rangeSeparator = ".."
 
+    /// The message that reports a collection range in source read without OCL range syntax.
+    ///
+    /// - Parameter location: Where the range separator is, such as `line 1, column 20`.
+    /// - Returns: A message that names the portable alternatives to the range.
+    static func unsupportedRangeMessage(at location: String) -> String {
+        let sequence = ATLCollectionKind.sequence.rawValue
+        let includingRange = ATLOperation.includingRange.rawValue
+        return "Collection ranges such as '\(sequence){1\(rangeSeparator)3}' at \(location) are not supported by Eclipse ATL; "
+            + "list the integers, as in '\(sequence){1, 2, 3}', or use '\(sequence){}->\(includingRange)(1, 3)', "
+            + "which the Eclipse ATL EMFTVM provides"
+    }
+
     /// The operators made of two characters, which the lexer must try before single characters.
     static let multiCharacterOperators: [String] = ["<>", "<=", "<-", ">=", "->", rangeSeparator]
 

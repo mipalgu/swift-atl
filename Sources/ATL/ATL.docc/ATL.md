@@ -27,6 +27,7 @@ metamodelling framework.
 - **Helpers**: Define reusable query operations
 - **OCL expressions**: Full support for guards, bindings, and navigation
 - **Language coverage**: String escapes, real, enumeration and `OclUndefined` literals, collection literals that keep their objects and accept integer ranges such as `Sequence{1..3}`, three-valued logical operators, and extensive collection, string and type operations
+- **Options**: ``ATLOptions`` selects between the current behaviour and that of swift-atl 0.6 or Eclipse ATL
 - **Reflective operations**: `refImmediateComposite()`, `refGetValue`, `refSetValue`, `refUnsetValue`, `refInvokeOperation` and the `eContainer()` family navigate and modify models by name
 - **Helper overloads**: Contextual helpers dispatch on the dynamic type of the receiver
 - **Metamodel binding**: `@nsURI` and `@path` directives with an ``ATLMetamodelRegistry``
@@ -42,7 +43,7 @@ import ATL
 import ECore
 
 // Parse the transformation
-let parser = ATLParser()
+let parser = ATLParser(options: .standard)
 let module = try await parser.parse(URL(fileURLWithPath: "Class2Table.atl"))
 
 // Create and configure the virtual machine
@@ -55,6 +56,25 @@ try await vm.registerSourceModel(classModel, as: "IN")
 let result = try await vm.execute()
 let tableModel = result.targetModels["OUT"]
 ```
+
+### Compatibility with 0.6
+
+APIs that take an ``ATLOptions`` value default to the current behaviour,
+``ATLOptions/standard``. The APIs of swift-atl 0.6, which take no options, keep the
+behaviour of 0.6 by using ``ATLOptions/legacy``; those whose behaviour now differs
+from the default are deprecated in favour of the variant that takes options.
+
+| Behaviour | Default | Option | 0.6 behaviour |
+| :-- | :-- | :-- | :-- |
+| Integer ranges in collection literals, such as `Sequence{1..3}` | Accepted | ``ATLOptions/collectionRangeSyntax`` | ``ATLCollectionRangeSyntax/eclipse``: rejected, as in Eclipse ATL |
+| Collection ranges in XMI | ``ATLCollectionRangeEncoding/collectionRange`` | ``ATLOptions/collectionRangeEncoding`` | No ranges could be written; ``ATLCollectionRangeEncoding/portable`` writes them with expressions that 0.6 reads |
+
+A rejected range is reported with a message that names the portable alternatives:
+listing the integers, as in `Sequence{1, 2, 3}`, or calling `includingRange`, as in
+`Sequence{}->includingRange(1, 3)`, which the Eclipse ATL EMFTVM provides. To keep the
+0.6 behaviour with the new APIs, pass ``ATLOptions/legacy``, for example
+`ATLParser(options: .legacy)`. Parse errors now also describe themselves through
+`localizedDescription`.
 
 ## Topics
 
@@ -100,6 +120,9 @@ let tableModel = result.targetModels["OUT"]
 ### Parsing
 
 - ``ATLParser``
+- ``ATLOptions``
+- ``ATLCollectionRangeSyntax``
+- ``ATLCollectionRangeEncoding``
 - ``ATLLexer``
 - ``ATLSyntaxParser``
 

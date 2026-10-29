@@ -93,10 +93,11 @@ let dbMetamodel = dbResource.rootObjects.first as! EPackage
 
 ## Parsing the Transformation
 
-Use ``ATLParser`` to parse the ATL file:
+Use ``ATLParser`` to parse the ATL file. The ``ATLOptions/standard`` options
+give the current behaviour, such as accepting collection ranges like `Sequence{1..3}`:
 
 ```swift
-let parser = ATLParser()
+let parser = ATLParser(options: .standard)
 let module = try await parser.parse(URL(fileURLWithPath: "Class2Table.atl"))
 
 print("Loaded module: \(module.name)")
@@ -228,7 +229,7 @@ result with `writeTo` needs a file output policy, because writing files is disab
 by default:
 
 ```swift
-let query = try await ATLParser().parse(URL(fileURLWithPath: "LibraryGraph.atl"))
+let query = try await ATLParser(options: .standard).parse(URL(fileURLWithPath: "LibraryGraph.atl"))
 let vm = ATLVirtualMachine(
     module: query, fileOutput: .confined(to: URL(fileURLWithPath: "output")))
 let written = try await vm.evaluateQuery(sources: ["Library": libraryModel])
