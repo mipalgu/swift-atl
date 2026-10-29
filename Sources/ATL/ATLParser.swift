@@ -1242,8 +1242,64 @@ private class ATLSyntaxParser {
         )
     }
 
+    /// Parses an expression.
+    ///
+    /// A range separator directly after the expression is reported here, because
+    /// a range such as `1..3` is only valid as a part of a collection literal,
+    /// which parses its parts with ``parseCollectionLiteralPart()`` instead.
+    ///
+    /// - Returns: The parsed expression.
+    /// - Throws: ``ATLParseError`` when the tokens do not form an expression.
     private func parseExpression() throws -> any ATLExpression {
-        return try parseConditionalExpression()
+        let expression = try parseConditionalExpression()
+        if let separator = currentToken(), isRangeSeparator(separator) {
+            throw ATLParseError.invalidSyntax(
+                "A range 'first\(ATLLanguage.rangeSeparator)last' at \(describe(separator)) is only allowed inside a collection literal, as in 'Sequence{1\(ATLLanguage.rangeSeparator)3}'"
+            )
+        }
+        return expression
+    }
+
+    /// Parses one part of a collection literal: an item or a range `first..last`.
+    ///
+    /// - Returns: The item expression, or an ``ATLCollectionRangeExpression`` for a range.
+    /// - Throws: ``ATLParseError`` when the part is malformed, for example when a
+    ///   range lacks its first or its last value.
+    private func parseCollectionLiteralPart() throws -> any ATLExpression {
+        let start = position
+        let separatorText = ATLLanguage.rangeSeparator
+        if let separator = currentToken(), isRangeSeparator(separator) {
+            throw ATLParseError.invalidSyntax(
+                "Expected the first value of the range before '\(separatorText)' at \(describe(separator))"
+            )
+        }
+        let first = try parseConditionalExpression()
+        guard let separator = currentToken(), isRangeSeparator(separator) else { return first }
+        advance()
+        if let next = currentToken(), endsCollectionLiteralPart(next) {
+            throw ATLParseError.invalidSyntax(
+                "Expected the last value of the range after '\(separatorText)' at \(describe(separator)), but found '\(next.type == .eof ? "EOF" : next.value)'"
+            )
+        }
+        let last = try parseConditionalExpression()
+        return ATLCollectionRangeExpression(first: first, last: last, origin: origin(from: start))
+    }
+
+    /// Whether a token is the separator of a collection range.
+    ///
+    /// - Parameter token: The token to test.
+    /// - Returns: `true` for the `..` operator.
+    private func isRangeSeparator(_ token: ATLToken) -> Bool {
+        token.type == .operator(ATLLanguage.rangeSeparator)
+    }
+
+    /// Whether a token cannot start an expression because it ends a collection literal part.
+    ///
+    /// - Parameter token: The token to test.
+    /// - Returns: `true` for a comma, a closing brace, a range separator or the end of input.
+    private func endsCollectionLiteralPart(_ token: ATLToken) -> Bool {
+        token.type == .punctuation(",") || token.type == .punctuation("}") || token.type == .eof
+            || isRangeSeparator(token)
     }
 
     private func parseConditionalExpression() throws -> any ATLExpression {
@@ -1631,9 +1687,9 @@ private class ATLSyntaxParser {
 
             var elements: [any ATLExpression] = []
 
-            // Parse elements if any
+            // Parse elements if any, each an item or a range
             while !isAtEnd() && !(currentToken()?.type == .punctuation("}")) {
-                elements.append(try parseExpression())
+                elements.append(try parseCollectionLiteralPart())
 
                 if let commaToken = currentToken(), case .punctuation(let p) = commaToken.type,
                     p == ","
@@ -1645,6 +1701,11 @@ private class ATLSyntaxParser {
             }
 
             guard consumePunctuation("}") else {
+                if let separator = currentToken(), isRangeSeparator(separator) {
+                    throw ATLParseError.invalidSyntax(
+                        "A collection range has only one '\(ATLLanguage.rangeSeparator)', but another one follows at \(describe(separator))"
+                    )
+                }
                 throw ATLParseError.invalidSyntax("Expected '}' after collection elements")
             }
 

@@ -26,7 +26,7 @@ metamodelling framework.
 - **Lazy rules**: Create target elements on-demand
 - **Helpers**: Define reusable query operations
 - **OCL expressions**: Full support for guards, bindings, and navigation
-- **Language coverage**: String escapes, real, enumeration and `OclUndefined` literals, collection literals that keep their objects, three-valued logical operators, and extensive collection, string and type operations
+- **Language coverage**: String escapes, real, enumeration and `OclUndefined` literals, collection literals that keep their objects and accept integer ranges such as `Sequence{1..3}`, three-valued logical operators, and extensive collection, string and type operations
 - **Reflective operations**: `refImmediateComposite()`, `refGetValue`, `refSetValue`, `refUnsetValue`, `refInvokeOperation` and the `eContainer()` family navigate and modify models by name
 - **Helper overloads**: Contextual helpers dispatch on the dynamic type of the receiver
 - **Metamodel binding**: `@nsURI` and `@path` directives with an ``ATLMetamodelRegistry``

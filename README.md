@@ -98,6 +98,7 @@ try await xmiResource.save()
 - Strings support the escapes `\'`, `\"`, `\\`, `\n`, `\r`, `\t`, `\b`, `\f`, `\uXXXX` and octal escapes. Any other backslash sequence is kept as written, so regular expressions such as `'\s+'` need no doubling.
 - Real literals (`3.14`, `1e-3`), enumeration literals (`#Editable`), `OclUndefined` (and `null`) are supported. An enumeration literal evaluates to the literal name, which is how enumeration-typed attributes of dynamic objects are stored. Binding it to an attribute checks that the enumeration declares the literal.
 - `Sequence{}`, `OrderedSet{}`, `Set{}` and `Bag{}` literals keep their elements, not descriptions of them. Sets and ordered sets remain duplicate-free through `union`, `including`, `append` and friends.
+- Collection literals accept OCL integer ranges `first..last`, alone or mixed with items: `Sequence{0, 2..4, 9}` holds `0, 2, 3, 4, 9`. Both bounds may be expressions but must be Integers; a range whose first value exceeds its last is empty, and sets keep each integer once. Ranges are an OCL feature that the Eclipse ATL compilers do not accept, so transformations that use them do not run on Eclipse ATL; `includingRange` is the portable alternative.
 - Infix `implies`, `xor`, `div` and `mod` follow OCL precedence: `implies` binds weakest, then `or` and `xor`, then `and`. Logical operators use three-valued logic with `OclUndefined`.
 
 ### Built-in operations
@@ -267,7 +268,7 @@ To use the CLI tool, install the [swift-modelling](https://github.com/mipalgu/sw
 - [x] **Method Calls**: Object method invocations
 - [x] **Helper Calls**: ATL helper function calls
 - [x] **Conditional Expressions**: If-then-else expressions
-- [x] **Collection Literals**: Sequence, Set, Bag, OrderedSet literals
+- [x] **Collection Literals**: Sequence, Set, Bag, OrderedSet literals, including integer ranges
 - [x] **Collection Operations**: select, reject, collect, iterate, forAll, exists, etc.
 - [x] **Let Expressions**: Local variable binding
 - [x] **Lambda Expressions**: Anonymous functions for iteration

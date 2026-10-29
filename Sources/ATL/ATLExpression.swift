@@ -2573,12 +2573,17 @@ public enum ATLCollectionOperation: String, Sendable, CaseIterable, Equatable, H
 /// Represents an ATL collection literal expression.
 ///
 /// Collection literals create collections with explicit element values,
-/// supporting the standard OCL collection types: Sequence, Set, and Bag.
+/// supporting the standard OCL collection types: Sequence, OrderedSet, Set, and Bag.
 ///
 /// In ATL, collection literals are expressed using the syntax:
 /// - `Sequence{elements}` for ordered collections
+/// - `OrderedSet{elements}` for ordered collections without duplicates
 /// - `Set{elements}` for unique collections
 /// - `Bag{elements}` for multiset collections
+///
+/// Each element is either an expression or an integer range written
+/// `first..last` (see ``ATLCollectionRangeExpression``), which contributes every
+/// integer it spans, as in `Sequence{0, 2..4, 9}`.
 ///
 /// This expression evaluates to the appropriate Swift collection type
 /// with the evaluated element values.
@@ -2587,6 +2592,9 @@ public struct ATLCollectionLiteralExpression: ATLExpression, Sendable, Equatable
     public let collectionType: String
 
     /// The expressions for the collection elements.
+    ///
+    /// An element that is an ``ATLCollectionRangeExpression`` stands for the
+    /// integers of the range rather than for a nested collection.
     public let elements: [any ATLExpression]
 
     /// The source range the node was parsed from, if it was parsed.
@@ -2608,6 +2616,15 @@ public struct ATLCollectionLiteralExpression: ATLExpression, Sendable, Equatable
 
     /// Evaluates the collection literal by creating the appropriate collection type
     /// and evaluating all element expressions.
+    ///
+    /// Elements are evaluated in order; an undefined element is left out and a range
+    /// contributes each integer it spans. A `Set` or an `OrderedSet` keeps only the
+    /// first occurrence of each element.
+    ///
+    /// - Parameter context: The execution context in which the elements are evaluated.
+    /// - Returns: The collection of the evaluated elements.
+    /// - Throws: ``ATLExecutionError`` when the collection type is unknown or an
+    ///   element, including a range bound, cannot be evaluated.
     @MainActor
     public func evaluate(in context: ATLExecutionContext) async throws -> (any EcoreValue)? {
         guard let kind = ATLCollectionKind(rawValue: collectionType) else {
@@ -2618,7 +2635,9 @@ public struct ATLCollectionLiteralExpression: ATLExpression, Sendable, Equatable
         // Evaluate all element expressions, keeping the elements themselves and their order
         var evaluatedElements: [any EcoreValue] = []
         for elementExpr in elements {
-            if let value = try await elementExpr.evaluate(in: context) {
+            if let range = elementExpr as? ATLCollectionRangeExpression {
+                evaluatedElements += try await range.integers(in: context)
+            } else if let value = try await elementExpr.evaluate(in: context) {
                 evaluatedElements.append(value)
             }
         }
@@ -2686,6 +2705,8 @@ internal func areATLExpressionsEqual(_ lhs: any ATLExpression, _ rhs: any ATLExp
         return l == r
     case (let l as ATLCollectionLiteralExpression, let r as ATLCollectionLiteralExpression):
         return l == r
+    case (let l as ATLCollectionRangeExpression, let r as ATLCollectionRangeExpression):
+        return l == r
     case (let l as ATLEnumLiteralExpression, let r as ATLEnumLiteralExpression):
         return l == r
     default:
@@ -2720,6 +2741,8 @@ internal func hashATLExpression(_ expression: any ATLExpression, into hasher: in
     case let expr as ATLCollectionExpression:
         expr.hash(into: &hasher)
     case let expr as ATLCollectionLiteralExpression:
+        expr.hash(into: &hasher)
+    case let expr as ATLCollectionRangeExpression:
         expr.hash(into: &hasher)
     case let expr as ATLEnumLiteralExpression:
         expr.hash(into: &hasher)

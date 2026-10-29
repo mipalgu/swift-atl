@@ -67,7 +67,12 @@ public enum ATLDiagnosticCode: String, Sendable, CaseIterable, Hashable {
     }
 }
 
-extension ATLParseError {
+extension ATLParseError: LocalizedError {
+    /// A human-readable description of the error.
+    ///
+    /// The description is the same message that a diagnostic of the error carries.
+    public var errorDescription: String? { diagnosticMessage }
+
     /// A human-readable description of the error.
     var diagnosticMessage: String {
         switch self {

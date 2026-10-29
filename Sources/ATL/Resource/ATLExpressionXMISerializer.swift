@@ -79,6 +79,8 @@ public struct ATLExpressionXMISerializer {
             return serializeTuple(tuple, indent: indentString)
         } else if let collectionLiteral = expression as? ATLCollectionLiteralExpression {
             return serializeCollectionLiteral(collectionLiteral, indent: indentString)
+        } else if let range = expression as? ATLCollectionRangeExpression {
+            return serializeCollectionRange(range, indent: indentString)
         } else if let collection = expression as? ATLCollectionExpression {
             return serializeCollection(collection, indent: indentString)
         } else if let typeLiteral = expression as? ATLTypeLiteralExpression {
@@ -317,6 +319,19 @@ public struct ATLExpressionXMISerializer {
         return xmi
     }
 
+    private func serializeCollectionRange(_ range: ATLCollectionRangeExpression, indent: String) -> String {
+        let names = ATLCollectionRangeXMI.self
+        var xmi = "\(indent)<expression xsi:type=\"\(names.qualifiedType)\">\n"
+        xmi += "\(indent)  <\(names.first)>\n"
+        xmi += serialize(range.first, indent: indent.count + 4)
+        xmi += "\(indent)  </\(names.first)>\n"
+        xmi += "\(indent)  <\(names.last)>\n"
+        xmi += serialize(range.last, indent: indent.count + 4)
+        xmi += "\(indent)  </\(names.last)>\n"
+        xmi += "\(indent)</expression>\n"
+        return xmi
+    }
+
     private func serializeCollection(_ collection: ATLCollectionExpression, indent: String) -> String {
         let opName = collection.operation.rawValue
         var xmi = "\(indent)<expression xsi:type=\"ocl:IteratorExp\" name=\"\(escapeXML(opName))\">\n"
@@ -355,4 +370,22 @@ public struct ATLExpressionXMISerializer {
             .replacingOccurrences(of: "\"", with: "&quot;")
             .replacingOccurrences(of: "'", with: "&apos;")
     }
+}
+
+/// The XMI names of a collection range, shared by the expression serialiser and parser.
+///
+/// A range is written as an OCL `CollectionRange` part of a collection literal,
+/// with its bounds in `first` and `last` containers.
+enum ATLCollectionRangeXMI {
+    /// The type name of a range part.
+    static let type = "CollectionRange"
+
+    /// The namespace-qualified type name of a range part.
+    static let qualifiedType = "ocl:" + type
+
+    /// The container of the first bound.
+    static let first = "first"
+
+    /// The container of the last bound.
+    static let last = "last"
 }

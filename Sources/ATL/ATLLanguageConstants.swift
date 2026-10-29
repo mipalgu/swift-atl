@@ -49,8 +49,11 @@ enum ATLLanguage {
         InfixKeyword.mod.rawValue,
     ]
 
+    /// The separator between the first and the last value of a collection range, as in `Sequence{1..3}`.
+    static let rangeSeparator = ".."
+
     /// The operators made of two characters, which the lexer must try before single characters.
-    static let multiCharacterOperators: [String] = ["<>", "<=", "<-", ">=", "->"]
+    static let multiCharacterOperators: [String] = ["<>", "<=", "<-", ">=", "->", rangeSeparator]
 
     /// Every operator, whether it is made of one or of several characters.
     static let operators: Set<String> = Set(multiCharacterOperators).union([
