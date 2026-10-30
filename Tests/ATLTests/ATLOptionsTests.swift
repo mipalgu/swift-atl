@@ -183,7 +183,7 @@ struct ATLResourceOptionTests {
     private func write(_ source: String) throws -> URL {
         let url = FileManager.default.temporaryDirectory
             .appendingPathComponent("ATLOptions-\(UUID().uuidString).atl")
-        try source.write(to: url, atomically: true, encoding: .utf8)
+        try source.write(to: url, atomically: testWritesAtomically, encoding: .utf8)
         return url
     }
 
