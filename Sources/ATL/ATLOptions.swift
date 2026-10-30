@@ -5,6 +5,8 @@
 //  Created by Rene Hexel on 30/10/2026.
 //  Copyright © 2026 Rene Hexel. All rights reserved.
 //
+import ECore
+import Foundation
 
 /// Whether ATL source may write integer ranges in collection literals.
 ///
@@ -100,4 +102,39 @@ public struct ATLOptions: Sendable, Hashable {
     /// Ranges built in code are written to XMI as OCL collection ranges, because
     /// swift-atl 0.6 had no ranges that it could write.
     public static let legacy = ATLOptions(collectionRangeSyntax: .eclipse)
+
+    /// Creates the options that a choice of semantics selects.
+    ///
+    /// `ModellingSemantics/standard` selects ``standard`` and
+    /// `ModellingSemantics/legacy` selects ``legacy``.
+    ///
+    /// - Parameter semantics: The semantics to follow.
+    public init(semantics: ModellingSemantics) {
+        switch semantics {
+        case .standard: self = .standard
+        case .legacy: self = .legacy
+        }
+    }
+
+    /// Creates the options that an environment selects.
+    ///
+    /// The `SWIFT_MODELLING_SEMANTICS` variable (`ModellingSemantics/environmentVariable`)
+    /// selects ``standard`` or ``legacy`` by its value, `standard` or `legacy`. Without the
+    /// variable, or with an empty value, the options are ``standard``. A parser can take its
+    /// options from the environment of the process once, when it is created:
+    ///
+    /// ```swift
+    /// let parser = ATLParser(options: try ATLOptions.fromEnvironment())
+    /// ```
+    ///
+    /// - Parameter environment: The environment variables to read; by default those of the
+    ///   current process.
+    /// - Returns: The selected options.
+    /// - Throws: `ModellingSemanticsError/invalidValue(_:variable:)` if the variable holds
+    ///   any other value.
+    public static func fromEnvironment(
+        _ environment: [String: String] = ProcessInfo.processInfo.environment
+    ) throws(ModellingSemanticsError) -> ATLOptions {
+        ATLOptions(semantics: try ModellingSemantics.fromEnvironment(environment) ?? .standard)
+    }
 }
