@@ -155,6 +155,8 @@ public struct ATLExpressionXMIParser {
             return try parseTuple(element)
         } else if type.contains("CollectionLiteralExp") {
             return try parseCollectionLiteral(element)
+        } else if type.contains(ATLCollectionRangeXMI.type) {
+            return try parseCollectionRange(element)
         } else {
             throw ExpressionParseError.unsupportedType("Unsupported expression type: \(type)")
         }
@@ -390,6 +392,18 @@ public struct ATLExpressionXMIParser {
         }
 
         return ATLCollectionLiteralExpression(collectionType: kind, elements: elements)
+    }
+
+    private func parseCollectionRange(_ element: XElement) throws -> ATLCollectionRangeExpression {
+        let names = ATLCollectionRangeXMI.self
+        guard let firstElement = try childExpression(names.first, in: element) else {
+            throw ExpressionParseError.missingAttribute("Missing \(names.first) in \(names.type)")
+        }
+        guard let lastElement = try childExpression(names.last, in: element) else {
+            throw ExpressionParseError.missingAttribute("Missing \(names.last) in \(names.type)")
+        }
+        return ATLCollectionRangeExpression(
+            first: try parseExpression(firstElement), last: try parseExpression(lastElement))
     }
 
     // MARK: - Advanced Expression Parsers

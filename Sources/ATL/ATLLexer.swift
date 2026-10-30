@@ -137,6 +137,9 @@ final class ATLLexer {
     private var column = 1
     private var scan = ATLScan()
 
+    /// Whether `..` is read as the separator of a collection range.
+    private let readsRanges: Bool
+
     /// The header directives (`@path`, `@nsURI` and `@param`) extracted from comments.
     var directives = ATLDirectives()
 
@@ -149,9 +152,13 @@ final class ATLLexer {
     /// a single line break, so that tokens, directives, string literals and source
     /// locations are the same whichever convention the source file uses.
     ///
-    /// - Parameter content: The ATL source text to tokenise.
-    init(content: String) {
+    /// - Parameters:
+    ///   - content: The ATL source text to tokenise.
+    ///   - collectionRangeSyntax: Whether `..` is one range separator token, or two `.`
+    ///     tokens as in a language without collection ranges.
+    init(content: String, collectionRangeSyntax: ATLCollectionRangeSyntax = .ocl) {
         self.scalars = Array(content.unicodeScalars)
+        self.readsRanges = collectionRangeSyntax == .ocl
     }
 
     /// Converts every line terminator in a text to a single line feed.
@@ -299,6 +306,7 @@ final class ATLLexer {
     private func multiCharacterOperator() -> String? {
         guard let first = scalar(at: 0), let second = scalar(at: 1) else { return nil }
         let pair = String(first) + String(second)
+        guard readsRanges || pair != ATLLanguage.rangeSeparator else { return nil }
         return ATLLanguage.multiCharacterOperators.contains(pair) ? pair : nil
     }
 

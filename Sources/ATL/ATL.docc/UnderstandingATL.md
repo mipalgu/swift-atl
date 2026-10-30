@@ -387,7 +387,7 @@ The parser returns a query unit as an ``ATLModule`` whose ``ATLModule/kind`` is
 evaluates the query and returns its value:
 
 ```swift
-let query = try await ATLParser().parse(queryURL)
+let query = try await ATLParser(options: .standard).parse(queryURL)
 let vm = ATLVirtualMachine(module: query)
 let count = try await vm.evaluateQuery(sources: ["Library": libraryModel])
 ```

@@ -67,7 +67,12 @@ public enum ATLDiagnosticCode: String, Sendable, CaseIterable, Hashable {
     }
 }
 
-extension ATLParseError {
+extension ATLParseError: LocalizedError {
+    /// A human-readable description of the error.
+    ///
+    /// The description is the same message that a diagnostic of the error carries.
+    public var errorDescription: String? { diagnosticMessage }
+
     /// A human-readable description of the error.
     var diagnosticMessage: String {
         switch self {
@@ -167,10 +172,38 @@ public enum ATLSyntax {
     /// offsets, lines from one and columns in Unicode scalars from one, and the line
     /// terminators `\r\n`, `\r` and `\n` each end one line.
     ///
+    /// The text is read with ``ATLOptions/legacy``, as swift-atl 0.6 read it, so the
+    /// range separator `..` is two `.` tokens.
+    ///
     /// - Parameter text: The ATL source text.
     /// - Returns: The tokens in source order.
+    @available(
+        *, deprecated,
+        message:
+            "Use tokens(in:options:) with .standard to read '..' as one range separator, or with .legacy to keep two '.' tokens as swift-atl 0.6 does"
+    )
     public static func tokens(in text: String) -> [SourceToken] {
-        let scan = ATLLexer(content: text).scanAll()
+        tokens(in: text, options: .legacy)
+    }
+
+    /// Splits ATL source text into classified tokens with the given options.
+    ///
+    /// The tokeniser never fails: text that cannot be read becomes a token of kind
+    /// ``SourceTokenKind/invalid``. Comments are included, and a comment that holds a
+    /// header directive such as `-- @path Name=file.ecore` is of kind
+    /// ``SourceTokenKind/directive``. Whitespace is not reported. Positions count UTF-8
+    /// offsets, lines from one and columns in Unicode scalars from one, and the line
+    /// terminators `\r\n`, `\r` and `\n` each end one line. With the OCL
+    /// ``ATLOptions/collectionRangeSyntax``, the range separator `..` is one token;
+    /// otherwise it is two `.` tokens.
+    ///
+    /// - Parameters:
+    ///   - text: The ATL source text.
+    ///   - options: The options that select how the text is read, such as
+    ///     ``ATLOptions/standard`` for the current behaviour.
+    /// - Returns: The tokens in source order.
+    public static func tokens(in text: String, options: ATLOptions) -> [SourceToken] {
+        let scan = ATLLexer(content: text, collectionRangeSyntax: options.collectionRangeSyntax).scanAll()
         return sourceTokens(of: scan)
     }
 

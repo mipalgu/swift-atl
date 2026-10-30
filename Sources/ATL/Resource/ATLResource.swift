@@ -36,7 +36,8 @@ import Foundation
 ///
 /// ```swift
 /// // Create a resource for an ATL module
-/// let resource = ATLResource(uri: "file:///transformations/Book2Publication.atl")
+/// let resource = ATLResource(
+///     uri: "file:///transformations/Book2Publication.atl", options: .standard)
 ///
 /// // Load from XMI
 /// try await resource.load()
@@ -76,24 +77,71 @@ public final class ATLResource {
     /// references to metamodel elements.
     public weak var resourceSet: ResourceSet?
 
+    /// The options that select how ATL source is read and how XMI is written.
+    public let options: ATLOptions
+
     // MARK: - Initialisation
 
-    /// Creates a new ATL resource with the specified URI.
+    /// Creates a new ATL resource with the specified URI that behaves as in swift-atl 0.6.
+    ///
+    /// The resource uses ``ATLOptions/legacy``, so loading ATL source rejects
+    /// collection ranges such as `Sequence{1..3}`.
     ///
     /// - Parameter uri: The URI identifying this resource
+    @available(
+        *, deprecated,
+        message:
+            "Use init(uri:options:) with .standard to accept collection ranges such as Sequence{1..3}, or with .legacy to keep rejecting them as swift-atl 0.6 does"
+    )
     public init(uri: String) {
         self.uri = uri
+        self.options = .legacy
         self.ecoreResource = Resource(uri: uri)
     }
 
-    /// Creates a new ATL resource with an ATL module.
+    /// Creates a new ATL resource with the specified URI and options.
+    ///
+    /// - Parameters:
+    ///   - uri: The URI identifying this resource.
+    ///   - options: The options that select how ATL source is read and how XMI is
+    ///     written, such as ``ATLOptions/standard`` for the current behaviour.
+    public init(uri: String, options: ATLOptions) {
+        self.uri = uri
+        self.options = options
+        self.ecoreResource = Resource(uri: uri)
+    }
+
+    /// Creates a new ATL resource with an ATL module that behaves as in swift-atl 0.6.
+    ///
+    /// The resource uses ``ATLOptions/legacy``, so loading ATL source rejects
+    /// collection ranges such as `Sequence{1..3}`.
     ///
     /// - Parameters:
     ///   - uri: The URI identifying this resource
     ///   - module: The ATL module to store in this resource
+    @available(
+        *, deprecated,
+        message:
+            "Use init(uri:module:options:) with .standard to accept collection ranges such as Sequence{1..3}, or with .legacy to keep rejecting them as swift-atl 0.6 does"
+    )
     public init(uri: String, module: ATLModule) {
         self.uri = uri
         self.module = module
+        self.options = .legacy
+        self.ecoreResource = Resource(uri: uri)
+    }
+
+    /// Creates a new ATL resource with an ATL module and options.
+    ///
+    /// - Parameters:
+    ///   - uri: The URI identifying this resource.
+    ///   - module: The ATL module to store in this resource.
+    ///   - options: The options that select how ATL source is read and how XMI is
+    ///     written, such as ``ATLOptions/standard`` for the current behaviour.
+    public init(uri: String, module: ATLModule, options: ATLOptions) {
+        self.uri = uri
+        self.module = module
+        self.options = options
         self.ecoreResource = Resource(uri: uri)
     }
 
@@ -113,10 +161,11 @@ public final class ATLResource {
     /// Loads the ATL module from its URI.
     ///
     /// This method determines the format based on the file extension:
-    /// - `.atl`: Parses as ATL text format
+    /// - `.atl`: Parses as ATL text format, with the ``options`` of the resource
     /// - `.xmi`: Parses as Eclipse ATL XMI format
     ///
-    /// - Throws: `ATLResourceError` if loading fails
+    /// - Throws: `ATLResourceError` if loading fails, or ``ATLParseError`` if the
+    ///   ATL source cannot be parsed
     public func load() async throws {
         // Determine format from URI
         if uri.hasSuffix(".xmi") {
@@ -132,7 +181,8 @@ public final class ATLResource {
     ///
     /// The format is determined by the file extension:
     /// - `.atl`: Not supported for saving (ATL text format is input-only)
-    /// - `.xmi`: Saves as Eclipse ATL XMI format
+    /// - `.xmi`: Saves as Eclipse ATL XMI format, writing collection ranges with
+    ///   the ``ATLOptions/collectionRangeEncoding`` of the resource
     ///
     /// - Throws: `ATLResourceError` if saving fails or module is nil
     public func save() async throws {
@@ -158,7 +208,7 @@ public final class ATLResource {
             throw ATLResourceError.invalidURI("Not a valid file URI: \(uri)")
         }
 
-        let parser = ATLParser()
+        let parser = ATLParser(options: options)
         self.module = try await parser.parse(url)
     }
 
@@ -181,7 +231,7 @@ public final class ATLResource {
             throw ATLResourceError.invalidURI("Not a valid file URI: \(uri)")
         }
 
-        let serializer = ATLXMISerializer()
+        let serializer = ATLXMISerializer(options: options)
         let xmiText = try serializer.serialize(module)
         try xmiText.write(to: url, atomically: FileURIHandler.writesAtomically, encoding: .utf8)
     }

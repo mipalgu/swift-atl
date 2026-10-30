@@ -96,12 +96,14 @@ struct LanguageHarness {
     ///   - fixture: The metamodel bound to both the source and the target model.
     ///   - sources: Source models by alias.
     ///   - directives: Header comment directives placed before the module.
+    ///   - options: The parser options, or `nil` for the parser of swift-atl 0.6.
     static func make(
         declarations: String = "",
         expression: String = "OclUndefined",
         fixture: ShapeFixture = ShapeFixture(),
         sources: OrderedDictionary<String, Resource> = [:],
-        directives: String = ""
+        directives: String = "",
+        options: ATLOptions? = nil
     ) async throws -> LanguageHarness {
         let source = """
             \(directives)
@@ -111,7 +113,8 @@ struct LanguageHarness {
             helper def : \(probeName)() : OclAny = \(expression);
             """
         let registry = ATLMetamodelRegistry(packages: [fixture.package])
-        let module = try await ATLParser().parseContent(source, metamodelRegistry: registry)
+        let parser = options.map { ATLParser(options: $0) } ?? ATLParser()
+        let module = try await parser.parseContent(source, metamodelRegistry: registry)
         let context = ATLExecutionContext(
             module: module, sources: sources, targets: [:],
             executionEngine: ECoreExecutionEngine(models: [:]))
@@ -125,10 +128,12 @@ struct LanguageHarness {
         _ expression: String,
         declarations: String = "",
         fixture: ShapeFixture = ShapeFixture(),
-        sources: OrderedDictionary<String, Resource> = [:]
+        sources: OrderedDictionary<String, Resource> = [:],
+        options: ATLOptions? = nil
     ) async throws -> (any EcoreValue)? {
         let harness = try await make(
-            declarations: declarations, expression: expression, fixture: fixture, sources: sources)
+            declarations: declarations, expression: expression, fixture: fixture, sources: sources,
+            options: options)
         return try await harness.context.callHelper(probeName, arguments: [])
     }
 }
