@@ -24,7 +24,7 @@ import Foundation
 ///
 /// ```swift
 /// let registry = ATLMetamodelRegistry(packages: [ecorePackage, genModelPackage])
-/// let module = try await ATLParser().parse(url, metamodelRegistry: registry)
+/// let module = try await ATLParser(options: .standard).parse(url, metamodelRegistry: registry)
 /// ```
 public struct ATLMetamodelRegistry: Sendable {
 

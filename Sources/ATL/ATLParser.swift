@@ -57,17 +57,52 @@ public enum ATLParseError: Error, Sendable {
 /// ## Example Usage
 ///
 /// ```swift
-/// let parser = ATLParser()
+/// let parser = ATLParser(options: .standard)
 /// let module = try await parser.parse(atlFileURL)
 /// ```
+///
+/// ## Options
+///
+/// The ``options`` of a parser select how source is read. With the OCL
+/// ``ATLOptions/collectionRangeSyntax`` of ``ATLOptions/standard``, collection
+/// literals accept integer ranges such as `Sequence{1..3}`. With the Eclipse syntax
+/// of ``ATLOptions/legacy``, which ``init(enableDebugging:)`` uses, a range is a
+/// syntax error, as it is in Eclipse ATL and swift-atl 0.6.
 ///
 /// - Note: This is a simplified parser focused on supporting the Swift ATL implementation.
 ///   It may not support all advanced ATL features found in Eclipse ATL.
 public actor ATLParser {
     private let debug: Bool
 
-    /// Public initializer for ATLParser
+    /// The options that select how ATL source is read.
+    ///
+    /// The ``ATLOptions/collectionRangeSyntax`` decides whether collection literals
+    /// may hold integer ranges such as `Sequence{1..3}`.
+    public nonisolated let options: ATLOptions
+
+    /// Creates a parser that reads ATL source as swift-atl 0.6 did.
+    ///
+    /// The parser uses ``ATLOptions/legacy``, so it rejects collection ranges such
+    /// as `Sequence{1..3}`.
+    ///
+    /// - Parameter enableDebugging: Whether the parser prints debugging output.
+    @available(
+        *, deprecated,
+        message:
+            "Use init(options:enableDebugging:) with .standard to accept collection ranges such as Sequence{1..3}, or with .legacy to keep rejecting them as swift-atl 0.6 does"
+    )
     public init(enableDebugging: Bool = false) {
+        self.init(options: .legacy, enableDebugging: enableDebugging)
+    }
+
+    /// Creates a parser with the given options.
+    ///
+    /// - Parameters:
+    ///   - options: The options that select how ATL source is read, such as
+    ///     ``ATLOptions/standard`` for the current behaviour.
+    ///   - enableDebugging: Whether the parser prints debugging output.
+    public init(options: ATLOptions, enableDebugging: Bool = false) {
+        self.options = options
         debug = enableDebugging
     }
 
@@ -107,7 +142,7 @@ public actor ATLParser {
         continueAfterErrors: Bool = true,
         metamodelRegistry: ATLMetamodelRegistry = .empty
     ) async throws -> ATLModule {
-        let lexer = ATLLexer(content: content)
+        let lexer = ATLLexer(content: content, collectionRangeSyntax: options.collectionRangeSyntax)
         let tokens = try lexer.tokenize()
         if let directiveError = lexer.directives.errors.first {
             throw ATLParseError.invalidSyntax(directiveError)
@@ -159,7 +194,7 @@ public actor ATLParser {
         name: String,
         metamodelRegistry: ATLMetamodelRegistry = .empty
     ) async -> ATLParseResult {
-        let lexer = ATLLexer(content: content)
+        let lexer = ATLLexer(content: content, collectionRangeSyntax: options.collectionRangeSyntax)
         let scan = lexer.scanAll()
         var diagnostics: [SourceDiagnostic] = scan.problems.map {
             SourceDiagnostic(
@@ -1242,8 +1277,64 @@ private class ATLSyntaxParser {
         )
     }
 
+    /// Parses an expression.
+    ///
+    /// A range separator directly after the expression is reported here, because
+    /// a range such as `1..3` is only valid as a part of a collection literal,
+    /// which parses its parts with ``parseCollectionLiteralPart()`` instead.
+    ///
+    /// - Returns: The parsed expression.
+    /// - Throws: ``ATLParseError`` when the tokens do not form an expression.
     private func parseExpression() throws -> any ATLExpression {
-        return try parseConditionalExpression()
+        let expression = try parseConditionalExpression()
+        if let separator = currentToken(), isRangeSeparator(separator) {
+            throw ATLParseError.invalidSyntax(
+                "A range 'first\(ATLLanguage.rangeSeparator)last' at \(describe(separator)) is only allowed inside a collection literal, as in 'Sequence{1\(ATLLanguage.rangeSeparator)3}'"
+            )
+        }
+        return expression
+    }
+
+    /// Parses one part of a collection literal: an item or a range `first..last`.
+    ///
+    /// - Returns: The item expression, or an ``ATLCollectionRangeExpression`` for a range.
+    /// - Throws: ``ATLParseError`` when the part is malformed, for example when a
+    ///   range lacks its first or its last value.
+    private func parseCollectionLiteralPart() throws -> any ATLExpression {
+        let start = position
+        let separatorText = ATLLanguage.rangeSeparator
+        if let separator = currentToken(), isRangeSeparator(separator) {
+            throw ATLParseError.invalidSyntax(
+                "Expected the first value of the range before '\(separatorText)' at \(describe(separator))"
+            )
+        }
+        let first = try parseConditionalExpression()
+        guard let separator = currentToken(), isRangeSeparator(separator) else { return first }
+        advance()
+        if let next = currentToken(), endsCollectionLiteralPart(next) {
+            throw ATLParseError.invalidSyntax(
+                "Expected the last value of the range after '\(separatorText)' at \(describe(separator)), but found '\(next.type == .eof ? "EOF" : next.value)'"
+            )
+        }
+        let last = try parseConditionalExpression()
+        return ATLCollectionRangeExpression(first: first, last: last, origin: origin(from: start))
+    }
+
+    /// Whether a token is the separator of a collection range.
+    ///
+    /// - Parameter token: The token to test.
+    /// - Returns: `true` for the `..` operator.
+    private func isRangeSeparator(_ token: ATLToken) -> Bool {
+        token.type == .operator(ATLLanguage.rangeSeparator)
+    }
+
+    /// Whether a token cannot start an expression because it ends a collection literal part.
+    ///
+    /// - Parameter token: The token to test.
+    /// - Returns: `true` for a comma, a closing brace, a range separator or the end of input.
+    private func endsCollectionLiteralPart(_ token: ATLToken) -> Bool {
+        token.type == .punctuation(",") || token.type == .punctuation("}") || token.type == .eof
+            || isRangeSeparator(token)
     }
 
     private func parseConditionalExpression() throws -> any ATLExpression {
@@ -1486,6 +1577,11 @@ private class ATLSyntaxParser {
                 op == "." || op == "->"
             {
                 advance()
+                if op == ".", let next = currentToken(), next.type == token.type,
+                    next.offset == token.offset + op.utf8.count
+                {
+                    throw unsupportedRange(at: position - 1)
+                }
                 guard let nameToken = currentToken(),
                     case .identifier(let propertyName) = nameToken.type
                 else {
@@ -1631,9 +1727,9 @@ private class ATLSyntaxParser {
 
             var elements: [any ATLExpression] = []
 
-            // Parse elements if any
+            // Parse elements if any, each an item or a range
             while !isAtEnd() && !(currentToken()?.type == .punctuation("}")) {
-                elements.append(try parseExpression())
+                elements.append(try parseCollectionLiteralPart())
 
                 if let commaToken = currentToken(), case .punctuation(let p) = commaToken.type,
                     p == ","
@@ -1645,6 +1741,11 @@ private class ATLSyntaxParser {
             }
 
             guard consumePunctuation("}") else {
+                if let separator = currentToken(), isRangeSeparator(separator) {
+                    throw ATLParseError.invalidSyntax(
+                        "A collection range has only one '\(ATLLanguage.rangeSeparator)', but another one follows at \(describe(separator))"
+                    )
+                }
                 throw ATLParseError.invalidSyntax("Expected '}' after collection elements")
             }
 
@@ -1775,6 +1876,20 @@ private class ATLSyntaxParser {
     /// Describes where a token is for use in messages.
     private func describe(_ token: ATLToken) -> String {
         "line \(token.line), column \(token.column)"
+    }
+
+    /// Creates the error for a collection range in source read without OCL range syntax.
+    ///
+    /// Without OCL range syntax, the lexer reads the range separator as two adjacent
+    /// `.` tokens, so the error covers both of them.
+    ///
+    /// - Parameter index: The index of the first `.` token.
+    /// - Returns: The error to throw.
+    private func unsupportedRange(at index: Int) -> ATLParseError {
+        let first = tokens[index]
+        let second = tokens[min(index + 1, tokens.count - 1)]
+        errorRangeOverride = SourceRange(start: first.start, end: second.end)
+        return .invalidSyntax(ATLLanguage.unsupportedRangeMessage(at: describe(first)))
     }
 
     /// Creates an unsupported-construct error that is reported at a token.

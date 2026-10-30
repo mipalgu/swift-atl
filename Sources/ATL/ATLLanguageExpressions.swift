@@ -55,6 +55,129 @@ public struct ATLEnumLiteralExpression: ATLExpression, Equatable, Hashable {
     }
 }
 
+/// A range of integers that is a part of a collection literal, as in `Sequence{1..3}`.
+///
+/// A range stands for every integer from its first to its last value, both
+/// included and in ascending order. It may appear in a `Sequence`, `Set`,
+/// `OrderedSet` or `Bag` literal and may be mixed with ordinary items, as in
+/// `Sequence{0, 2..4, 9}`, which holds `0, 2, 3, 4, 9`. A range whose first value
+/// is greater than its last value contributes no elements, and a `Set` or an
+/// `OrderedSet` keeps only the first occurrence of each integer.
+///
+/// Both bounds may be arbitrary expressions, but each must evaluate to an
+/// `Integer`; any other value, including the undefined value, is a type error.
+///
+/// ## Example Usage
+///
+/// ```swift
+/// // Sequence{1..n}
+/// let literal = ATLCollectionLiteralExpression(
+///     collectionType: "Sequence",
+///     elements: [
+///         ATLCollectionRangeExpression(
+///             first: ATLLiteralExpression(value: 1),
+///             last: ATLVariableExpression(name: "n"))
+///     ])
+/// ```
+public struct ATLCollectionRangeExpression: ATLExpression, Equatable, Hashable {
+
+    /// The expression for the first integer of the range.
+    public let first: any ATLExpression
+
+    /// The expression for the last integer of the range.
+    public let last: any ATLExpression
+
+    /// The source range the node was parsed from, if it was parsed.
+    ///
+    /// The origin never takes part in equality or hashing, so nodes that differ only
+    /// in where they were written compare equal.
+    public let origin: SourceOrigin
+
+    /// Creates a collection range.
+    ///
+    /// - Parameters:
+    ///   - first: The expression for the first integer of the range.
+    ///   - last: The expression for the last integer of the range.
+    ///   - origin: The source range the node was parsed from.
+    public init(first: any ATLExpression, last: any ATLExpression, origin: SourceOrigin = .init()) {
+        self.first = first
+        self.last = last
+        self.origin = origin
+    }
+
+    /// Evaluates the range to the sequence of the integers it spans.
+    ///
+    /// Inside a collection literal, the integers become elements of the literal
+    /// instead, so a range never appears there as a nested sequence.
+    ///
+    /// - Parameter context: The execution context in which the bounds are evaluated.
+    /// - Returns: A `Sequence` of the integers from the first to the last value.
+    /// - Throws: ``ATLExecutionError/typeError(_:)`` when a bound is not an `Integer`,
+    ///   or ``ATLExecutionError/runtimeError(_:)`` when the range is too long to build.
+    @MainActor
+    public func evaluate(in context: ATLExecutionContext) async throws -> (any EcoreValue)? {
+        ATLCollections.make(kind: .sequence, try await integers(in: context))
+    }
+
+    /// Evaluates the bounds and returns the integers the range spans.
+    ///
+    /// - Parameter context: The execution context in which the bounds are evaluated.
+    /// - Returns: The integers from the first to the last value in ascending order,
+    ///   or no integers when the first value is greater than the last value.
+    /// - Throws: ``ATLExecutionError/typeError(_:)`` when a bound is not an `Integer`,
+    ///   or ``ATLExecutionError/runtimeError(_:)`` when the range would hold more than
+    ///   the number of integers that `includingRange` may add in one call.
+    @MainActor
+    func integers(in context: ATLExecutionContext) async throws -> [any EcoreValue] {
+        let low = try Self.bound(try await first.evaluate(in: context), named: "first")
+        let high = try Self.bound(try await last.evaluate(in: context), named: "last")
+        guard low <= high else { return [] }
+        let limit = ATLBuiltinOperations.maximumRangeLength
+        let (span, overflow) = high.subtractingReportingOverflow(low)
+        guard !overflow, span < limit else {
+            throw ATLExecutionError.runtimeError(
+                "The collection range \(low)\(ATLLanguage.rangeSeparator)\(high) holds more than \(limit) integers")
+        }
+        return (low...high).map { $0 as any EcoreValue }
+    }
+
+    /// Checks that a bound of the range is an integer.
+    ///
+    /// - Parameters:
+    ///   - value: The value of the bound.
+    ///   - role: Which bound the value is, for the error message.
+    /// - Returns: The integer value of the bound.
+    /// - Throws: ``ATLExecutionError/typeError(_:)`` when the value is not an `Integer`.
+    private static func bound(_ value: (any EcoreValue)?, named role: String) throws -> Int {
+        guard let integer = value as? Int else {
+            let integerType = ATLLanguage.PrimitiveType.integer.rawValue
+            throw ATLExecutionError.typeError(
+                "The \(role) value of a collection range must be an \(integerType), not \(ATLTypeMatching.typeName(of: value))")
+        }
+        return integer
+    }
+
+    /// Compares two ranges by their bounds.
+    ///
+    /// - Parameters:
+    ///   - lhs: The first range.
+    ///   - rhs: The second range.
+    /// - Returns: `true` when both bounds are equal expressions.
+    public static func == (lhs: ATLCollectionRangeExpression, rhs: ATLCollectionRangeExpression)
+        -> Bool
+    {
+        areATLExpressionsEqual(lhs.first, rhs.first) && areATLExpressionsEqual(lhs.last, rhs.last)
+    }
+
+    /// Hashes the bounds of the range.
+    ///
+    /// - Parameter hasher: The hasher to combine the bounds into.
+    public func hash(into hasher: inout Hasher) {
+        hashATLExpression(first, into: &hasher)
+        hashATLExpression(last, into: &hasher)
+    }
+}
+
 /// The result of a built-in operation, which may legitimately be the undefined value.
 struct ATLBuiltinResult {
     /// The value produced by the operation, or `nil` for the undefined value.

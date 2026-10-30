@@ -42,7 +42,7 @@ import Foundation
 /// ## Example Usage
 ///
 /// ```swift
-/// let serializer = ATLXMISerializer()
+/// let serializer = ATLXMISerializer(options: .standard)
 /// let xmi = try serializer.serialize(atlModule)
 /// print(xmi)
 /// ```
@@ -50,11 +50,28 @@ public struct ATLXMISerializer {
 
     // MARK: - Initialisation
 
-    /// Creates a new ATL XMI serializer.
-    public init() {}
+    /// Creates a new ATL XMI serializer that behaves as in swift-atl 0.6.
+    ///
+    /// The serializer uses ``ATLOptions/legacy``, which writes collection ranges as
+    /// OCL collection ranges.
+    public init() {
+        self.init(options: .legacy)
+    }
+
+    /// Creates a new ATL XMI serializer with the given options.
+    ///
+    /// - Parameter options: The options whose ``ATLOptions/collectionRangeEncoding``
+    ///   selects how collection ranges are written.
+    public init(options: ATLOptions) {
+        self.options = options
+        self.expressionSerializer = ATLExpressionXMISerializer(options: options)
+    }
+
+    /// The options that select how collection ranges are written.
+    public let options: ATLOptions
 
     /// Expression serializer for handling expression trees.
-    private let expressionSerializer = ATLExpressionXMISerializer()
+    private let expressionSerializer: ATLExpressionXMISerializer
 
     // MARK: - Serialization
 
