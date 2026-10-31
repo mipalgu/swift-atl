@@ -15,7 +15,7 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-collections", from: "1.0.0"),
-        .package(url: "https://github.com/mipalgu/swift-ecore", exact: "0.6.2"),
+        .package(url: "https://github.com/mipalgu/swift-ecore", exact: "0.6.4"),
         .package(url: "https://github.com/swiftxml/SwiftXML.git", from: "1.0.0"),
     ],
     targets: [
