@@ -76,6 +76,19 @@ listing the integers, as in `Sequence{1, 2, 3}`, or calling `includingRange`, as
 `ATLParser(options: .legacy)`. Parse errors now also describe themselves through
 `localizedDescription`.
 
+``ATLOptions/init(semantics:)`` selects ``ATLOptions/standard`` or ``ATLOptions/legacy``
+from a `ModellingSemantics` value, and ``ATLOptions/fromEnvironment(_:)`` reads that choice
+from the `SWIFT_MODELLING_SEMANTICS` environment variable (`standard` or `legacy`;
+``ATLOptions/standard`` if it is unset):
+
+```swift
+let parser = ATLParser(options: try ATLOptions.fromEnvironment())
+```
+
+The `eContainer()` family of operations finds containers through the resources of the
+models, in the container lookup scope configured for each resource or its resource set
+(`ContainerLookupScope`), and in the scope of version 0.6 if none is configured.
+
 ## Topics
 
 ### Essentials

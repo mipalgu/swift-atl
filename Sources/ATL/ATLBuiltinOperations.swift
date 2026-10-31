@@ -994,13 +994,32 @@ struct ATLConsole {
     /// Output lines are printed, so that they keep their order with other text the
     /// process prints. Error lines are written through ``ATLStandardErrorStream``.
     static var system: ATLConsole {
+        system(errors: ATLStandardErrorStream())
+    }
+
+    /// The console that prints its output lines and writes its error lines to a stream.
+    ///
+    /// - Parameter errors: The stream that receives the error lines.
+    /// - Returns: The console.
+    private static func system(errors: ATLStandardErrorStream) -> ATLConsole {
         ATLConsole(
             writeOutput: { print($0) },
             writeError: {
-                var errors = ATLStandardErrorStream()
+                var errors = errors
                 print($0, to: &errors)
             })
     }
+
+    #if !os(Windows)
+    /// The console that prints its output lines and writes its error lines to a descriptor
+    /// in place of standard error.
+    ///
+    /// - Parameter errorDescriptor: The open file descriptor that receives the error lines.
+    /// - Returns: The console.
+    static func system(errorDescriptor: Int32) -> ATLConsole {
+        system(errors: ATLStandardErrorStream(descriptor: errorDescriptor))
+    }
+    #endif
 }
 
 /// A text output stream that writes to the standard error of the process.
@@ -1010,6 +1029,19 @@ struct ATLConsole {
 /// cannot be created. Text that standard error cannot take, for example because
 /// it has been closed, is dropped instead of stopping the transformation.
 struct ATLStandardErrorStream: TextOutputStream {
+    #if !os(Windows)
+    /// The file descriptor written to, standard error unless another is given.
+    let descriptor: Int32
+
+    /// Creates a stream that writes to a file descriptor.
+    ///
+    /// - Parameter descriptor: The open file descriptor to write to; by default standard
+    ///   error.
+    init(descriptor: Int32 = STDERR_FILENO) {
+        self.descriptor = descriptor
+    }
+    #endif
+
     /// Writes text to standard error.
     ///
     /// - Parameter string: The text to write.
@@ -1017,24 +1049,26 @@ struct ATLStandardErrorStream: TextOutputStream {
         #if os(Windows)
         try? FileHandle.standardError.write(contentsOf: Data(string.utf8))
         #else
-        writeToStandardErrorDescriptor(Array(string.utf8))
+        writeToDescriptor(descriptor, Array(string.utf8))
         #endif
     }
 }
 
 #if !os(Windows)
-/// Writes bytes to the standard error descriptor of the process.
+/// Writes bytes to a file descriptor.
 ///
 /// The bytes are written in as many calls as the descriptor accepts. The
 /// remainder is dropped when a call writes nothing or fails, so that a closed
 /// or unwritable standard error never stops the caller.
 ///
-/// - Parameter bytes: The bytes to write.
-private func writeToStandardErrorDescriptor(_ bytes: [UInt8]) {
+/// - Parameters:
+///   - descriptor: The file descriptor to write to.
+///   - bytes: The bytes to write.
+private func writeToDescriptor(_ descriptor: Int32, _ bytes: [UInt8]) {
     var remaining = bytes[...]
     while !remaining.isEmpty {
         let written = remaining.withUnsafeBytes { buffer in
-            write(STDERR_FILENO, buffer.baseAddress, buffer.count)
+            write(descriptor, buffer.baseAddress, buffer.count)
         }
         guard written > 0 else { return }
         remaining = remaining.dropFirst(written)
