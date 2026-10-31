@@ -347,6 +347,8 @@ The APIs that take an `ATLOptions` value (`ATLParser(options:enableDebugging:)`,
 
 With `.eclipse`, a range is reported as a syntax error whose message names the portable alternatives: listing the integers, as in `Sequence{1, 2, 3}`, or calling `includingRange`, as in `Sequence{}->includingRange(1, 3)`, which the Eclipse ATL EMFTVM provides. With `.portable`, a range whose bounds are integer literals is written as its integers, and any other range as a call of `includingRange`, with the items after it added by `includingAll`; both operations exist in swift-atl 0.6 and in the Eclipse ATL EMFTVM, which however reports an error for an empty range. To keep the 0.6 behaviour with the new APIs, pass `.legacy`, for example `ATLParser(options: .legacy)`. Parse errors now also describe themselves through `localizedDescription` instead of naming their case number.
 
+`ATLOptions(semantics:)` selects `.standard` or `.legacy` from a `ModellingSemantics` value, and `ATLOptions.fromEnvironment()` reads that choice from the `SWIFT_MODELLING_SEMANTICS` environment variable (`standard` or `legacy`; `.standard` if it is unset, and an error for any other value), for example `ATLParser(options: try ATLOptions.fromEnvironment())`. The `eContainer()` family of operations finds containers through the resources of the models, in the `ContainerLookupScope` configured for each resource or its resource set, and in the scope of version 0.6 if none is configured.
+
 ## References
 
 This implementation is based on the following standards and technologies:

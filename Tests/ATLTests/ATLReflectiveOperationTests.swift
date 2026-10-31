@@ -585,34 +585,27 @@ struct ATLReflectiveOperationTests {
     }
 
     #if !os(WASI) && !os(Windows)
-    /// Runs a body while the standard error of the process is redirected.
+    /// Writes error lines through the system console and returns what reached its error
+    /// descriptor.
     ///
-    /// - Parameters:
-    ///   - descriptor: The file descriptor that receives what is written to standard error.
-    ///   - body: The code to run while standard error is redirected.
-    private func redirectingStandardError(to descriptor: Int32, _ body: () -> Void) {
-        fflush(nil)
-        let saved = dup(STDERR_FILENO)
-        dup2(descriptor, STDERR_FILENO)
-        body()
-        fflush(nil)
-        dup2(saved, STDERR_FILENO)
-        close(saved)
-    }
-
-    /// Writes error lines through the system console and returns what reached standard error.
+    /// The console writes to a pipe in place of standard error, so that the text written by
+    /// tests that run meanwhile neither reaches the pipe nor is lost.
     ///
     /// - Parameter lines: The lines to write.
-    /// - Returns: The text written to standard error meanwhile.
+    /// - Returns: The text written to the error descriptor.
     private func standardErrorText(writing lines: [String]) throws -> String {
         let pipe = Pipe()
-        redirectingStandardError(to: pipe.fileHandleForWriting.fileDescriptor) {
-            for line in lines {
-                ATLConsole.system.writeError(line)
-            }
+        let console = ATLConsole.system(errorDescriptor: pipe.fileHandleForWriting.fileDescriptor)
+        for line in lines {
+            console.writeError(line)
         }
         try pipe.fileHandleForWriting.close()
         return String(decoding: pipe.fileHandleForReading.readDataToEndOfFile(), as: UTF8.self)
+    }
+
+    @Test("The system console writes its error lines to standard error")
+    func systemConsoleUsesStandardError() {
+        #expect(ATLStandardErrorStream().descriptor == STDERR_FILENO)
     }
 
     @Test("The system console writes each error line, terminated, to standard error")
@@ -626,9 +619,7 @@ struct ATLReflectiveOperationTests {
         let readOnly = open("/dev/null", O_RDONLY)
         try #require(readOnly >= 0)
         defer { close(readOnly) }
-        redirectingStandardError(to: readOnly) {
-            ATLConsole.system.writeError("dropped console line")
-        }
+        ATLConsole.system(errorDescriptor: readOnly).writeError("dropped console line")
         let written = try standardErrorText(writing: ["restored console line"])
         #expect(written.contains("restored console line\n"))
         #expect(!written.contains("dropped console line"))
