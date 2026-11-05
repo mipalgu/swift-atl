@@ -144,6 +144,8 @@ let registry = ATLMetamodelRegistry(packages: [ecorePackage, genModelPackage])
 let module = try await ATLParser(options: .standard).parse(url, metamodelRegistry: registry)
 ```
 
+A relative `-- @path` is resolved against the directory of the transformation and then against each search directory given to `parseContent(_:filename:searchPaths:continueAfterErrors:metamodelRegistry:)`. A path that starts with `/` names a file in an Eclipse workspace, such as `/Families2Persons/Families.ecore` for `Families.ecore` in the project `Families2Persons`. It is looked up in each search directory, first as `Families2Persons/Families.ecore`, with the search directory as the workspace, and then as `Families.ecore`, with the search directory as the project directory itself.
+
 A registry can also be built from a table of namespace URIs, or given a resolver closure for URIs it does not hold. Type references such as `Ecore!EClass` use the name from the module header, which need not equal the name of the bound package.
 
 ### Module parameters

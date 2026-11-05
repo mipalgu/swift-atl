@@ -464,7 +464,30 @@ public actor ATLParser {
         return module.withMetamodels(source: sourceMetamodels, target: targetMetamodels)
     }
 
+    /// The paths, relative to a search directory, under which a workspace path is looked up.
+    ///
+    /// A workspace path such as `/Families2Persons/Families.ecore` names a file in an
+    /// Eclipse project: its first component is the project. Below a search directory, the
+    /// path is looked up first as it stands, with the search directory as the workspace,
+    /// and then without its project component, with the search directory as the project
+    /// directory itself. A transformation therefore finds the metamodels of its project
+    /// both in a copy of the workspace and in the project directory.
+    ///
+    /// - Parameter workspacePath: A path that starts with `/`.
+    /// - Returns: The relative path, followed by the path within the project if the path
+    ///   has more than one component.
+    static func workspaceCandidatePaths(for workspacePath: String) -> [String] {
+        let components = workspacePath.split(separator: "/", omittingEmptySubsequences: true)
+        let relativePath = components.joined(separator: "/")
+        guard components.count > 1 else { return [relativePath] }
+        return [relativePath, components.dropFirst().joined(separator: "/")]
+    }
+
     /// Loads a metamodel from an Ecore file.
+    ///
+    /// A relative path is resolved against the directory of the transformation and then
+    /// against each search directory. A workspace path, which starts with `/`, is looked up
+    /// in each search directory under the paths of ``workspaceCandidatePaths(for:)``.
     ///
     /// - Parameters:
     ///   - metamodelName: The name of the metamodel (from @path directive)
@@ -482,17 +505,14 @@ public actor ATLParser {
         var candidateURLs: [URL] = []
 
         if filePath.hasPrefix("/") {
-            // Workspace-relative path - search in search paths
-            // Remove leading '/' to get relative path
-            let relativePath = String(filePath.dropFirst())
-
-            // Try each search path
             for searchPath in searchPaths {
-                let candidate = URL(fileURLWithPath: searchPath)
-                    .appendingPathComponent(relativePath)
-                candidateURLs.append(candidate)
-                if debug {
-                    print("[ATL]     Workspace-relative candidate: \(candidate.path)")
+                for relativePath in Self.workspaceCandidatePaths(for: filePath) {
+                    let candidate = URL(fileURLWithPath: searchPath)
+                        .appendingPathComponent(relativePath)
+                    candidateURLs.append(candidate)
+                    if debug {
+                        print("[ATL]     Workspace-relative candidate: \(candidate.path)")
+                    }
                 }
             }
         } else {

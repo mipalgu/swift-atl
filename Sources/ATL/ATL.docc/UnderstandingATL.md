@@ -37,6 +37,18 @@ rule MyRule {                               -- Rule
 A query unit has no module declaration and no rules. It computes a single value from
 its input models, as described under Queries below.
 
+### Metamodel Paths
+
+A `-- @path Name=Name.ecore` directive in the header names the file of a metamodel. A
+relative path is resolved against the directory of the transformation and then against
+each search directory that the parser receives. A path that starts with `/` names a file
+in an Eclipse workspace, such as `/Families2Persons/Families.ecore` for `Families.ecore`
+in the project `Families2Persons`. It is looked up in each search directory, first as
+`Families2Persons/Families.ecore`, with the search directory as the workspace, and then
+as `Families.ecore`, with the search directory as the project directory itself. A
+transformation copied from an Eclipse project therefore finds its metamodels both in a
+copy of the workspace and in a copy of the project directory.
+
 ## Rule Types
 
 ATL supports three types of rules:
