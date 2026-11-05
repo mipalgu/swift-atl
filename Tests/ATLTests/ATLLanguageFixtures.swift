@@ -96,7 +96,8 @@ struct LanguageHarness {
     ///   - fixture: The metamodel bound to both the source and the target model.
     ///   - sources: Source models by alias.
     ///   - directives: Header comment directives placed before the module.
-    ///   - options: The parser options, or `nil` for the parser of swift-atl 0.6.
+    ///   - options: The options of the parser and the execution context, or `nil` for the
+    ///     parser and execution context of swift-atl 0.6.
     static func make(
         declarations: String = "",
         expression: String = "OclUndefined",
@@ -118,6 +119,7 @@ struct LanguageHarness {
         let context = ATLExecutionContext(
             module: module, sources: sources, targets: [:],
             executionEngine: ECoreExecutionEngine(models: [:]))
+        if let options { context.options = options }
         await context.executionEngine.enableDefaultValues()
         return LanguageHarness(module: module, context: context)
     }

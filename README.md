@@ -101,6 +101,7 @@ try await xmiResource.save()
 - `Sequence{}`, `OrderedSet{}`, `Set{}` and `Bag{}` literals keep their elements, not descriptions of them. Sets and ordered sets remain duplicate-free through `union`, `including`, `append` and friends.
 - Collection literals accept OCL integer ranges `first..last`, alone or mixed with items: `Sequence{0, 2..4, 9}` holds `0, 2, 3, 4, 9`. Both bounds may be expressions but must be Integers; a range whose first value exceeds its last is empty, and sets keep each integer once. Ranges are an OCL feature that the Eclipse ATL compilers do not accept, so transformations that use them do not run on Eclipse ATL; `includingRange` is the portable alternative. Parsing with `ATLOptions(collectionRangeSyntax: .eclipse)` rejects ranges as Eclipse ATL does (see [Compatibility with 0.6](#compatibility-with-06)).
 - Infix `implies`, `xor`, `div` and `mod` follow OCL precedence: `implies` binds weakest, then `or` and `xor`, then `and`. Logical operators use three-valued logic with `OclUndefined`.
+- `/` divides as OCL and Eclipse ATL do: the quotient is a Real even for two Integers, so `7 / 2` is `3.5` and `8 / 2` is `4.0`. `div` and `mod` take Integers: `div` truncates the quotient towards zero and `mod` gives the remainder with the sign of the dividend, so `-7 div 2` is `-3` and `-7 mod 2` is `-1`. Dividing by zero is an error. A virtual machine created with `ATLOptions(integerDivision: .truncating)`, or without options, truncates the quotient of two Integers as swift-atl 0.6 did (see [Compatibility with 0.6](#compatibility-with-06)).
 
 ### Built-in operations
 
@@ -128,7 +129,7 @@ let greet = ATLNativeHelper(
 ) { _, arguments in
     "hello \(arguments.first.flatMap { $0 as? String } ?? "")"
 }
-let machine = ATLVirtualMachine(module: module, nativeHelpers: [greet])
+let machine = ATLVirtualMachine(module: module, options: .standard, nativeHelpers: [greet])
 machine.register(otherHelper)  // helpers can also be added later
 ```
 
@@ -162,7 +163,7 @@ Header comments declare parameters of type `String`, `Integer`, `Boolean` or `Re
 The caller supplies values when executing, and the transformation reads them as `thisModule.projectName`:
 
 ```swift
-try await ATLVirtualMachine(module: module).execute(
+try await ATLVirtualMachine(module: module, options: .standard).execute(
     sources: ["IN": input], targets: ["OUT": output],
     parameters: ["projectName": "demo", "generateTests": true])
 ```
@@ -186,7 +187,7 @@ rule Rename {
 Each target model starts as a copy of the source model in the same position of the header, so the module declares as many target models as source models, each with the metamodel of its source model. Elements that no rule matches are copied with their attribute values and with their references pointing to the copies. In a matched rule, the first target pattern whose type is the type of the first source pattern denotes the matched element itself: its bound features take their new values and its other features keep theirs. Other target patterns, lazy rules and called rules create new elements. Rules match and navigate the unchanged source models, which are never modified, and a source element in a bound value resolves to the target element of the matched rule that transformed it or, failing that, to its copy. `ATLModule.refining()` selects the same mode for a module whose header uses `from`:
 
 ```swift
-try await ATLVirtualMachine(module: module.refining()).execute(
+try await ATLVirtualMachine(module: module.refining(), options: .standard).execute(
     sources: ["IN": input], targets: ["OUT": output])
 ```
 
@@ -224,11 +225,11 @@ helper def : unit : String = 'books';
 
 ```swift
 let query = try await ATLParser(options: .standard).parse(queryURL)
-let value = try await ATLVirtualMachine(module: query).evaluateQuery(sources: ["Library": library])
+let value = try await ATLVirtualMachine(module: query, options: .standard).evaluateQuery(sources: ["Library": library])
 
 // Name the model IN, so that the query can use allInstancesFrom('IN')
 let renamed = query.declaringSourceModels(["IN": "Library"])
-let count = try await ATLVirtualMachine(module: renamed).evaluateQuery(sources: ["IN": library])
+let count = try await ATLVirtualMachine(module: renamed, options: .standard).evaluateQuery(sources: ["IN": library])
 ```
 
 Helpers, `thisModule` and `-- @param` parameters work in queries as they do in modules. A query whose value is a string often ends with `writeTo`, in which case its value is `true`, as in Eclipse ATL.
@@ -241,7 +242,7 @@ Writing files is disabled by default: a transformation or query that calls eithe
 
 ```swift
 // Write only inside the output directory
-let vm = ATLVirtualMachine(module: query, fileOutput: .confined(to: outputDirectory))
+let vm = ATLVirtualMachine(module: query, options: .standard, fileOutput: .confined(to: outputDirectory))
 
 // Trusted code only: relative paths resolve against the directory, absolute paths are accepted
 vm.fileOutput = .unrestricted(relativeTo: outputDirectory)
@@ -382,14 +383,15 @@ Swift ATL targets compatibility with:
 
 ### Compatibility with 0.6
 
-The APIs that take an `ATLOptions` value (`ATLParser(options:enableDebugging:)`, `ATLResource(uri:options:)`, `ATLResource(uri:module:options:)`, `ATLXMISerializer(options:)`, `ATLExpressionXMISerializer(options:)` and `ATLSyntax.tokens(in:options:)`) default to the current behaviour, `ATLOptions.standard`, which `ATLOptions()` also gives. The APIs of swift-atl 0.6, which take no options, keep the 0.6 behaviour by using `ATLOptions.legacy`. `ATLParser(enableDebugging:)`, `ATLResource(uri:)`, `ATLResource(uri:module:)` and `ATLSyntax.tokens(in:)` now behave differently from the default and are deprecated in favour of the variants that take options.
+The APIs that take an `ATLOptions` value (`ATLParser(options:enableDebugging:)`, `ATLVirtualMachine(module:options:enableDebugging:unsetFeatureReads:nativeHelpers:fileOutput:)`, `ATLResource(uri:options:)`, `ATLResource(uri:module:options:)`, `ATLXMISerializer(options:)`, `ATLExpressionXMISerializer(options:)` and `ATLSyntax.tokens(in:options:)`) default to the current behaviour, `ATLOptions.standard`, which `ATLOptions()` also gives. The APIs of swift-atl 0.6, which take no options, keep the 0.6 behaviour by using `ATLOptions.legacy`. `ATLParser(enableDebugging:)`, `ATLVirtualMachine(module:enableDebugging:unsetFeatureReads:nativeHelpers:fileOutput:)`, `ATLResource(uri:)`, `ATLResource(uri:module:)` and `ATLSyntax.tokens(in:)` now behave differently from the default and are deprecated in favour of the variants that take options.
 
 | Behaviour | Default | Option | 0.6 behaviour |
 | :-- | :-- | :-- | :-- |
 | Integer ranges in collection literals, such as `Sequence{1..3}` | Accepted (`.ocl`) | `collectionRangeSyntax` (`ATLCollectionRangeSyntax`) | `.eclipse`: rejected, as in Eclipse ATL, and `..` is two `.` tokens |
 | Collection ranges in XMI | `.collectionRange`: an OCL `CollectionRange` part that reads back unchanged | `collectionRangeEncoding` (`ATLCollectionRangeEncoding`) | No ranges could be written; `.portable` writes them with expressions that 0.6 reads |
+| `/` on two Integers, such as `7 / 2` | `.real`: a Real (`3.5`), as in OCL and Eclipse ATL | `integerDivision` (`ATLIntegerDivision`) | `.truncating`: an Integer truncated towards zero (`3`), as `div` gives |
 
-With `.eclipse`, a range is reported as a syntax error whose message names the portable alternatives: listing the integers, as in `Sequence{1, 2, 3}`, or calling `includingRange`, as in `Sequence{}->includingRange(1, 3)`, which the Eclipse ATL EMFTVM provides. With `.portable`, a range whose bounds are integer literals is written as its integers, and any other range as a call of `includingRange`, with the items after it added by `includingAll`; both operations exist in swift-atl 0.6 and in the Eclipse ATL EMFTVM, which however reports an error for an empty range. To keep the 0.6 behaviour with the new APIs, pass `.legacy`, for example `ATLParser(options: .legacy)`. Parse errors now also describe themselves through `localizedDescription` instead of naming their case number.
+With `.eclipse`, a range is reported as a syntax error whose message names the portable alternatives: listing the integers, as in `Sequence{1, 2, 3}`, or calling `includingRange`, as in `Sequence{}->includingRange(1, 3)`, which the Eclipse ATL EMFTVM provides. With `.portable`, a range whose bounds are integer literals is written as its integers, and any other range as a call of `includingRange`, with the items after it added by `includingAll`; both operations exist in swift-atl 0.6 and in the Eclipse ATL EMFTVM, which however reports an error for an empty range. To keep the 0.6 behaviour with the new APIs, pass `.legacy`, for example `ATLParser(options: .legacy)` or `ATLVirtualMachine(module: module, options: .legacy)`. Parse errors now also describe themselves through `localizedDescription` instead of naming their case number.
 
 `ATLOptions(semantics:)` selects `.standard` or `.legacy` from a `ModellingSemantics` value, and `ATLOptions.fromEnvironment()` reads that choice from the `SWIFT_MODELLING_SEMANTICS` environment variable (`standard` or `legacy`; `.standard` if it is unset, and an error for any other value), for example `ATLParser(options: try ATLOptions.fromEnvironment())`. The `eContainer()` family of operations finds containers through the resources of the models, in the `ContainerLookupScope` configured for each resource or its resource set, and in the scope of version 0.6 if none is configured.
 

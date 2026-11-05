@@ -106,11 +106,13 @@ print("Rules: \(module.matchedRules.count)")
 
 ## Configuring the Virtual Machine
 
-Create an ``ATLVirtualMachine`` and register your metamodels and models:
+Create an ``ATLVirtualMachine`` and register your metamodels and models. The
+``ATLOptions/standard`` options evaluate expressions as OCL and Eclipse ATL do, so
+`7 / 2` is the Real `3.5`:
 
 ```swift
 // Create the virtual machine
-let vm = ATLVirtualMachine(module: module)
+let vm = ATLVirtualMachine(module: module, options: .standard)
 
 // Register metamodels (names must match the ATL module declaration)
 try await vm.registerSourceMetamodel(umlMetamodel, as: "UML")
@@ -188,7 +190,7 @@ let greet = ATLNativeHelper(
 ) { _, arguments in
     "hello \(arguments.first.flatMap { $0 as? String } ?? "")"
 }
-let machine = ATLVirtualMachine(module: module, nativeHelpers: [greet])
+let machine = ATLVirtualMachine(module: module, options: .standard, nativeHelpers: [greet])
 machine.register(otherHelper)  // helpers can also be added later
 ```
 
@@ -231,7 +233,7 @@ by default:
 ```swift
 let query = try await ATLParser(options: .standard).parse(URL(fileURLWithPath: "LibraryGraph.atl"))
 let vm = ATLVirtualMachine(
-    module: query, fileOutput: .confined(to: URL(fileURLWithPath: "output")))
+    module: query, options: .standard, fileOutput: .confined(to: URL(fileURLWithPath: "output")))
 let written = try await vm.evaluateQuery(sources: ["Library": libraryModel])
 ```
 
@@ -243,7 +245,7 @@ resolved.
 Enable debugging to trace execution:
 
 ```swift
-let vm = ATLVirtualMachine(module: module, enableDebugging: true)
+let vm = ATLVirtualMachine(module: module, options: .standard, enableDebugging: true)
 ```
 
 This prints detailed information about rule matching and element creation.

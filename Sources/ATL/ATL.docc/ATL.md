@@ -48,7 +48,7 @@ let parser = ATLParser(options: .standard)
 let module = try await parser.parse(URL(fileURLWithPath: "Class2Table.atl"))
 
 // Create and configure the virtual machine
-let vm = ATLVirtualMachine(module: module)
+let vm = ATLVirtualMachine(module: module, options: .standard)
 try await vm.registerSourceMetamodel(umlMetamodel, as: "UML")
 try await vm.registerTargetMetamodel(dbMetamodel, as: "DB")
 try await vm.registerSourceModel(classModel, as: "IN")
@@ -69,13 +69,21 @@ from the default are deprecated in favour of the variant that takes options.
 | :-- | :-- | :-- | :-- |
 | Integer ranges in collection literals, such as `Sequence{1..3}` | Accepted | ``ATLOptions/collectionRangeSyntax`` | ``ATLCollectionRangeSyntax/eclipse``: rejected, as in Eclipse ATL |
 | Collection ranges in XMI | ``ATLCollectionRangeEncoding/collectionRange`` | ``ATLOptions/collectionRangeEncoding`` | No ranges could be written; ``ATLCollectionRangeEncoding/portable`` writes them with expressions that 0.6 reads |
+| `/` on two Integers, such as `7 / 2` | ``ATLIntegerDivision/real``: a Real (`3.5`), as in OCL and Eclipse ATL | ``ATLOptions/integerDivision`` | ``ATLIntegerDivision/truncating``: an Integer truncated towards zero (`3`), as `div` gives |
 
 A rejected range is reported with a message that names the portable alternatives:
 listing the integers, as in `Sequence{1, 2, 3}`, or calling `includingRange`, as in
 `Sequence{}->includingRange(1, 3)`, which the Eclipse ATL EMFTVM provides. To keep the
 0.6 behaviour with the new APIs, pass ``ATLOptions/legacy``, for example
-`ATLParser(options: .legacy)`. Parse errors now also describe themselves through
-`localizedDescription`.
+`ATLParser(options: .legacy)` or `ATLVirtualMachine(module: module, options: .legacy)`.
+Parse errors now also describe themselves through `localizedDescription`.
+
+A virtual machine created with
+``ATLVirtualMachine/init(module:options:enableDebugging:unsetFeatureReads:nativeHelpers:fileOutput:)``
+evaluates expressions as its options select; one created without options truncates the
+quotient of two Integers, as swift-atl 0.6 did. `div` and `mod` behave alike under both:
+`div` truncates the quotient of two Integers towards zero and `mod` gives the remainder with
+the sign of the dividend, as in OCL and Eclipse ATL.
 
 ``ATLOptions/init(semantics:)`` selects ``ATLOptions/standard`` or ``ATLOptions/legacy``
 from a `ModellingSemantics` value, and ``ATLOptions/fromEnvironment(_:)`` reads that choice
@@ -137,6 +145,7 @@ models, in the container lookup scope configured for each resource or its resour
 - ``ATLOptions``
 - ``ATLCollectionRangeSyntax``
 - ``ATLCollectionRangeEncoding``
+- ``ATLIntegerDivision``
 - ``ATLLexer``
 - ``ATLSyntaxParser``
 

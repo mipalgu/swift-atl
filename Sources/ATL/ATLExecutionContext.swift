@@ -112,6 +112,15 @@ public final class ATLExecutionContext: Sendable {
     /// The default, ``ATLFileOutputPolicy/disabled``, makes both operations fail.
     public var fileOutput: ATLFileOutputPolicy = .disabled
 
+    /// The options that select how expressions are evaluated in this context.
+    ///
+    /// The ``ATLOptions/integerDivision`` decides whether `/` divides two Integers
+    /// into a Real or truncates the quotient. A context created with
+    /// ``init(module:sources:targets:executionEngine:commandStack:)`` evaluates as
+    /// swift-atl 0.6 did, with ``ATLOptions/legacy``; a virtual machine gives its
+    /// context the options it was created with.
+    public var options: ATLOptions = .legacy
+
     /// Back-reference to the owning virtual machine for called rule dispatch.
     public weak var virtualMachine: ATLVirtualMachine?
 

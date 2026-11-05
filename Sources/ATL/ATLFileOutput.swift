@@ -34,7 +34,7 @@ import Foundation
 ///
 /// ```swift
 /// let vm = ATLVirtualMachine(
-///     module: query, fileOutput: .confined(to: URL(fileURLWithPath: "output")))
+///     module: query, options: .standard, fileOutput: .confined(to: URL(fileURLWithPath: "output")))
 /// ```
 public struct ATLFileOutputPolicy: Sendable, Hashable {
 

@@ -87,7 +87,7 @@ import OrderedCollections
 /// ## Example Usage
 ///
 /// ```swift
-/// let vm = ATLVirtualMachine(module: transformationModule)
+/// let vm = ATLVirtualMachine(module: transformationModule, options: .standard)
 ///
 /// try await vm.execute(
 ///     sources: ["IN": sourceResource],
@@ -127,6 +127,14 @@ public final class ATLVirtualMachine {
     /// The mode is fixed when the machine is created.
     public let unsetFeatureReads: UnsetFeatureReads
 
+    /// The options that select how transformations executed by this machine evaluate
+    /// expressions.
+    ///
+    /// The ``ATLOptions/integerDivision`` decides whether `/` divides two Integers into
+    /// a Real, as in OCL and Eclipse ATL, or truncates the quotient, as swift-atl 0.6 did.
+    /// The options are fixed when the machine is created.
+    public let options: ATLOptions
+
     /// The monitor of the run in progress, if any.
     private var monitor: ATLRunMonitor?
 
@@ -149,7 +157,10 @@ public final class ATLVirtualMachine {
 
     // MARK: - Initialisation
 
-    /// Creates a new ATL virtual machine for the specified module.
+    /// Creates a virtual machine that evaluates expressions as swift-atl 0.6 did.
+    ///
+    /// The machine uses ``ATLOptions/legacy``, so `/` truncates the quotient of two
+    /// Integers to an Integer.
     ///
     /// - Parameters:
     ///   - module: The ATL module to execute
@@ -162,13 +173,46 @@ public final class ATLVirtualMachine {
     ///     They take precedence over module helpers of the same name; see ``ATLNativeHelper``.
     ///   - fileOutput: Where the `writeTo` and `writeToWithCharset` operations may write
     ///     files. The default, ``ATLFileOutputPolicy/disabled``, rejects every write.
-    public init(
+    @available(
+        *, deprecated,
+        message:
+            "Use init(module:options:enableDebugging:unsetFeatureReads:nativeHelpers:fileOutput:) with .standard to divide two Integers into a Real as OCL does, or with .legacy to keep truncating as swift-atl 0.6 does"
+    )
+    public convenience init(
         module: ATLModule, enableDebugging: Bool = false,
         unsetFeatureReads: UnsetFeatureReads = .defaults,
         nativeHelpers: [ATLNativeHelper] = [],
         fileOutput: ATLFileOutputPolicy = .disabled
     ) {
+        self.init(
+            module: module, options: .legacy, enableDebugging: enableDebugging,
+            unsetFeatureReads: unsetFeatureReads, nativeHelpers: nativeHelpers, fileOutput: fileOutput)
+    }
+
+    /// Creates a virtual machine for a module that evaluates expressions as the options select.
+    ///
+    /// - Parameters:
+    ///   - module: The ATL module to execute.
+    ///   - options: The options that select how expressions are evaluated, such as
+    ///     ``ATLOptions/standard`` for the current behaviour, in which `/` divides two
+    ///     Integers into a Real.
+    ///   - enableDebugging: Whether to enable debug output for systematic tracing.
+    ///   - unsetFeatureReads: How navigation reads a feature that the model leaves unset.
+    ///     The default, ``UnsetFeatureReads/defaults``, gives the feature's default value as
+    ///     the Eclipse Modeling Framework does; ``UnsetFeatureReads/undefined`` gives
+    ///     `OclUndefined` instead.
+    ///   - nativeHelpers: Helpers implemented in Swift that the transformation can call.
+    ///     They take precedence over module helpers of the same name; see ``ATLNativeHelper``.
+    ///   - fileOutput: Where the `writeTo` and `writeToWithCharset` operations may write
+    ///     files. The default, ``ATLFileOutputPolicy/disabled``, rejects every write.
+    public init(
+        module: ATLModule, options: ATLOptions, enableDebugging: Bool = false,
+        unsetFeatureReads: UnsetFeatureReads = .defaults,
+        nativeHelpers: [ATLNativeHelper] = [],
+        fileOutput: ATLFileOutputPolicy = .disabled
+    ) {
         self.module = module
+        self.options = options
         self.unsetFeatureReads = unsetFeatureReads
 
         // Create execution engine with empty models initially
@@ -178,6 +222,7 @@ public final class ATLVirtualMachine {
             module: module,
             executionEngine: executionEngine
         )
+        executionContext.options = options
         statistics = ATLExecutionStatistics()
         debug = enableDebugging
         // Wire back-reference so helpers and expressions can invoke called rules

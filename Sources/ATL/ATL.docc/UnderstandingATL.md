@@ -468,7 +468,7 @@ evaluates the query and returns its value:
 
 ```swift
 let query = try await ATLParser(options: .standard).parse(queryURL)
-let vm = ATLVirtualMachine(module: query)
+let vm = ATLVirtualMachine(module: query, options: .standard)
 let count = try await vm.evaluateQuery(sources: ["Library": libraryModel])
 ```
 
@@ -513,7 +513,7 @@ output with an ``ATLFileOutputPolicy``:
   a directory and accepts every other path. Use it only for trusted transformations.
 
 ```swift
-let vm = ATLVirtualMachine(module: query, fileOutput: .confined(to: outputDirectory))
+let vm = ATLVirtualMachine(module: query, options: .standard, fileOutput: .confined(to: outputDirectory))
 ```
 
 Eclipse ATL resolves a relative path against the workspace, or against the working
