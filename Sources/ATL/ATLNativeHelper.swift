@@ -34,7 +34,7 @@ import EMFBase
 /// ) { _, arguments in
 ///     "hello \(arguments.first.flatMap { $0 as? String } ?? "")"
 /// }
-/// let machine = ATLVirtualMachine(module: module, nativeHelpers: [greet])
+/// let machine = ATLVirtualMachine(module: module, options: .standard, nativeHelpers: [greet])
 /// ```
 public struct ATLNativeHelper: ATLHelperType, Sendable {
 

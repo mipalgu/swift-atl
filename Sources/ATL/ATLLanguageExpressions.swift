@@ -218,12 +218,16 @@ enum ATLOperatorSemantics {
     ///   - operator: The operator.
     ///   - left: The evaluated left operand.
     ///   - right: The evaluated right operand.
+    ///   - integerDivision: What `/` yields for two Integer operands.
     /// - Returns: The result, or `nil` when the operator is evaluated by the OCL library.
     /// - Throws: ``ATLExecutionError`` for operands of the wrong type or division by zero.
     static func evaluate(
-        _ operator: ATLBinaryOperator, left: (any EcoreValue)?, right: (any EcoreValue)?
+        _ operator: ATLBinaryOperator, left: (any EcoreValue)?, right: (any EcoreValue)?,
+        integerDivision: ATLIntegerDivision
     ) throws -> ATLBuiltinResult? {
         switch `operator` {
+        case .divide:
+            return try divideIntegers(left, right, integerDivision).map { ATLBuiltinResult(value: $0) }
         case .equals:
             return ATLBuiltinResult(value: ATLValues.areEqual(left, right))
         case .notEquals:
@@ -269,6 +273,33 @@ enum ATLOperatorSemantics {
         default:
             guard let l, let r else { return nil }
             return l != r
+        }
+    }
+
+    /// Divides two Integers with the `/` operator.
+    ///
+    /// With ``ATLIntegerDivision/real``, the quotient is a Real, as `/` is in OCL and
+    /// Eclipse ATL. With ``ATLIntegerDivision/truncating``, it is the Integer that
+    /// `div` yields. Operands that are not both Integers are left to the division of
+    /// the OCL library, which yields a Real.
+    ///
+    /// - Parameters:
+    ///   - left: The dividend.
+    ///   - right: The divisor.
+    ///   - integerDivision: What the quotient of two Integers is.
+    /// - Returns: The quotient, or `nil` when an operand is not an Integer.
+    /// - Throws: ``ATLExecutionError/divisionByZero`` when both operands are Integers and
+    ///   the divisor is zero.
+    private static func divideIntegers(
+        _ left: (any EcoreValue)?, _ right: (any EcoreValue)?, _ integerDivision: ATLIntegerDivision
+    ) throws -> (any EcoreValue)? {
+        guard let dividend = left as? Int, let divisor = right as? Int else { return nil }
+        switch integerDivision {
+        case .real:
+            guard divisor != 0 else { throw ATLExecutionError.divisionByZero }
+            return Double(dividend) / Double(divisor)
+        case .truncating:
+            return try integerDivide(dividend, divisor)
         }
     }
 

@@ -215,6 +215,84 @@ struct ATLMetamodelLoadingTests {
         }
     }
 
+    @Test(
+        "Look a workspace path up as it stands and then within its project",
+        arguments: [
+            ("/Families2Persons/Families.ecore", ["Families2Persons/Families.ecore", "Families.ecore"]),
+            ("/Project/model/Families.ecore", ["Project/model/Families.ecore", "model/Families.ecore"]),
+            ("/Families.ecore", ["Families.ecore"]),
+        ])
+    func workspaceCandidatePaths(path: String, expected: [String]) {
+        #expect(ATLParser.workspaceCandidatePaths(for: path) == expected)
+    }
+
+    @Test("Resolve a workspace path in a search directory that is the project directory")
+    func workspacePathInProjectDirectory() async throws {
+        let projectDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("project-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: projectDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: projectDir) }
+        let ecoreContent = """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <ecore:EPackage xmi:version="2.0" xmlns:xmi="http://www.omg.org/XMI" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                xmlns:ecore="http://www.eclipse.org/emf/2002/Ecore" name="Families" nsURI="http://www.example.org/families" nsPrefix="families">
+              <eClassifiers xsi:type="ecore:EClass" name="Family"/>
+            </ecore:EPackage>
+            """
+        try ecoreContent.write(
+            to: projectDir.appendingPathComponent("Families.ecore"), atomically: testWritesAtomically,
+            encoding: .utf8)
+        let atlContent = """
+            -- @path Families=/Families2Persons/Families.ecore
+
+            module TestModule;
+            create OUT: Families from IN: Families;
+            """
+
+        let module = try await ATLParser().parseContent(
+            atlContent, filename: projectDir.appendingPathComponent("Families2Persons.atl").path,
+            searchPaths: [projectDir.path], continueAfterErrors: false)
+
+        #expect(module.sourceMetamodels["IN"]?.nsURI == "http://www.example.org/families")
+        #expect(module.sourceMetamodels["IN"]?.eClassifiers.map(\.name) == ["Family"])
+    }
+
+    @Test("Prefer the project directory below a search directory for a workspace path")
+    func workspacePathPrefersProjectSubdirectory() async throws {
+        let workspaceDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("workspace-\(UUID().uuidString)")
+        let projectDir = workspaceDir.appendingPathComponent("Families2Persons")
+        try FileManager.default.createDirectory(at: projectDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: workspaceDir) }
+        func ecore(nsURI: String) -> String {
+            """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <ecore:EPackage xmi:version="2.0" xmlns:xmi="http://www.omg.org/XMI" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+                xmlns:ecore="http://www.eclipse.org/emf/2002/Ecore" name="Families" nsURI="\(nsURI)" nsPrefix="families">
+              <eClassifiers xsi:type="ecore:EClass" name="Family"/>
+            </ecore:EPackage>
+            """
+        }
+        try ecore(nsURI: "http://example.org/project").write(
+            to: projectDir.appendingPathComponent("Families.ecore"), atomically: testWritesAtomically,
+            encoding: .utf8)
+        try ecore(nsURI: "http://example.org/workspace").write(
+            to: workspaceDir.appendingPathComponent("Families.ecore"), atomically: testWritesAtomically,
+            encoding: .utf8)
+        let atlContent = """
+            -- @path Families=/Families2Persons/Families.ecore
+
+            module TestModule;
+            create OUT: Families from IN: Families;
+            """
+
+        let module = try await ATLParser().parseContent(
+            atlContent, filename: workspaceDir.appendingPathComponent("test.atl").path,
+            searchPaths: [workspaceDir.path], continueAfterErrors: false)
+
+        #expect(module.sourceMetamodels["IN"]?.nsURI == "http://example.org/project")
+    }
+
     @Test("Fall back to dummy metamodel when file not found")
     func testFallbackToDummyMetamodel() async throws {
         // Given - ATL with @path pointing to non-existent file

@@ -56,6 +56,25 @@ public enum ATLCollectionRangeEncoding: String, Sendable, CaseIterable, Hashable
     case portable
 }
 
+/// What the `/` operator yields for two Integer operands.
+///
+/// In OCL and in Eclipse ATL, `/` divides as Reals, so `7 / 2` is `3.5` even when
+/// both operands are Integers, and `div` is the operator of integer division.
+/// swift-atl 0.6 instead truncated the quotient of two Integers to an Integer.
+/// A Real operand makes the quotient a Real either way. The raw value of each case
+/// is its spelling on a command line.
+public enum ATLIntegerDivision: String, Sendable, CaseIterable, Hashable {
+    /// The quotient of two Integers is a Real, as in OCL and Eclipse ATL.
+    ///
+    /// `7 / 2` is `3.5` and `8 / 2` is `4.0`. This is the default.
+    case real
+
+    /// The quotient of two Integers is truncated towards zero, as in swift-atl 0.6.
+    ///
+    /// `7 / 2` is `3` and `-7 / 2` is `-3`, the result of `div`.
+    case truncating
+}
+
 /// Options that choose between the current behaviour of ATL processing and the
 /// behaviour of swift-atl 0.6.
 ///
@@ -77,31 +96,41 @@ public struct ATLOptions: Sendable, Hashable {
     /// How collection ranges are written to XMI.
     public var collectionRangeEncoding: ATLCollectionRangeEncoding
 
+    /// What the `/` operator yields for two Integer operands.
+    ///
+    /// The virtual machine and the execution context that are given the options
+    /// divide as this selects.
+    public var integerDivision: ATLIntegerDivision
+
     /// Creates a set of options.
     ///
     /// - Parameters:
     ///   - collectionRangeSyntax: Whether ATL source may write integer ranges in collection literals.
     ///   - collectionRangeEncoding: How collection ranges are written to XMI.
+    ///   - integerDivision: What the `/` operator yields for two Integer operands.
     public init(
         collectionRangeSyntax: ATLCollectionRangeSyntax = .ocl,
-        collectionRangeEncoding: ATLCollectionRangeEncoding = .collectionRange
+        collectionRangeEncoding: ATLCollectionRangeEncoding = .collectionRange,
+        integerDivision: ATLIntegerDivision = .real
     ) {
         self.collectionRangeSyntax = collectionRangeSyntax
         self.collectionRangeEncoding = collectionRangeEncoding
+        self.integerDivision = integerDivision
     }
 
     /// The current behaviour, which the default initialiser also gives.
     ///
-    /// Collection literals accept OCL integer ranges, and ranges are written to XMI
-    /// as OCL collection ranges.
+    /// Collection literals accept OCL integer ranges, ranges are written to XMI
+    /// as OCL collection ranges, and `/` divides two Integers into a Real.
     public static let standard = ATLOptions()
 
     /// The behaviour of swift-atl 0.6.
     ///
     /// Collection ranges are rejected as syntax errors, as swift-atl 0.6 rejected them.
     /// Ranges built in code are written to XMI as OCL collection ranges, because
-    /// swift-atl 0.6 had no ranges that it could write.
-    public static let legacy = ATLOptions(collectionRangeSyntax: .eclipse)
+    /// swift-atl 0.6 had no ranges that it could write. `/` truncates the quotient of
+    /// two Integers to an Integer.
+    public static let legacy = ATLOptions(collectionRangeSyntax: .eclipse, integerDivision: .truncating)
 
     /// Creates the options that a choice of semantics selects.
     ///

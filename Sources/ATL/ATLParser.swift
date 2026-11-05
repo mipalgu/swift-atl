@@ -464,7 +464,30 @@ public actor ATLParser {
         return module.withMetamodels(source: sourceMetamodels, target: targetMetamodels)
     }
 
+    /// The paths, relative to a search directory, under which a workspace path is looked up.
+    ///
+    /// A workspace path such as `/Families2Persons/Families.ecore` names a file in an
+    /// Eclipse project: its first component is the project. Below a search directory, the
+    /// path is looked up first as it stands, with the search directory as the workspace,
+    /// and then without its project component, with the search directory as the project
+    /// directory itself. A transformation therefore finds the metamodels of its project
+    /// both in a copy of the workspace and in the project directory.
+    ///
+    /// - Parameter workspacePath: A path that starts with `/`.
+    /// - Returns: The relative path, followed by the path within the project if the path
+    ///   has more than one component.
+    static func workspaceCandidatePaths(for workspacePath: String) -> [String] {
+        let components = workspacePath.split(separator: "/", omittingEmptySubsequences: true)
+        let relativePath = components.joined(separator: "/")
+        guard components.count > 1 else { return [relativePath] }
+        return [relativePath, components.dropFirst().joined(separator: "/")]
+    }
+
     /// Loads a metamodel from an Ecore file.
+    ///
+    /// A relative path is resolved against the directory of the transformation and then
+    /// against each search directory. A workspace path, which starts with `/`, is looked up
+    /// in each search directory under the paths of ``workspaceCandidatePaths(for:)``.
     ///
     /// - Parameters:
     ///   - metamodelName: The name of the metamodel (from @path directive)
@@ -482,17 +505,14 @@ public actor ATLParser {
         var candidateURLs: [URL] = []
 
         if filePath.hasPrefix("/") {
-            // Workspace-relative path - search in search paths
-            // Remove leading '/' to get relative path
-            let relativePath = String(filePath.dropFirst())
-
-            // Try each search path
             for searchPath in searchPaths {
-                let candidate = URL(fileURLWithPath: searchPath)
-                    .appendingPathComponent(relativePath)
-                candidateURLs.append(candidate)
-                if debug {
-                    print("[ATL]     Workspace-relative candidate: \(candidate.path)")
+                for relativePath in Self.workspaceCandidatePaths(for: filePath) {
+                    let candidate = URL(fileURLWithPath: searchPath)
+                        .appendingPathComponent(relativePath)
+                    candidateURLs.append(candidate)
+                    if debug {
+                        print("[ATL]     Workspace-relative candidate: \(candidate.path)")
+                    }
                 }
             }
         } else {
@@ -688,14 +708,16 @@ private class ATLSyntaxParser {
         var matchedRules: [ATLMatchedRule] = []
         var calledRules: OrderedDictionary<String, ATLCalledRule> = [:]
         var declarationNodes: [OutlineNode] = []
+        var isRefining = false
 
         // Parse create statement if present
         if !isQueryUnit, currentToken()?.type == .keyword("create") {
             let createStart = position
             do {
-                let (source, target) = try parseCreateStatement()
-                sourceMetamodels = source
-                targetMetamodels = target
+                let header = try parseCreateStatement()
+                sourceMetamodels = header.sourceMetamodels
+                targetMetamodels = header.targetMetamodels
+                isRefining = header.isRefining
             } catch let error as ATLParseError {
                 guard recovering else { throw error }
                 record(error, at: position)
@@ -779,7 +801,8 @@ private class ATLSyntaxParser {
             calledRules: calledRules,
             helperOverloads: helperOverloads,
             origin: SourceOrigin(moduleRange),
-            queryBody: queryBody
+            queryBody: queryBody,
+            isRefining: isRefining
         )
     }
 
@@ -845,23 +868,67 @@ private class ATLSyntaxParser {
         return name
     }
 
-    private func parseCreateStatement() throws -> (
-        OrderedDictionary<String, EPackage>, OrderedDictionary<String, EPackage>
-    ) {
+    /// The models declared by the `create` statement of a module header.
+    private struct ModelDeclarations {
+        /// The source models, indexed by model name, in declaration order.
+        var sourceMetamodels: OrderedDictionary<String, EPackage> = [:]
+
+        /// The target models, indexed by model name, in declaration order.
+        var targetMetamodels: OrderedDictionary<String, EPackage> = [:]
+
+        /// Whether the source models follow `refining` rather than `from`.
+        var isRefining = false
+    }
+
+    /// Parses the `create` statement of a module header.
+    ///
+    /// The statement declares the target models, followed by the source models after
+    /// either `from` or `refining`, as in `create OUT : MM refining IN : MM;`. Each model
+    /// is declared as `Name : Metamodel`, and the declarations of a list are separated
+    /// by commas.
+    ///
+    /// - Returns: The declared models and whether the header selects refining mode.
+    /// - Throws: ``ATLParseError/invalidSyntax(_:)`` when a model declaration is malformed.
+    private func parseCreateStatement() throws -> ModelDeclarations {
         guard consumeKeyword("create") else {
             throw ATLParseError.invalidSyntax("Expected 'create' keyword")
         }
 
-        var targetMetamodels: OrderedDictionary<String, EPackage> = [:]
-        var sourceMetamodels: OrderedDictionary<String, EPackage> = [:]
+        var declarations = ModelDeclarations()
+        declarations.targetMetamodels = try parseModelDeclarations()
+        if consumeKeyword("from") {
+            declarations.sourceMetamodels = try parseModelDeclarations()
+        } else if currentToken()?.type == .identifier(ATLLanguage.refining) {
+            advance()
+            declarations.isRefining = true
+            declarations.sourceMetamodels = try parseModelDeclarations()
+        }
 
-        // Parse target models: OUT : TargetMM
-        while let token = currentToken(), case .identifier(let alias) = token.type {
-            if alias == ATLLanguage.UnsupportedKeyword.refining {
-                throw unsupported(
-                    "Refining mode ('refining') is not supported at \(describe(token))",
-                    at: position)
-            }
+        consumePunctuation(";")
+
+        return declarations
+    }
+
+    /// Whether the current token ends a list of model declarations.
+    private func endsModelDeclarations() -> Bool {
+        guard let token = currentToken() else { return true }
+        return token.type == .keyword("from") || token.type == .punctuation(";")
+            || token.type == .identifier(ATLLanguage.refining)
+    }
+
+    /// Parses a list of model declarations such as `IN : Families, LIB : Library`.
+    ///
+    /// The list ends before `from`, `refining` or `;`. A placeholder package named after
+    /// each metamodel stands for it until the metamodels are bound.
+    ///
+    /// - Returns: The placeholder metamodel packages, indexed by model name, in order.
+    /// - Throws: ``ATLParseError/invalidSyntax(_:)`` when a declaration lacks its `:` or
+    ///   its metamodel name.
+    private func parseModelDeclarations() throws -> OrderedDictionary<String, EPackage> {
+        var metamodels: OrderedDictionary<String, EPackage> = [:]
+        while !endsModelDeclarations(), let token = currentToken(),
+            case .identifier(let alias) = token.type
+        {
             advance()
             guard consumeOperator(":") else {
                 throw ATLParseError.invalidSyntax("Expected ':' after the model name '\(alias)'")
@@ -875,52 +942,14 @@ private class ATLSyntaxParser {
             metamodelRanges[metamodelName] = metamodelRanges[metamodelName] ?? mmToken.range
             advance()
 
-            targetMetamodels[alias] = EPackage(
+            metamodels[alias] = EPackage(
                 name: metamodelName, nsURI: "http://\(metamodelName.lowercased())")
-
-            if currentToken()?.type == .keyword("from") {
-                break
-            }
 
             if currentToken()?.type == .punctuation(",") {
                 advance()
             }
         }
-
-        // Parse 'from' keyword
-        if consumeKeyword("from") {
-            // Parse source models: IN : SourceMM
-            while let token = currentToken(), case .identifier(let alias) = token.type {
-                advance()
-                guard consumeOperator(":") else {
-                    throw ATLParseError.invalidSyntax(
-                        "Expected ':' after the model name '\(alias)'")
-                }
-
-                guard let mmToken = currentToken(),
-                    case .identifier(let metamodelName) = mmToken.type
-                else {
-                    throw ATLParseError.invalidSyntax("Expected metamodel name")
-                }
-                metamodelRanges[metamodelName] = metamodelRanges[metamodelName] ?? mmToken.range
-                advance()
-
-                sourceMetamodels[alias] = EPackage(
-                    name: metamodelName, nsURI: "http://\(metamodelName.lowercased())")
-
-                if currentToken()?.type == .punctuation(";") {
-                    break
-                }
-
-                if currentToken()?.type == .punctuation(",") {
-                    advance()
-                }
-            }
-        }
-
-        consumePunctuation(";")
-
-        return (sourceMetamodels, targetMetamodels)
+        return metamodels
     }
 
     private func parseQuery() throws -> any ATLHelperType {
@@ -1199,6 +1228,10 @@ private class ATLSyntaxParser {
             case .identifier(let varName) = varToken.type
         else {
             throw ATLParseError.invalidSyntax("Expected target variable name")
+        }
+        if varName == ATLLanguage.drop, peekToken(1)?.type != .operator(":") {
+            throw ATLParseError.invalidSyntax(
+                "'\(varName)' must directly follow 'to' at \(describe(varToken))")
         }
         advance()
 
@@ -2570,8 +2603,15 @@ extension ATLSyntaxParser {
         }
         let localVariables = try parseUsingSection()
         var targetPatterns: [ATLTargetPattern] = []
+        var dropIndex: Int?
         if consumeKeyword("to") {
-            targetPatterns = try parseTargetPatternList()
+            if currentToken()?.type == .identifier(ATLLanguage.drop), peekToken(1)?.type != .operator(":") {
+                dropIndex = position
+                advance()
+            }
+            if dropIndex == nil || startsTargetPattern() {
+                targetPatterns = try parseTargetPatternList()
+            }
         }
         var statements: [any ATLStatement] = []
         if currentToken()?.type == .keyword("do") {
@@ -2581,6 +2621,25 @@ extension ATLSyntaxParser {
             throw ATLParseError.invalidSyntax(
                 "Expected '}' to end \(parameters != nil ? "called" : modifiers.isLazy ? "lazy" : "matched") rule"
             )
+        }
+
+        if let dropIndex {
+            let kind = parameters != nil ? "called" : modifiers.isLazy ? "lazy" : nil
+            if let kind {
+                throw unsupported(
+                    "'\(ATLLanguage.drop)' is only supported in matched rules, not \(kind) rule '\(name)'",
+                    at: dropIndex)
+            }
+            if modifiers.isAbstract || superRuleName != nil {
+                throw unsupported(
+                    "'\(ATLLanguage.drop)' is not supported in a rule that is abstract or extends another rule, as rule '\(name)' does",
+                    at: dropIndex)
+            }
+            if sourcePatterns.count > 1 {
+                throw unsupported(
+                    "'\(ATLLanguage.drop)' is only supported in rules with one source pattern element, unlike rule '\(name)'",
+                    at: dropIndex)
+            }
         }
 
         if modifiers.isLazy {
@@ -2632,7 +2691,8 @@ extension ATLSyntaxParser {
         guard let primary = sourcePatterns.first else {
             throw ATLParseError.invalidSyntax("Expected 'from' clause in matched rule")
         }
-        guard !targetPatterns.isEmpty || modifiers.isAbstract || superRuleName != nil else {
+        guard !targetPatterns.isEmpty || modifiers.isAbstract || superRuleName != nil || dropIndex != nil
+        else {
             throw ATLParseError.invalidSyntax("Expected 'to' clause in matched rule")
         }
         return ATLMatchedRule(
@@ -2645,6 +2705,7 @@ extension ATLSyntaxParser {
             doStatements: statements,
             superRuleName: superRuleName,
             isAbstract: modifiers.isAbstract,
+            dropsSourceElement: dropIndex != nil,
             origin: origin(from: start)
         )
     }
@@ -2672,6 +2733,14 @@ extension ATLSyntaxParser {
             patterns.append(try parseSourcePattern())
         }
         return patterns
+    }
+
+    /// Whether the current token starts a target pattern, a name followed by `:`.
+    ///
+    /// - Returns: `true` if the current token is an identifier and the next one is `:`.
+    private func startsTargetPattern() -> Bool {
+        guard case .identifier = currentToken()?.type else { return false }
+        return peekToken(1)?.type == .operator(":")
     }
 
     /// Parses the comma-separated target patterns of a `to` section.

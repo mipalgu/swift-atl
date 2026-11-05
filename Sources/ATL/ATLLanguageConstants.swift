@@ -44,10 +44,22 @@ enum ATLLanguage {
     static let contextualKeywords: Set<String> = [
         ATLReservedNames.abstract, ATLReservedNames.unique, ATLReservedNames.entrypoint,
         ATLReservedNames.endpoint, ATLReservedNames.extends, ATLReservedNames.using,
-        ATLReservedNames.forLoop,
+        ATLReservedNames.forLoop, refining, drop,
         InfixKeyword.implies.rawValue, InfixKeyword.xor.rawValue, InfixKeyword.div.rawValue,
         InfixKeyword.mod.rawValue,
     ]
+
+    /// The word that selects refining mode in a module header.
+    ///
+    /// It takes the place of `from`, as in `create OUT : MM refining IN : MM;`, and the
+    /// lexer reads it as an identifier.
+    static let refining = "refining"
+
+    /// The word that deletes the matched element of a rule in refining mode.
+    ///
+    /// It directly follows `to`, alone as in `to drop` or before the target patterns of
+    /// new elements, and the lexer reads it as an identifier.
+    static let drop = "drop"
 
     /// The separator between the first and the last value of a collection range, as in `Sequence{1..3}`.
     static let rangeSeparator = ".."
@@ -98,9 +110,6 @@ enum ATLLanguage {
 
         /// Imports a library, as in `uses Helpers;`.
         static let uses = "uses"
-
-        /// Selects refining mode, as in `create OUT : M refining IN : M;`.
-        static let refining = "refining"
 
         /// Marks a rule that is not applied by default.
         static let nodefault = "nodefault"

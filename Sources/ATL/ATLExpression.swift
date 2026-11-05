@@ -527,6 +527,14 @@ public struct ATLTypeLiteralExpression: ATLExpression, Sendable, Equatable, Hash
 /// - **Collection**: Union, intersection, difference operations
 /// - **String**: Concatenation and pattern matching
 ///
+/// ## Division
+///
+/// `/` divides two Integers into a Real, as in OCL and Eclipse ATL, unless the
+/// ``ATLExecutionContext/options`` select the truncating division of swift-atl 0.6.
+/// `div` and `mod` take Integer operands: `div` truncates the quotient towards zero
+/// and `mod` gives the remainder with the sign of the dividend, so `-7 div 2` is `-3`
+/// and `-7 mod 2` is `-1`. Division by zero is an error.
+///
 /// ## Example Usage
 ///
 /// ```swift
@@ -590,7 +598,8 @@ public struct ATLBinaryExpression: ATLExpression, Sendable, Equatable, Hashable 
         let rightValue = try await right.evaluate(in: context)
 
         if let result = try ATLOperatorSemantics.evaluate(
-            self.`operator`, left: leftValue, right: rightValue)
+            self.`operator`, left: leftValue, right: rightValue,
+            integerDivision: context.options.integerDivision)
         {
             return result.value
         }

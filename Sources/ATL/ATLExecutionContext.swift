@@ -75,6 +75,9 @@ public final class ATLExecutionContext: Sendable {
     /// Lazy bindings waiting for resolution.
     private var lazyBindings: [ATLLazyBinding] = []
 
+    /// The copies of the source elements in refining mode, indexed by source element.
+    private var refiningCopies: [EUUID: EUUID] = [:]
+
     /// Helper functions registered for this context.
     var helpers: [String: any ATLHelperType] = [:]
 
@@ -108,6 +111,15 @@ public final class ATLExecutionContext: Sendable {
     ///
     /// The default, ``ATLFileOutputPolicy/disabled``, makes both operations fail.
     public var fileOutput: ATLFileOutputPolicy = .disabled
+
+    /// The options that select how expressions are evaluated in this context.
+    ///
+    /// The ``ATLOptions/integerDivision`` decides whether `/` divides two Integers
+    /// into a Real or truncates the quotient. A context created with
+    /// ``init(module:sources:targets:executionEngine:commandStack:)`` evaluates as
+    /// swift-atl 0.6 did, with ``ATLOptions/legacy``; a virtual machine gives its
+    /// context the options it was created with.
+    public var options: ATLOptions = .legacy
 
     /// Back-reference to the owning virtual machine for called rule dispatch.
     public weak var virtualMachine: ATLVirtualMachine?
@@ -741,25 +753,50 @@ public final class ATLExecutionContext: Sendable {
     ///
     /// The default target element is the first target element created by the
     /// matched rule that transformed the source element. Lazy and called rules
-    /// do not contribute to the default resolution of bindings.
+    /// do not contribute to the default resolution of bindings. In refining mode,
+    /// a source element that no matched rule transformed resolves to its copy in
+    /// the target model.
     ///
     /// - Parameter sourceElement: The source element ID
     /// - Returns: The target element ID, or `nil` if no matched rule transformed the element
+    ///   and the element has no refining copy
     public func defaultTargetID(for sourceElement: EUUID) -> EUUID? {
         return getTraceLinks(for: sourceElement)
             .first(where: { $0.kind == .matched && $0.additionalSourceElements.isEmpty })?
             .targetElements.first
+            ?? refiningCopies[sourceElement]
+    }
+
+    /// Records the copies that refining mode made of the source elements.
+    ///
+    /// The copies are added to those recorded earlier in the same run.
+    ///
+    /// - Parameter copies: The identifier of each copy, indexed by the identifier of
+    ///   the source element it copies.
+    func recordRefiningCopies(_ copies: [EUUID: EUUID]) {
+        refiningCopies.merge(copies) { _, new in new }
+    }
+
+    /// The copy that refining mode made of a source element.
+    ///
+    /// - Parameter sourceElement: The identifier of the source element.
+    /// - Returns: The identifier of its copy in a target model, or `nil` when the
+    ///   element has not been copied.
+    func refiningCopy(of sourceElement: EUUID) -> EUUID? {
+        refiningCopies[sourceElement]
     }
 
     /// Discards all state accumulated by a previous transformation run.
     ///
-    /// Trace links, pending lazy bindings and the results of unique lazy rules
-    /// are cleared; variables, models and helpers are retained.
+    /// Trace links, pending lazy bindings, the results of unique lazy rules and
+    /// the refining copies of source elements are cleared; variables, models and
+    /// helpers are retained.
     public func resetTransformationState() {
         traceLinks.removeAll()
         traceLinkIndex.removeAll()
         lazyBindings.removeAll()
         uniqueRuleResults.removeAll()
+        refiningCopies.removeAll()
     }
 
     /// The elements an unique rule created for an argument tuple, if it has run for it.

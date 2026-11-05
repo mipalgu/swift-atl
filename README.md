@@ -22,6 +22,7 @@ A pure Swift implementation of the Eclipse Atlas Transformation Language (ATL) w
 - **Reflection**: `refImmediateComposite()`, `refGetValue`, `refSetValue`, `refUnsetValue` and `refInvokeOperation` on any model element
 - **Metamodel-Qualified Types**: Full support for `MM!Type` syntax
 - **Lazy Rules**: Deferred rule execution with lazy binding resolution
+- **Refining Mode**: `create OUT : MM refining IN : MM;` changes a copy of the source model in place, and `to drop` deletes matched elements
 - **Helper Functions**: Context and standalone helper functions
 - **Execution Engine**: Complete ATL virtual machine with 134/134 tests passing
 
@@ -100,6 +101,7 @@ try await xmiResource.save()
 - `Sequence{}`, `OrderedSet{}`, `Set{}` and `Bag{}` literals keep their elements, not descriptions of them. Sets and ordered sets remain duplicate-free through `union`, `including`, `append` and friends.
 - Collection literals accept OCL integer ranges `first..last`, alone or mixed with items: `Sequence{0, 2..4, 9}` holds `0, 2, 3, 4, 9`. Both bounds may be expressions but must be Integers; a range whose first value exceeds its last is empty, and sets keep each integer once. Ranges are an OCL feature that the Eclipse ATL compilers do not accept, so transformations that use them do not run on Eclipse ATL; `includingRange` is the portable alternative. Parsing with `ATLOptions(collectionRangeSyntax: .eclipse)` rejects ranges as Eclipse ATL does (see [Compatibility with 0.6](#compatibility-with-06)).
 - Infix `implies`, `xor`, `div` and `mod` follow OCL precedence: `implies` binds weakest, then `or` and `xor`, then `and`. Logical operators use three-valued logic with `OclUndefined`.
+- `/` divides as OCL and Eclipse ATL do: the quotient is a Real even for two Integers, so `7 / 2` is `3.5` and `8 / 2` is `4.0`. `div` and `mod` take Integers: `div` truncates the quotient towards zero and `mod` gives the remainder with the sign of the dividend, so `-7 div 2` is `-3` and `-7 mod 2` is `-1`. Dividing by zero is an error. A virtual machine created with `ATLOptions(integerDivision: .truncating)`, or without options, truncates the quotient of two Integers as swift-atl 0.6 did (see [Compatibility with 0.6](#compatibility-with-06)).
 
 ### Built-in operations
 
@@ -127,7 +129,7 @@ let greet = ATLNativeHelper(
 ) { _, arguments in
     "hello \(arguments.first.flatMap { $0 as? String } ?? "")"
 }
-let machine = ATLVirtualMachine(module: module, nativeHelpers: [greet])
+let machine = ATLVirtualMachine(module: module, options: .standard, nativeHelpers: [greet])
 machine.register(otherHelper)  // helpers can also be added later
 ```
 
@@ -144,6 +146,8 @@ let registry = ATLMetamodelRegistry(packages: [ecorePackage, genModelPackage])
 let module = try await ATLParser(options: .standard).parse(url, metamodelRegistry: registry)
 ```
 
+A relative `-- @path` is resolved against the directory of the transformation and then against each search directory given to `parseContent(_:filename:searchPaths:continueAfterErrors:metamodelRegistry:)`. A path that starts with `/` names a file in an Eclipse workspace, such as `/Families2Persons/Families.ecore` for `Families.ecore` in the project `Families2Persons`. It is looked up in each search directory, first as `Families2Persons/Families.ecore`, with the search directory as the workspace, and then as `Families.ecore`, with the search directory as the project directory itself.
+
 A registry can also be built from a table of namespace URIs, or given a resolver closure for URIs it does not hold. Type references such as `Ecore!EClass` use the name from the module header, which need not equal the name of the bound package.
 
 ### Module parameters
@@ -159,12 +163,52 @@ Header comments declare parameters of type `String`, `Integer`, `Boolean` or `Re
 The caller supplies values when executing, and the transformation reads them as `thisModule.projectName`:
 
 ```swift
-try await ATLVirtualMachine(module: module).execute(
+try await ATLVirtualMachine(module: module, options: .standard).execute(
     sources: ["IN": input], targets: ["OUT": output],
     parameters: ["projectName": "demo", "generateTests": true])
 ```
 
 A missing required parameter, an undeclared parameter or a value of the wrong type is reported as an `ATLExecutionError`. `ATLModule.parameterValues(fromText:)` converts textual values, for example from a command line, to the declared types.
+
+### Refining mode
+
+A module whose header declares its source models after `refining` instead of `from` refines them, as the in-place refining mode of Eclipse ATL does:
+
+```atl
+module RenameNodes;
+create OUT : Graph refining IN : Graph;
+
+rule Rename {
+    from s : Graph!Node (s.name = 'a')
+    to   t : Graph!Node (name <- 'A')
+}
+```
+
+Each target model starts as a copy of the source model in the same position of the header, so the module declares as many target models as source models, each with the metamodel of its source model. Elements that no rule matches are copied with their attribute values and with their references pointing to the copies. In a matched rule, the first target pattern whose type is the type of the first source pattern denotes the matched element itself: its bound features take their new values and its other features keep theirs. Other target patterns, lazy rules and called rules create new elements. Rules match and navigate the unchanged source models, which are never modified, and a source element in a bound value resolves to the target element of the matched rule that transformed it or, failing that, to its copy. `ATLModule.refining()` selects the same mode for a module whose header uses `from`:
+
+```swift
+try await ATLVirtualMachine(module: module.refining(), options: .standard).execute(
+    sources: ["IN": input], targets: ["OUT": output])
+```
+
+A matched rule deletes the element it matches when its `to` section starts with `drop`, as in the ATL 2010 compiler of Eclipse ATL:
+
+```atl
+rule RemoveEmpty {
+    from s : Graph!Node (s.weight = 0)
+    to drop
+}
+
+rule Replace {
+    from s : Graph!Node (s.name = 'old')
+    to drop
+       n : Graph!Node (name <- 'new')
+}
+```
+
+Deletion happens after every rule, lazy binding and endpoint rule has run, so the elements that a dropped element contains at that point are deleted with it, while an element that another rule has moved to a new container survives. References from the remaining elements to the deleted ones are removed: a single-valued reference is unset, and a many-valued one loses the deleted elements, which also clears both ends of opposite references. Eclipse ATL leaves such references dangling. Target patterns after `drop` create new elements, and a reference to the dropped source element resolves to the first of them. `drop` needs refining mode and a matched rule with one source pattern element that is neither abstract nor part of a rule hierarchy; otherwise it is rejected.
+
+Only instances of dynamic classes can be copied, so a model holding metamodel elements, such as an Ecore package, cannot be refined. Rules match the elements of the first model of each metamodel, so further source models of the same metamodel are copied unchanged.
 
 ### Queries
 
@@ -181,11 +225,11 @@ helper def : unit : String = 'books';
 
 ```swift
 let query = try await ATLParser(options: .standard).parse(queryURL)
-let value = try await ATLVirtualMachine(module: query).evaluateQuery(sources: ["Library": library])
+let value = try await ATLVirtualMachine(module: query, options: .standard).evaluateQuery(sources: ["Library": library])
 
 // Name the model IN, so that the query can use allInstancesFrom('IN')
 let renamed = query.declaringSourceModels(["IN": "Library"])
-let count = try await ATLVirtualMachine(module: renamed).evaluateQuery(sources: ["IN": library])
+let count = try await ATLVirtualMachine(module: renamed, options: .standard).evaluateQuery(sources: ["IN": library])
 ```
 
 Helpers, `thisModule` and `-- @param` parameters work in queries as they do in modules. A query whose value is a string often ends with `writeTo`, in which case its value is `true`, as in Eclipse ATL.
@@ -198,7 +242,7 @@ Writing files is disabled by default: a transformation or query that calls eithe
 
 ```swift
 // Write only inside the output directory
-let vm = ATLVirtualMachine(module: query, fileOutput: .confined(to: outputDirectory))
+let vm = ATLVirtualMachine(module: query, options: .standard, fileOutput: .confined(to: outputDirectory))
 
 // Trusted code only: relative paths resolve against the directory, absolute paths are accepted
 vm.fileOutput = .unrestricted(relativeTo: outputDirectory)
@@ -227,7 +271,7 @@ A transformation runs in two phases. All matched rules first create their target
 
 `ATLSyntax.tokens(in:options:)` classifies the tokens of ATL source text, including comments and unreadable text, without ever failing. `ATLParser.parseDiagnosing(_:name:metamodelRegistry:)` parses source text without throwing: it recovers at declaration and binding level, and returns the module read so far, diagnostics with source ranges and stable `ATLDiagnosticCode` values, an outline of the module and the tokens. Parsed syntax tree nodes carry a `SourceOrigin` with their range in the source text, which does not take part in equality.
 
-The ATL constructs that are not supported (libraries and `uses`, refining mode, `nodefault` rules, iterated target patterns with `foreach` or `distinct`, and `extends` on lazy or called rules) are reported as `unsupportedConstruct` errors at the offending token. Text that cannot start a declaration is reported as an unexpected token by both parsers.
+The ATL constructs that are not supported (libraries and `uses`, `nodefault` rules, iterated target patterns with `foreach` or `distinct`, and `extends` on lazy or called rules) are reported as `unsupportedConstruct` errors at the offending token. Text that cannot start a declaration is reported as an unexpected token by both parsers.
 
 ## CLI Tool
 
@@ -302,6 +346,7 @@ To use the CLI tool, install the [swift-modelling](https://github.com/mipalgu/sw
 - [x] **Rule Variants**: `abstract` rules, `extends` inheritance, `unique lazy` memoisation, `entrypoint` and `endpoint` rules, `using` variables and several source patterns in `from`
 - [x] **Imperative Blocks**: `do { }` sections with `target.feature <- value;`, variable declarations and assignments, `if`/`else`, `for` and expression statements
 - [x] **Reflective Operations**: `refImmediateComposite`, `refGetValue`, `refSetValue`, `refUnsetValue`, `refInvokeOperation` and the `eContainer`, `eContainingFeature`, `eContents` and `eAllContents` method forms
+- [x] **Refining Mode**: `refining` headers and `ATLModule.refining()` change copies of the source models in place, and `to drop` deletes matched elements
 - [x] **Read-only Source Models**: Setting or unsetting a feature of a source element is an error; only target elements can be modified
 - [x] **File Output**: `writeTo` and `writeToWithCharset`, disabled unless the host enables them, and confined to an output directory by default
 
@@ -338,14 +383,15 @@ Swift ATL targets compatibility with:
 
 ### Compatibility with 0.6
 
-The APIs that take an `ATLOptions` value (`ATLParser(options:enableDebugging:)`, `ATLResource(uri:options:)`, `ATLResource(uri:module:options:)`, `ATLXMISerializer(options:)`, `ATLExpressionXMISerializer(options:)` and `ATLSyntax.tokens(in:options:)`) default to the current behaviour, `ATLOptions.standard`, which `ATLOptions()` also gives. The APIs of swift-atl 0.6, which take no options, keep the 0.6 behaviour by using `ATLOptions.legacy`. `ATLParser(enableDebugging:)`, `ATLResource(uri:)`, `ATLResource(uri:module:)` and `ATLSyntax.tokens(in:)` now behave differently from the default and are deprecated in favour of the variants that take options.
+The APIs that take an `ATLOptions` value (`ATLParser(options:enableDebugging:)`, `ATLVirtualMachine(module:options:enableDebugging:unsetFeatureReads:nativeHelpers:fileOutput:)`, `ATLResource(uri:options:)`, `ATLResource(uri:module:options:)`, `ATLXMISerializer(options:)`, `ATLExpressionXMISerializer(options:)` and `ATLSyntax.tokens(in:options:)`) default to the current behaviour, `ATLOptions.standard`, which `ATLOptions()` also gives. The APIs of swift-atl 0.6, which take no options, keep the 0.6 behaviour by using `ATLOptions.legacy`. `ATLParser(enableDebugging:)`, `ATLVirtualMachine(module:enableDebugging:unsetFeatureReads:nativeHelpers:fileOutput:)`, `ATLResource(uri:)`, `ATLResource(uri:module:)` and `ATLSyntax.tokens(in:)` now behave differently from the default and are deprecated in favour of the variants that take options.
 
 | Behaviour | Default | Option | 0.6 behaviour |
 | :-- | :-- | :-- | :-- |
 | Integer ranges in collection literals, such as `Sequence{1..3}` | Accepted (`.ocl`) | `collectionRangeSyntax` (`ATLCollectionRangeSyntax`) | `.eclipse`: rejected, as in Eclipse ATL, and `..` is two `.` tokens |
 | Collection ranges in XMI | `.collectionRange`: an OCL `CollectionRange` part that reads back unchanged | `collectionRangeEncoding` (`ATLCollectionRangeEncoding`) | No ranges could be written; `.portable` writes them with expressions that 0.6 reads |
+| `/` on two Integers, such as `7 / 2` | `.real`: a Real (`3.5`), as in OCL and Eclipse ATL | `integerDivision` (`ATLIntegerDivision`) | `.truncating`: an Integer truncated towards zero (`3`), as `div` gives |
 
-With `.eclipse`, a range is reported as a syntax error whose message names the portable alternatives: listing the integers, as in `Sequence{1, 2, 3}`, or calling `includingRange`, as in `Sequence{}->includingRange(1, 3)`, which the Eclipse ATL EMFTVM provides. With `.portable`, a range whose bounds are integer literals is written as its integers, and any other range as a call of `includingRange`, with the items after it added by `includingAll`; both operations exist in swift-atl 0.6 and in the Eclipse ATL EMFTVM, which however reports an error for an empty range. To keep the 0.6 behaviour with the new APIs, pass `.legacy`, for example `ATLParser(options: .legacy)`. Parse errors now also describe themselves through `localizedDescription` instead of naming their case number.
+With `.eclipse`, a range is reported as a syntax error whose message names the portable alternatives: listing the integers, as in `Sequence{1, 2, 3}`, or calling `includingRange`, as in `Sequence{}->includingRange(1, 3)`, which the Eclipse ATL EMFTVM provides. With `.portable`, a range whose bounds are integer literals is written as its integers, and any other range as a call of `includingRange`, with the items after it added by `includingAll`; both operations exist in swift-atl 0.6 and in the Eclipse ATL EMFTVM, which however reports an error for an empty range. To keep the 0.6 behaviour with the new APIs, pass `.legacy`, for example `ATLParser(options: .legacy)` or `ATLVirtualMachine(module: module, options: .legacy)`. Parse errors now also describe themselves through `localizedDescription` instead of naming their case number.
 
 `ATLOptions(semantics:)` selects `.standard` or `.legacy` from a `ModellingSemantics` value, and `ATLOptions.fromEnvironment()` reads that choice from the `SWIFT_MODELLING_SEMANTICS` environment variable (`standard` or `legacy`; `.standard` if it is unset, and an error for any other value), for example `ATLParser(options: try ATLOptions.fromEnvironment())`. The `eContainer()` family of operations finds containers through the resources of the models, in the `ContainerLookupScope` configured for each resource or its resource set, and in the scope of version 0.6 if none is configured.
 
