@@ -125,6 +125,16 @@ public struct ATLModule: Sendable, Equatable, Hashable {
     /// result of the query.
     public let queryBody: (any ATLExpression)?
 
+    /// Whether the module runs in refining mode.
+    ///
+    /// A module header that declares its source models after `refining` instead of
+    /// `from`, as in `create OUT : MM refining IN : MM;`, selects refining mode, and
+    /// ``refining(_:)`` selects it for any module. In refining mode each target model
+    /// starts as a copy of the source model in the same position of the header, and the
+    /// matched rules change that copy instead of building the target model from
+    /// nothing; see ``ATLVirtualMachine`` for the details. A query unit ignores the mode.
+    public let isRefining: Bool
+
     /// The kind of unit: a transformation module or a query.
     ///
     /// A unit with a ``queryBody`` is a query unit; every other unit is a module.
@@ -155,6 +165,7 @@ public struct ATLModule: Sendable, Equatable, Hashable {
     ///   - declaredMetamodelNames: The header metamodel names by alias (default: the package names)
     ///   - origin: The source range the node was parsed from.
     ///   - queryBody: The query expression of a query unit, or `nil` (the default) for a module.
+    ///   - isRefining: Whether the module runs in refining mode (default: `false`).
     ///
     /// - Precondition: The module name must be a non-empty string
     /// - Precondition: At least one source metamodel must be specified for a module
@@ -170,7 +181,8 @@ public struct ATLModule: Sendable, Equatable, Hashable {
         parameters: [ATLModuleParameter] = [],
         declaredMetamodelNames: [String: String]? = nil,
         origin: SourceOrigin = .init(),
-        queryBody: (any ATLExpression)? = nil
+        queryBody: (any ATLExpression)? = nil,
+        isRefining: Bool = false
     ) {
         precondition(!name.isEmpty, "Module name must not be empty")
         precondition(
@@ -196,6 +208,7 @@ public struct ATLModule: Sendable, Equatable, Hashable {
                 uniquingKeysWith: { first, _ in first })
         self.origin = origin
         self.queryBody = queryBody
+        self.isRefining = isRefining
     }
 
     /// Returns a copy of this module bound to different metamodel packages.
@@ -221,7 +234,8 @@ public struct ATLModule: Sendable, Equatable, Hashable {
             parameters: parameters,
             declaredMetamodelNames: declaredMetamodelNames,
             origin: origin,
-            queryBody: queryBody
+            queryBody: queryBody,
+            isRefining: isRefining
         )
     }
 
@@ -241,7 +255,37 @@ public struct ATLModule: Sendable, Equatable, Hashable {
             parameters: parameters,
             declaredMetamodelNames: declaredMetamodelNames,
             origin: origin,
-            queryBody: queryBody
+            queryBody: queryBody,
+            isRefining: isRefining
+        )
+    }
+
+    /// Returns a copy of this module in or out of refining mode.
+    ///
+    /// This selects refining mode for a module whose header declares its source models
+    /// after `from`, as if the header used `refining` instead. All other members,
+    /// including the declared metamodel names, the parameters and the source origin, are
+    /// kept. Refining mode pairs the target models with the source models in
+    /// declaration order, so the module must declare as many target models as source
+    /// models, each conforming to the metamodel of its source model; the virtual machine
+    /// checks this when the transformation runs.
+    ///
+    /// - Parameter isRefining: Whether the copy runs in refining mode (default: `true`).
+    /// - Returns: The module with its refining mode replaced.
+    public func refining(_ isRefining: Bool = true) -> ATLModule {
+        ATLModule(
+            name: name,
+            sourceMetamodels: sourceMetamodels,
+            targetMetamodels: targetMetamodels,
+            helpers: helpers,
+            matchedRules: matchedRules,
+            calledRules: calledRules,
+            helperOverloads: helperOverloads,
+            parameters: parameters,
+            declaredMetamodelNames: declaredMetamodelNames,
+            origin: origin,
+            queryBody: queryBody,
+            isRefining: isRefining
         )
     }
 
@@ -288,7 +332,8 @@ public struct ATLModule: Sendable, Equatable, Hashable {
             parameters: parameters,
             declaredMetamodelNames: declared,
             origin: origin,
-            queryBody: queryBody
+            queryBody: queryBody,
+            isRefining: isRefining
         )
     }
 
@@ -357,6 +402,7 @@ public struct ATLModule: Sendable, Equatable, Hashable {
             && lhs.matchedRules == rhs.matchedRules
             && lhs.calledRules == rhs.calledRules
             && lhs.queryBody.map { AnyHashable($0) } == rhs.queryBody.map { AnyHashable($0) }
+            && lhs.isRefining == rhs.isRefining
     }
 
     // MARK: - Hashable
@@ -381,6 +427,7 @@ public struct ATLModule: Sendable, Equatable, Hashable {
         hasher.combine(matchedRules)
         hasher.combine(calledRules.keys.sorted())
         hasher.combine(queryBody.map { AnyHashable($0) })
+        hasher.combine(isRefining)
     }
 }
 

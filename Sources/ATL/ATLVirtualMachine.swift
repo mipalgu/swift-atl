@@ -39,6 +39,51 @@ import OrderedCollections
 /// execution. Rule processing can occur concurrently for independent elements while
 /// maintaining serialised access to shared transformation state.
 ///
+/// ## Refining Mode
+///
+/// A module whose ``ATLModule/isRefining`` is `true`, because its header declares
+/// its source models after `refining` or because it was made with
+/// ``ATLModule/refining(_:)``, refines its source models in the manner of the
+/// in-place refining mode of Eclipse ATL:
+///
+/// - Each target model starts as a copy of the source model in the same position of
+///   the header. The module must declare as many target models as source models, and
+///   each target model must conform to the metamodel of its source model.
+/// - Elements that no rule matches are copied unchanged, with their attribute values
+///   and with references to other source elements pointing to the copies of those
+///   elements. Containment is preserved.
+/// - In a matched rule, the first target pattern whose type is the type of the first
+///   source pattern denotes the copy of the matched element, which is changed in
+///   place: the bound features take their new values and every other feature keeps
+///   its value. A binding replaces the whole value of its feature, including every
+///   value of a many-valued feature. Other target patterns create new elements, as do
+///   lazy and called rules.
+/// - Rules match, and expressions navigate, the unchanged source models. A source
+///   element in a bound value resolves to the first target element of the matched
+///   rule that transformed it, as outside refining mode, and otherwise to its copy.
+///   `resolveTemp` finds the copy changed in place under the name of its target
+///   pattern.
+/// - The source models are not modified.
+///
+/// - A matched rule whose `to` section starts with `drop`, as in the ATL 2010 compiler
+///   of Eclipse ATL, deletes the copy of its matched element once every rule, lazy
+///   binding and endpoint rule has run. The elements that the dropped element contains
+///   at that point are deleted with it, so an element that another rule moved to a
+///   new container survives. References from the remaining elements of the target
+///   models to the deleted elements are removed, single-valued ones by unsetting them
+///   and many-valued ones by removing the deleted elements from their values, which
+///   also removes both ends of a pair of opposite references. The target patterns that
+///   follow `drop` create new elements, and a source element in a bound value resolves
+///   to the first of them, or, without any, to the copy that is deleted. A rule that
+///   drops must be a matched rule with one source pattern element that is neither
+///   abstract nor part of a rule hierarchy, and `drop` outside refining mode is an
+///   error.
+/// Only instances of dynamic classes can be copied, so a source model holding
+/// metamodel elements, such as an Ecore package, cannot be refined. Rules match the
+/// elements of one model per metamodel, as outside refining mode, so when several
+/// source models share a metamodel only the first is changed by rules and the others
+/// are copied unchanged.
+///
 /// ## Example Usage
 ///
 /// ```swift
@@ -84,6 +129,12 @@ public final class ATLVirtualMachine {
 
     /// The monitor of the run in progress, if any.
     private var monitor: ATLRunMonitor?
+
+    /// In refining mode, the target model that refines each source model, by source model name.
+    private var refiningTargets: [String: String] = [:]
+
+    /// In refining mode, the copies of the matched elements that rules drop, in match order.
+    private var droppedCopies: [EUUID] = []
 
     /// Where the `writeTo` and `writeToWithCharset` string operations may write files.
     ///
@@ -172,8 +223,13 @@ public final class ATLVirtualMachine {
     ///   - parameters: Values for the module parameters declared with `-- @param`, by name
     /// - Throws: ATL execution errors for transformation failures, including
     ///   ``ATLExecutionError/missingParameter(_:)`` for a required parameter without a value
+    ///   and ``ATLExecutionError/invalidOperation(_:)`` when, in refining mode, the target
+    ///   models cannot be paired with the source models, or when a rule drops its matched
+    ///   element outside refining mode or is extended by another rule
     ///
-    /// - Note: Source and target model aliases must match the module's metamodel specifications
+    /// - Note: Source and target model aliases must match the module's metamodel specifications.
+    ///   In refining mode each target model starts as a copy of its source model, as the
+    ///   Refining Mode section of ``ATLVirtualMachine`` describes.
     public func execute(
         sources: OrderedDictionary<String, Resource>,
         targets: OrderedDictionary<String, Resource>,
@@ -247,6 +303,12 @@ public final class ATLVirtualMachine {
 
         do {
             executionContext.resetTransformationState()
+            refiningTargets = [:]
+            droppedCopies = []
+            try checkDroppingRules()
+            if module.isRefining {
+                try await copySourceModels(sources: sources, targets: targets)
+            }
 
             // Phase 1: match all rules and create every target element, so that
             // bindings can resolve any source element regardless of rule order
@@ -275,6 +337,14 @@ public final class ATLVirtualMachine {
             }
 
             try await executeCalledRules(.endpoint) { $0.isEndpoint }
+
+            // Phase 3: in refining mode, delete the elements that rules dropped
+            if !droppedCopies.isEmpty {
+                await ATLRefining.delete(droppedCopies, from: Array(targets.values))
+                if debug {
+                    print("[ATL] Refining: dropped \(Set(droppedCopies).count) matched elements")
+                }
+            }
             monitor.report(.finished, completed: 1, total: 1)
 
             // Update execution statistics
@@ -570,7 +640,9 @@ public final class ATLVirtualMachine {
     /// Creates the target elements of a matched rule and records the trace link.
     ///
     /// The `using` variables are evaluated first, so that they are available
-    /// to the bindings applied later.
+    /// to the bindings applied later. In refining mode, the target pattern whose type
+    /// is that of the first source pattern denotes the copy of the matched element
+    /// instead of a new element.
     ///
     /// - Parameter candidate: The matched rule and source elements
     /// - Returns: The pending match awaiting its bindings
@@ -593,9 +665,17 @@ public final class ATLVirtualMachine {
             variables.append((local.name, value))
         }
 
+        let inPlace = rule.rule.dropsSourceElement ? nil : try inPlacePatternIndex(of: rule)
+        if rule.rule.dropsSourceElement {
+            droppedCopies.append(try refiningCopy(of: candidate.sources[0]))
+        }
         var targetIDs: [EUUID] = []
-        for pattern in rule.targetPatterns {
-            targetIDs.append(try await createTargetElement(type: pattern.type).id)
+        for (index, pattern) in rule.targetPatterns.enumerated() {
+            if index == inPlace {
+                targetIDs.append(try refiningCopy(of: candidate.sources[0]))
+            } else {
+                targetIDs.append(try await createTargetElement(type: pattern.type).id)
+            }
         }
 
         let ids = candidate.sourceIDs
@@ -611,6 +691,104 @@ public final class ATLVirtualMachine {
         statistics.traceLinksCreated += 1
 
         return PendingMatch(rule: rule, variables: variables, targetIDs: targetIDs)
+    }
+
+    // MARK: - Refining Mode
+
+    /// Checks that the rules that drop their matched element can do so.
+    ///
+    /// Dropping deletes an element of a model being refined, so it needs refining mode,
+    /// and a rule that drops is not part of a rule hierarchy.
+    ///
+    /// - Throws: ``ATLExecutionError/invalidOperation(_:)`` when a rule drops its matched
+    ///   element outside refining mode, or when a rule extends a rule that drops.
+    private func checkDroppingRules() throws {
+        let dropping = Set(module.matchedRules.filter(\.dropsSourceElement).map(\.name))
+        guard let first = module.matchedRules.first(where: \.dropsSourceElement) else { return }
+        guard module.isRefining else {
+            throw ATLExecutionError.invalidOperation(
+                "Rule '\(first.name)' deletes its matched element with '\(ATLLanguage.drop)', "
+                    + "which needs refining mode, but module '\(module.name)' is not refining")
+        }
+        if let sub = module.matchedRules.first(where: { $0.superRuleName.map(dropping.contains) == true }),
+            let base = sub.superRuleName
+        {
+            throw ATLExecutionError.invalidOperation(
+                "Rule '\(sub.name)' extends rule '\(base)', which deletes its matched element with "
+                    + "'\(ATLLanguage.drop)'; a rule that drops cannot be extended")
+        }
+    }
+
+    /// Starts each target model as a copy of the source model it refines.
+    ///
+    /// Every source model is checked before any target model changes, so a model that
+    /// cannot be refined leaves all target models as they were.
+    ///
+    /// - Parameters:
+    ///   - sources: The source models, by model name.
+    ///   - targets: The target models, by model name.
+    /// - Throws: ``ATLExecutionError/invalidOperation(_:)`` when the models cannot be
+    ///   paired, and ``ATLExecutionError/unsupportedOperation(_:)`` when a source model
+    ///   holds an element that cannot be copied.
+    private func copySourceModels(
+        sources: OrderedDictionary<String, Resource>,
+        targets: OrderedDictionary<String, Resource>
+    ) async throws {
+        let pairs = try ATLRefining.modelPairs(of: module)
+        var copies: [EUUID: EUUID] = [:]
+        var originals: [(target: Resource, elements: [DynamicEObject])] = []
+        for pair in pairs {
+            guard let source = sources[pair.source], let target = targets[pair.target] else {
+                throw ATLExecutionError.invalidOperation(
+                    "Refining mode needs both source model '\(pair.source)' and target model '\(pair.target)'")
+            }
+            let elements = try await ATLRefining.elements(of: source, model: pair.source)
+            for element in elements { copies[element.id] = EUUID() }
+            originals.append((target, elements))
+        }
+        for (target, elements) in originals {
+            await target.add(contentsOf: ATLRefining.copies(of: elements, identifiers: copies))
+        }
+        executionContext.recordRefiningCopies(copies)
+        refiningTargets = Dictionary(pairs.map { ($0.source, $0.target) }) { first, _ in first }
+        if debug {
+            print("[ATL] Refining: copied \(copies.count) source elements")
+        }
+    }
+
+    /// Finds the target pattern that denotes the matched element itself in refining mode.
+    ///
+    /// It is the first target pattern whose type is the type of the first source
+    /// pattern, in the target model that refines the source model of that pattern.
+    ///
+    /// - Parameter rule: The matched rule.
+    /// - Returns: The position of the pattern among the rule's target patterns, or `nil`
+    ///   outside refining mode or when no target pattern has that type.
+    /// - Throws: ATL execution errors for malformed or unknown source types.
+    private func inPlacePatternIndex(of rule: ATLEffectiveMatchedRule) throws -> Int? {
+        guard module.isRefining, let first = rule.rule.sourcePatterns.first else { return nil }
+        let (sourceAlias, sourceClass) = try sourceClass(forType: first.type)
+        guard let targetAlias = refiningTargets[sourceAlias] else { return nil }
+        return rule.targetPatterns.firstIndex { pattern in
+            let components = pattern.type.split(
+                separator: ATLLanguage.metamodelSeparator, omittingEmptySubsequences: false)
+            guard components.count == 2 else { return false }
+            return String(components[1]) == sourceClass.name
+                && module.targetAlias(forMetamodel: String(components[0])) == targetAlias
+        }
+    }
+
+    /// The identifier of the refining copy of a matched source element.
+    ///
+    /// - Parameter element: The source element.
+    /// - Returns: The identifier of its copy in the target model.
+    /// - Throws: ``ATLExecutionError/runtimeError(_:)`` when the element has no copy.
+    private func refiningCopy(of element: any EObject) throws -> EUUID {
+        guard let copy = executionContext.refiningCopy(of: element.id) else {
+            throw ATLExecutionError.runtimeError(
+                "Refining mode found no copy of source element \(element.id)")
+        }
+        return copy
     }
 
     /// Applies the bindings and imperative block of a matched rule.

@@ -22,6 +22,7 @@ A pure Swift implementation of the Eclipse Atlas Transformation Language (ATL) w
 - **Reflection**: `refImmediateComposite()`, `refGetValue`, `refSetValue`, `refUnsetValue` and `refInvokeOperation` on any model element
 - **Metamodel-Qualified Types**: Full support for `MM!Type` syntax
 - **Lazy Rules**: Deferred rule execution with lazy binding resolution
+- **Refining Mode**: `create OUT : MM refining IN : MM;` changes a copy of the source model in place, and `to drop` deletes matched elements
 - **Helper Functions**: Context and standalone helper functions
 - **Execution Engine**: Complete ATL virtual machine with 134/134 tests passing
 
@@ -168,6 +169,46 @@ try await ATLVirtualMachine(module: module).execute(
 
 A missing required parameter, an undeclared parameter or a value of the wrong type is reported as an `ATLExecutionError`. `ATLModule.parameterValues(fromText:)` converts textual values, for example from a command line, to the declared types.
 
+### Refining mode
+
+A module whose header declares its source models after `refining` instead of `from` refines them, as the in-place refining mode of Eclipse ATL does:
+
+```atl
+module RenameNodes;
+create OUT : Graph refining IN : Graph;
+
+rule Rename {
+    from s : Graph!Node (s.name = 'a')
+    to   t : Graph!Node (name <- 'A')
+}
+```
+
+Each target model starts as a copy of the source model in the same position of the header, so the module declares as many target models as source models, each with the metamodel of its source model. Elements that no rule matches are copied with their attribute values and with their references pointing to the copies. In a matched rule, the first target pattern whose type is the type of the first source pattern denotes the matched element itself: its bound features take their new values and its other features keep theirs. Other target patterns, lazy rules and called rules create new elements. Rules match and navigate the unchanged source models, which are never modified, and a source element in a bound value resolves to the target element of the matched rule that transformed it or, failing that, to its copy. `ATLModule.refining()` selects the same mode for a module whose header uses `from`:
+
+```swift
+try await ATLVirtualMachine(module: module.refining()).execute(
+    sources: ["IN": input], targets: ["OUT": output])
+```
+
+A matched rule deletes the element it matches when its `to` section starts with `drop`, as in the ATL 2010 compiler of Eclipse ATL:
+
+```atl
+rule RemoveEmpty {
+    from s : Graph!Node (s.weight = 0)
+    to drop
+}
+
+rule Replace {
+    from s : Graph!Node (s.name = 'old')
+    to drop
+       n : Graph!Node (name <- 'new')
+}
+```
+
+Deletion happens after every rule, lazy binding and endpoint rule has run, so the elements that a dropped element contains at that point are deleted with it, while an element that another rule has moved to a new container survives. References from the remaining elements to the deleted ones are removed: a single-valued reference is unset, and a many-valued one loses the deleted elements, which also clears both ends of opposite references. Eclipse ATL leaves such references dangling. Target patterns after `drop` create new elements, and a reference to the dropped source element resolves to the first of them. `drop` needs refining mode and a matched rule with one source pattern element that is neither abstract nor part of a rule hierarchy; otherwise it is rejected.
+
+Only instances of dynamic classes can be copied, so a model holding metamodel elements, such as an Ecore package, cannot be refined. Rules match the elements of the first model of each metamodel, so further source models of the same metamodel are copied unchanged.
+
 ### Queries
 
 A query unit computes a single value from its input models instead of creating target models. It starts with `query Name = expression;` instead of a module header and contains only helpers besides its query (no rules and no `create` statement). Its metamodels are named by `-- @path` or `-- @nsURI` directives, as in Eclipse ATL.
@@ -229,7 +270,7 @@ A transformation runs in two phases. All matched rules first create their target
 
 `ATLSyntax.tokens(in:options:)` classifies the tokens of ATL source text, including comments and unreadable text, without ever failing. `ATLParser.parseDiagnosing(_:name:metamodelRegistry:)` parses source text without throwing: it recovers at declaration and binding level, and returns the module read so far, diagnostics with source ranges and stable `ATLDiagnosticCode` values, an outline of the module and the tokens. Parsed syntax tree nodes carry a `SourceOrigin` with their range in the source text, which does not take part in equality.
 
-The ATL constructs that are not supported (libraries and `uses`, refining mode, `nodefault` rules, iterated target patterns with `foreach` or `distinct`, and `extends` on lazy or called rules) are reported as `unsupportedConstruct` errors at the offending token. Text that cannot start a declaration is reported as an unexpected token by both parsers.
+The ATL constructs that are not supported (libraries and `uses`, `nodefault` rules, iterated target patterns with `foreach` or `distinct`, and `extends` on lazy or called rules) are reported as `unsupportedConstruct` errors at the offending token. Text that cannot start a declaration is reported as an unexpected token by both parsers.
 
 ## CLI Tool
 
@@ -304,6 +345,7 @@ To use the CLI tool, install the [swift-modelling](https://github.com/mipalgu/sw
 - [x] **Rule Variants**: `abstract` rules, `extends` inheritance, `unique lazy` memoisation, `entrypoint` and `endpoint` rules, `using` variables and several source patterns in `from`
 - [x] **Imperative Blocks**: `do { }` sections with `target.feature <- value;`, variable declarations and assignments, `if`/`else`, `for` and expression statements
 - [x] **Reflective Operations**: `refImmediateComposite`, `refGetValue`, `refSetValue`, `refUnsetValue`, `refInvokeOperation` and the `eContainer`, `eContainingFeature`, `eContents` and `eAllContents` method forms
+- [x] **Refining Mode**: `refining` headers and `ATLModule.refining()` change copies of the source models in place, and `to drop` deletes matched elements
 - [x] **Read-only Source Models**: Setting or unsetting a feature of a source element is an error; only target elements can be modified
 - [x] **File Output**: `writeTo` and `writeToWithCharset`, disabled unless the host enables them, and confined to an output directory by default
 

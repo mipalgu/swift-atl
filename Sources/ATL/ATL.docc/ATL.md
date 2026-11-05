@@ -32,6 +32,7 @@ metamodelling framework.
 - **Helper overloads**: Contextual helpers dispatch on the dynamic type of the receiver
 - **Metamodel binding**: `@nsURI` and `@path` directives with an ``ATLMetamodelRegistry``
 - **Module parameters**: `-- @param` declarations supplied through `execute(sources:targets:parameters:)`
+- **Refining mode**: `create OUT : MM refining IN : MM;` modules, or ``ATLModule/refining(_:)``, change a copy of the source model in place, copy the elements that no rule matches, and delete the elements that rules `drop`
 - **Queries**: `query Name = expression;` units evaluated to a value with ``ATLVirtualMachine/evaluateQuery(sources:parameters:)``
 - **File output**: `writeTo` and `writeToWithCharset`, disabled unless the host enables them with an ``ATLFileOutputPolicy``
 - **Two-phase execution**: Targets are created before bindings, with implicit trace resolution, `resolveTemp`, unique lazy rules, entrypoint and endpoint rules, and imperative `do` blocks

@@ -12,7 +12,7 @@ import Testing
 
 @testable import ATL
 
-/// Tests that every ATL construct either parses and runs or is rejected loudly.
+/// Tests that every ATL construct either parses and runs, or parses, or is rejected loudly.
 @Suite("ATL Construct Support Tests")
 @MainActor
 struct ATLConstructSupportTests {
@@ -24,6 +24,12 @@ struct ATLConstructSupportTests {
 
         /// The construct is rejected as unsupported at the given text and line.
         case unsupported(text: String, line: Int)
+
+        /// The construct parses without diagnostics into a module whose refining mode is as given.
+        case parses(isRefining: Bool)
+
+        /// The construct refines the source model, which then holds this many elements of a class.
+        case refines(className: String, count: Int)
     }
 
     /// One ATL construct with its expected outcome.
@@ -145,7 +151,44 @@ struct ATLConstructSupportTests {
         Construct(
             "refining mode",
             whole: "module Test;\ncreate OUT : Tgt refining IN : Src;\n",
-            .unsupported(text: "refining", line: 2)),
+            .parses(isRefining: true)),
+        Construct(
+            "drop in refining mode",
+            whole: """
+                module Test;
+                create OUT : Src refining IN : Src;
+                rule Delete {
+                    from s : Src!Node (s.name = 'beta')
+                    to drop
+                }
+                """, .refines(className: "Node", count: 2)),
+        Construct(
+            "drop with new elements in refining mode",
+            whole: """
+                module Test;
+                create OUT : Src refining IN : Src;
+                rule Replace {
+                    from s : Src!Node (s.name = 'beta')
+                    to drop
+                       n : Src!Node (name <- 'delta'), m : Src!Node (name <- 'epsilon')
+                }
+                """, .refines(className: "Node", count: 4)),
+        Construct(
+            "drop in a lazy rule",
+            "lazy rule L { from s : Src!Node to drop }",
+            .unsupported(text: "drop", line: 3)),
+        Construct(
+            "drop in a called rule",
+            "rule C() { to drop }",
+            .unsupported(text: "drop", line: 3)),
+        Construct(
+            "drop with several source pattern elements",
+            "rule P { from a : Src!Node, b : Src!Leaf to drop }",
+            .unsupported(text: "drop", line: 3)),
+        Construct(
+            "drop in an abstract rule",
+            "abstract rule A { from s : Src!Node to drop }",
+            .unsupported(text: "drop", line: 3)),
         Construct(
             "distinct foreach",
             """
@@ -216,7 +259,29 @@ struct ATLConstructSupportTests {
                 result.diagnostics.first { $0.code == ATLDiagnosticCode.unsupportedConstruct.rawValue })
             #expect(Self.slice(diagnostic.range, of: construct.source) == text)
             #expect(diagnostic.range?.start.line == line)
+
+        case .refines(let className, let count):
+            var fixture = SemanticsFixture()
+            await fixture.populate()
+            let parsed = try await ATLParser().parseContent(construct.source)
+            let refining = parsed.withMetamodels(source: ["IN": fixture.source], target: ["OUT": fixture.source])
+            try await ATLVirtualMachine(module: refining).execute(
+                sources: ["IN": fixture.sourceResource], targets: ["OUT": fixture.targetResource])
+            #expect(await fixture.targets(className).count == count)
+
+        case .parses(let isRefining):
+            let parsed = try await ATLParser().parseContent(construct.source)
+            #expect(parsed.isRefining == isRefining)
+            let result = await ATLParser().parseDiagnosing(construct.source, name: "test.atl")
+            #expect(result.diagnostics.filter { $0.severity == .error }.isEmpty)
         }
+    }
+
+    @Test("A target variable named drop is an ordinary target pattern outside refining mode")
+    func targetVariableNamedDrop() async throws {
+        let source = Construct.header + "rule N2T { from s : Src!Node to drop : Tgt!TNode (name <- s.name) }\n"
+        let parsed = try await ATLParser().parseContent(source)
+        #expect(parsed.matchedRules.first?.targetPatterns.map(\.variableName) == ["drop"])
     }
 
     @Test("Unsupported constructs do not hide supported declarations after them")

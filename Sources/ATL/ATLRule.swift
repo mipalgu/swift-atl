@@ -110,6 +110,14 @@ public struct ATLMatchedRule: Sendable, Equatable, Hashable {
     /// contribute target patterns and bindings to the rules that extend them.
     public let isAbstract: Bool
 
+    /// Whether the rule deletes the element it matches, as written with `to drop`.
+    ///
+    /// Deletion is part of refining mode: the copy of the matched element is removed
+    /// from its target model, together with the elements it contains, once every rule
+    /// has been applied. The target patterns of such a rule, if any, all create new
+    /// elements.
+    public let dropsSourceElement: Bool
+
     // MARK: - Initialisation
 
     /// The source range the node was parsed from, if it was parsed.
@@ -130,11 +138,12 @@ public struct ATLMatchedRule: Sendable, Equatable, Hashable {
     ///   - doStatements: The imperative statements of the `do` block
     ///   - superRuleName: The name of the extended rule, if any
     ///   - isAbstract: Whether the rule is abstract
+    ///   - dropsSourceElement: Whether the rule deletes the element it matches (`to drop`)
     ///   - origin: The source range the node was parsed from.
     ///
     /// - Precondition: The rule name must be a non-empty string
     /// - Precondition: At least one target pattern must be specified unless the
-    ///   rule is abstract or extends another rule
+    ///   rule is abstract, extends another rule or deletes the element it matches
     public init(
         name: String,
         sourcePattern: ATLSourcePattern,
@@ -145,11 +154,12 @@ public struct ATLMatchedRule: Sendable, Equatable, Hashable {
         doStatements: [any ATLStatement] = [],
         superRuleName: String? = nil,
         isAbstract: Bool = false,
+        dropsSourceElement: Bool = false,
         origin: SourceOrigin = .init()
     ) {
         precondition(!name.isEmpty, "Rule name must not be empty")
         precondition(
-            !targetPatterns.isEmpty || isAbstract || superRuleName != nil,
+            !targetPatterns.isEmpty || isAbstract || superRuleName != nil || dropsSourceElement,
             "At least one target pattern must be specified")
 
         self.name = name
@@ -161,6 +171,7 @@ public struct ATLMatchedRule: Sendable, Equatable, Hashable {
         self.doStatements = doStatements
         self.superRuleName = superRuleName
         self.isAbstract = isAbstract
+        self.dropsSourceElement = dropsSourceElement
         self.origin = origin
     }
 
@@ -180,6 +191,7 @@ public struct ATLMatchedRule: Sendable, Equatable, Hashable {
                 && lhs.localVariables == rhs.localVariables
                 && lhs.doStatements.count == rhs.doStatements.count
                 && lhs.superRuleName == rhs.superRuleName && lhs.isAbstract == rhs.isAbstract
+                && lhs.dropsSourceElement == rhs.dropsSourceElement
         else {
             return false
         }
@@ -205,6 +217,7 @@ public struct ATLMatchedRule: Sendable, Equatable, Hashable {
         hasher.combine(additionalSourcePatterns)
         hasher.combine(superRuleName)
         hasher.combine(isAbstract)
+        hasher.combine(dropsSourceElement)
         if let guardExpression = `guard` {
             hashATLExpression(guardExpression, into: &hasher)
         }

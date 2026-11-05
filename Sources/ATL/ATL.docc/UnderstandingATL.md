@@ -35,7 +35,9 @@ rule MyRule {                               -- Rule
 ```
 
 A query unit has no module declaration and no rules. It computes a single value from
-its input models, as described under Queries below.
+its input models, as described under Queries below. A module whose header declares its
+source models after `refining` instead of `from` changes copies of its source models,
+as described under Refining Mode below.
 
 ### Metamodel Paths
 
@@ -377,6 +379,72 @@ rule Machine2Scaled {
 
 `debug(message)` prints `message: value` to standard error and returns the value, which
 makes it convenient for inspecting an expression in place.
+
+## Refining Mode
+
+A refining transformation changes a few elements of a model and keeps the rest. Its
+header declares the source models after `refining` instead of `from`, and each target
+model conforms to the metamodel of the source model in the same position:
+
+```atl
+module RenameNodes;
+create OUT : Graph refining IN : Graph;
+
+rule Rename {
+    from s : Graph!Node (s.name = 'a')
+    to   t : Graph!Node (name <- 'A')
+}
+```
+
+``ATLModule/refining(_:)`` selects the same mode for a module whose header uses `from`.
+The transformation behaves like the in-place refining mode of Eclipse ATL:
+
+- Each target model starts as a copy of its source model. Elements that no rule matches
+  keep their attribute values and their references, which point to the copies.
+- The first target pattern whose type is the type of the first source pattern denotes the
+  matched element itself. Its bound features take their new values and its other features
+  keep theirs. A binding replaces the whole value of its feature.
+- Other target patterns, lazy rules and called rules create new elements.
+- Rules match, and expressions navigate, the unchanged source models, which the
+  transformation never modifies. A source element in a bound value resolves to the first
+  target element of the matched rule that transformed it, and otherwise to its copy.
+
+### Deleting Elements
+
+A matched rule deletes the element it matches when its `to` section starts with `drop`,
+as the ATL 2010 compiler of Eclipse ATL allows. Target patterns may follow `drop`; they
+create new elements:
+
+```atl
+rule RemoveEmpty {
+    from s : Graph!Node (s.weight = 0)
+    to drop
+}
+
+rule Replace {
+    from s : Graph!Node (s.name = 'old')
+    to drop
+       n : Graph!Node (name <- 'new')
+}
+```
+
+- Deletion happens last, after every rule, lazy binding and endpoint rule has run. The
+  elements that a dropped element contains at that point are deleted with it, so an
+  element that another rule has moved to a new container survives.
+- References from the remaining elements to the deleted elements are removed: a
+  single-valued reference is unset, and a many-valued reference loses the deleted
+  elements, which also clears both ends of opposite references. Eclipse ATL leaves such
+  references dangling, which the Eclipse Modeling Framework refuses to save by default.
+- A reference to the dropped source element in a bound value resolves to the first target
+  pattern after `drop`, or, without any, to the copy that is deleted.
+- `drop` needs refining mode, and the rule must be a matched rule with one source pattern
+  element that is neither abstract nor part of a rule hierarchy. Otherwise the parser or
+  the virtual machine rejects it.
+
+Only instances of dynamic classes can be copied, so a model
+holding metamodel elements, such as an Ecore package, cannot be refined. As in other
+modules, rules match the elements of the first model of each metamodel, so further source
+models of the same metamodel are copied unchanged.
 
 ## Queries
 
