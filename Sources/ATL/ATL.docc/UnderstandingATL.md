@@ -359,10 +359,15 @@ c.package.classes.name           -- The name of each class
 
 An operation called on a collection, with `.` or `->`, is the collection's own operation, so
 `classes.size()` and `classes->size()` both count the classes. Navigating a feature of a
-collection, as in `c.package.classes.name`, collects the feature of each element; Eclipse
-ATL reports this as an error. An attribute helper defined for the collection itself, with a
-context such as `Sequence(UML!Class)`, `Collection(UML!Class)` or `OclAny`, is used first,
-as in ATL.
+collection, as in `c.package.classes.name`, collects the feature of each element into the
+collection kind that `collect` gives: a Bag for a Set or a Bag, and a Sequence for a
+Sequence or an OrderedSet (always a Sequence with the ``ATLBagRepresentation/sequence`` of
+``ATLOptions/bagRepresentation``). Eclipse ATL reports this as an error. An attribute
+helper defined for the collection itself, with a context such as `Sequence(UML!Class)`,
+`Bag(UML!Class)`, `Collection(UML!Class)` or `OclAny`, is used first, as in ATL. A helper
+for a collection kind applies only to collections of that kind, so one for `Sequence(T)`
+does not apply to a Bag; one for `Collection(T)` applies to every kind, and the most
+specific context wins.
 
 ### Collections
 
@@ -395,7 +400,11 @@ if cond then x else y endif       -- Conditionals
   attribute checks that the enumeration declares the literal.
 - `Sequence{}`, `OrderedSet{}`, `Set{}` and `Bag{}` literals keep their elements. Sets
   and ordered sets remain free of duplicates through `union`, `including`, `append` and
-  similar operations.
+  similar operations. A Bag keeps its duplicates and is a collection kind of its own, as
+  in OCL and the Eclipse ATL EMFTVM: `asBag()`, `collect` on a Set or a Bag, the `union`
+  of a Set or an OrderedSet with a Bag, and navigating a feature over a Set or a Bag give
+  Bags, and two Bags are equal when they hold each element equally often, in any order.
+  ``ATLOptions/bagRepresentation`` selects the Sequences of swift-atl 0.6 instead.
 - Collection literals accept OCL integer ranges `first..last`, alone or mixed with items:
   `Sequence{0, 2..4, 9}` holds `0, 2, 3, 4, 9`. Both bounds may be expressions but must
   be Integers. A range whose first value exceeds its last is empty, and sets keep each
@@ -421,6 +430,10 @@ of one element.
   `indexOf`, `lastIndexOf`, `includesAll`, `excludesAll`, `isUnique`, `one`, `exists`
   and `forAll` (with several iterator variables), `sortedBy`, `flatten`, `reverse`,
   `max`, `min`, and the conversions `asSet`, `asOrderedSet`, `asSequence` and `asBag`.
+  `at` applies to Sequences and OrderedSets only and is an error on a Set or a Bag.
+  `asSet()` and `asOrderedSet()` give a Set and an OrderedSet for every receiver, except
+  that with ``ATLBagRepresentation/sequence`` `asSet()` on a Sequence gives a Sequence
+  without duplicates, as in swift-atl 0.6.
   `first()` and `last()` return `OclUndefined` for an empty collection.
 - **Strings**: `concat`, `substring`, `toInteger`, `toReal`, `toUpper`, `toLower`,
   `toSequence`, `trim`, `startsWith`, `endsWith`, `indexOf`, `lastIndexOf`, `split`,

@@ -75,6 +75,46 @@ public enum ATLIntegerDivision: String, Sendable, CaseIterable, Hashable {
     case truncating
 }
 
+/// What a Bag value is when ATL expressions evaluate.
+///
+/// In OCL and in the Eclipse ATL EMFTVM, a Bag is an unordered collection that keeps
+/// duplicates and is a collection kind of its own: it is neither a Sequence nor a Set.
+/// swift-atl 0.6 evaluated `Bag{...}` literals, `asBag()` and the operations whose
+/// result is a Bag to Sequences. The raw value of each case is its spelling on a
+/// command line.
+public enum ATLBagRepresentation: String, Sendable, CaseIterable, Hashable {
+    /// Bags are a collection kind of their own, as in OCL and the Eclipse ATL EMFTVM.
+    ///
+    /// A Bag keeps its duplicates, conforms to `Bag(T)` and `Collection(T)` but not to
+    /// `Sequence(T)`, reports its type as `Bag`, is written as `Bag{...}`, is the receiver
+    /// of helpers declared for `Bag(T)` rather than `Sequence(T)`, and equals another
+    /// collection that holds each element equally often, in any order. `collect` over a
+    /// Set or a Bag gives a Bag, and so does navigating a feature over one, as in
+    /// `classes.name` for a Set `classes`; over a Sequence or an OrderedSet, both give a
+    /// Sequence. `asSet()` gives a Set for every receiver. This is the default.
+    case bag
+
+    /// Bags are Sequences, as in swift-atl 0.6.
+    ///
+    /// `Bag{...}` literals, `asBag()` and the operations whose result is a Bag, such as
+    /// `collect` on a Set, give Sequences, which keep their order, conform to `Sequence(T)`
+    /// and compare element by element. Navigating a feature over any collection gives a
+    /// Sequence. `asSet()` on a Sequence or a single value gives a Sequence without
+    /// duplicates rather than a Set, also as in swift-atl 0.6.
+    case sequence
+
+    /// The collection kind that an evaluation produces for a requested kind.
+    ///
+    /// Only the Bag kind depends on the representation: ``sequence`` replaces it with the
+    /// Sequence kind, and every other kind is produced as requested.
+    ///
+    /// - Parameter kind: The kind that the OCL or ATL semantics of an operation call for.
+    /// - Returns: The kind of collection to produce.
+    public func kind(for kind: ATLCollectionKind) -> ATLCollectionKind {
+        self == .sequence && kind == .bag ? .sequence : kind
+    }
+}
+
 /// Options that choose between the current behaviour of ATL processing and the
 /// behaviour of swift-atl 0.6.
 ///
@@ -102,26 +142,36 @@ public struct ATLOptions: Sendable, Hashable {
     /// divide as this selects.
     public var integerDivision: ATLIntegerDivision
 
+    /// What a Bag value is when ATL expressions evaluate.
+    ///
+    /// The virtual machine and the execution context that are given the options
+    /// produce Bags as this selects.
+    public var bagRepresentation: ATLBagRepresentation
+
     /// Creates a set of options.
     ///
     /// - Parameters:
     ///   - collectionRangeSyntax: Whether ATL source may write integer ranges in collection literals.
     ///   - collectionRangeEncoding: How collection ranges are written to XMI.
     ///   - integerDivision: What the `/` operator yields for two Integer operands.
+    ///   - bagRepresentation: What a Bag value is when ATL expressions evaluate.
     public init(
         collectionRangeSyntax: ATLCollectionRangeSyntax = .ocl,
         collectionRangeEncoding: ATLCollectionRangeEncoding = .collectionRange,
-        integerDivision: ATLIntegerDivision = .real
+        integerDivision: ATLIntegerDivision = .real,
+        bagRepresentation: ATLBagRepresentation = .bag
     ) {
         self.collectionRangeSyntax = collectionRangeSyntax
         self.collectionRangeEncoding = collectionRangeEncoding
         self.integerDivision = integerDivision
+        self.bagRepresentation = bagRepresentation
     }
 
     /// The current behaviour, which the default initialiser also gives.
     ///
     /// Collection literals accept OCL integer ranges, ranges are written to XMI
-    /// as OCL collection ranges, and `/` divides two Integers into a Real.
+    /// as OCL collection ranges, `/` divides two Integers into a Real, and Bags are
+    /// a collection kind of their own.
     public static let standard = ATLOptions()
 
     /// The behaviour of swift-atl 0.6.
@@ -129,8 +179,9 @@ public struct ATLOptions: Sendable, Hashable {
     /// Collection ranges are rejected as syntax errors, as swift-atl 0.6 rejected them.
     /// Ranges built in code are written to XMI as OCL collection ranges, because
     /// swift-atl 0.6 had no ranges that it could write. `/` truncates the quotient of
-    /// two Integers to an Integer.
-    public static let legacy = ATLOptions(collectionRangeSyntax: .eclipse, integerDivision: .truncating)
+    /// two Integers to an Integer, and Bags are Sequences.
+    public static let legacy = ATLOptions(
+        collectionRangeSyntax: .eclipse, integerDivision: .truncating, bagRepresentation: .sequence)
 
     /// Creates the options that a choice of semantics selects.
     ///

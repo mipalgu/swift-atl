@@ -175,22 +175,29 @@ extension ATLExecutionContext {
 
     /// Navigates a feature over every element of a collection and collects the results.
     ///
+    /// The results form the collection kind that `collect` gives for the receiver:
+    /// a Bag for a Set or a Bag, and a Sequence for a Sequence or an OrderedSet, or
+    /// always a Sequence when the ``ATLOptions/bagRepresentation`` is
+    /// ``ATLBagRepresentation/sequence``.
+    ///
     /// - Parameters:
-    ///   - elements: The elements to navigate from.
+    ///   - collection: The collection to navigate from.
     ///   - property: The feature name.
-    /// - Returns: The flattened results as a sequence; undefined results are dropped.
+    /// - Returns: The flattened results; undefined results are dropped.
     /// - Throws: ``ATLExecutionError`` when navigation from an element fails.
-    func navigateCollection(_ elements: [any EcoreValue], property: String) async throws
+    func navigateCollection(_ collection: any EcoreValue, property: String) async throws
         -> (any EcoreValue)?
     {
         var collected: [any EcoreValue] = []
-        for element in elements {
+        for element in ATLCollections.elements(of: collection) {
             guard let value = try await navigate(from: element, property: property) else { continue }
             collected.append(
                 contentsOf: ATLCollections.isCollection(value)
                     ? ATLCollections.elements(of: value) : [value])
         }
-        return EcoreValueArray(collected)
+        let kind = ATLCollections.collectedKind(
+            over: ATLCollections.kind(of: collection) ?? .sequence, bags: options.bagRepresentation)
+        return ATLCollections.make(kind: kind, collected)
     }
 
     // MARK: - Module Parameters

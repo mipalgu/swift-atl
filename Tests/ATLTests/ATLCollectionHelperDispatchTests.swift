@@ -175,6 +175,98 @@ struct ATLCollectionHelperDispatchTests {
         #expect(try await evaluate("Set{'a'}->size()", declarations: declarations) as? Int == 1)
     }
 
+    // MARK: - Bag helpers
+
+    /// Evaluates an expression with the standard options, in which Bags are distinct from Sequences.
+    ///
+    /// - Parameters:
+    ///   - expression: The expression to evaluate.
+    ///   - declarations: The helper declarations of the module.
+    /// - Returns: The value of the expression.
+    private func evaluateStandard(_ expression: String, declarations: String) async throws
+        -> (any EcoreValue)?
+    {
+        try await LanguageHarness.evaluate(expression, declarations: declarations, options: .standard)
+    }
+
+    @Test(
+        "An attribute helper on a Bag applies to Bag receivers",
+        arguments: ["Bag{'a', 'a'}", "Sequence{'a', 'a'}->asBag()", "Set{'a', 'b'}->collect(s | s)"])
+    func bagAttribute(receiver: String) async throws {
+        let declarations = "helper context Bag(String) def : count : Integer = self->size();"
+        #expect(try await evaluateStandard("\(receiver).count", declarations: declarations) as? Int == 2)
+    }
+
+    @Test("An operation helper on a Bag is called with either call operator")
+    func bagOperation() async throws {
+        let declarations = "helper context Bag(String) def : count() : Integer = self->size();"
+        #expect(try await evaluateStandard("Bag{'a', 'a'}->count()", declarations: declarations) as? Int == 2)
+        #expect(try await evaluateStandard("Bag{'a', 'a'}.count()", declarations: declarations) as? Int == 2)
+    }
+
+    @Test(
+        "A Bag receiver prefers a Bag helper, then a Collection helper, then an OclAny helper",
+        arguments: [
+            (["Bag", "Collection", "OclAny"], "Bag"),
+            (["Collection", "OclAny"], "Collection"),
+            (["OclAny"], "OclAny"),
+        ])
+    func bagPrecedence(contexts: [String], expected: String) async throws {
+        let declarations = contexts.map { context in
+            let type = context == "OclAny" ? context : "\(context)(String)"
+            return """
+                helper context \(type) def : kind : String = '\(context)';
+                helper context \(type) def : kindOf() : String = '\(context)';
+                """
+        }.joined(separator: "\n")
+        #expect(try await evaluateStandard("Bag{'a'}.kind", declarations: declarations) as? String == expected)
+        #expect(try await evaluateStandard("Bag{'a'}->kindOf()", declarations: declarations) as? String == expected)
+        #expect(try await evaluateStandard("Bag{'a'}.kindOf()", declarations: declarations) as? String == expected)
+    }
+
+    @Test("A Sequence helper does not apply to a Bag, and a Bag helper not to a Sequence")
+    func bagAndSequenceHelpersAreDistinct() async throws {
+        let sequenceHelper = "helper context Sequence(String) def : size() : Integer = 99;"
+        #expect(try await evaluateStandard("Bag{'a'}->size()", declarations: sequenceHelper) as? Int == 1)
+        #expect(try await evaluateStandard("Sequence{'a'}->size()", declarations: sequenceHelper) as? Int == 99)
+        let bagHelper = "helper context Bag(String) def : size() : Integer = 42;"
+        #expect(try await evaluateStandard("Bag{'a'}->size()", declarations: bagHelper) as? Int == 42)
+        #expect(try await evaluateStandard("Sequence{'a'}->size()", declarations: bagHelper) as? Int == 1)
+        #expect(try await evaluateStandard("Set{'a'}->size()", declarations: bagHelper) as? Int == 1)
+    }
+
+    @Test("A Bag attribute helper takes precedence over collection over the elements")
+    func bagAttributeShadowsElementFeature() async throws {
+        let fixture = ShapeFixture()
+        let bag = EcoreValueArray(
+            [
+                fixture.make(fixture.square, ["name": "s"]),
+                fixture.make(fixture.circle, ["name": "c"]),
+            ], kind: .bag)
+        let declarations = "helper context Bag(Shapes!Shape) def : name : String = 'bag';"
+        let harness = try await LanguageHarness.make(
+            declarations: declarations, expression: "list.name", fixture: fixture, options: .standard)
+        harness.context.setVariable("list", value: bag)
+        let result = try await harness.context.callHelper(LanguageHarness.probeName, arguments: [])
+        #expect(result as? String == "bag")
+    }
+
+    @Test("A Sequence attribute helper does not stop collection over the elements of a Bag")
+    func sequenceHelperIgnoredForBag() async throws {
+        let fixture = ShapeFixture()
+        let bag = EcoreValueArray(
+            [
+                fixture.make(fixture.square, ["name": "s"]),
+                fixture.make(fixture.circle, ["name": "c"]),
+            ], kind: .bag)
+        let declarations = "helper context Sequence(Shapes!Shape) def : name : String = 'sequence';"
+        let harness = try await LanguageHarness.make(
+            declarations: declarations, expression: "list.name", fixture: fixture, options: .standard)
+        harness.context.setVariable("list", value: bag)
+        let result = try await harness.context.callHelper(LanguageHarness.probeName, arguments: [])
+        #expect(result.strings == ["s", "c"])
+    }
+
     // MARK: - Implicit collection over elements
 
     @Test("An element attribute helper is collected over a collection without a collection helper")

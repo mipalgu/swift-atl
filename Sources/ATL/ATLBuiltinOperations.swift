@@ -136,7 +136,8 @@ enum ATLBuiltinOperations {
         case .allInstancesFrom where arguments.count == 1:
             return try await allInstances(of: receiver, from: arguments[0], context: context)
         default:
-            return try collectionOperation(operation, receiver, arguments)
+            return try collectionOperation(
+                operation, receiver, arguments, bags: context.options.bagRepresentation)
         }
     }
 
@@ -148,20 +149,31 @@ enum ATLBuiltinOperations {
 
     /// Evaluates a collection operation without iterator variables.
     ///
-    /// The result has the kind of the receiver, with one exception:
-    /// `symmetricDifference` is a set operation, so on a Sequence or a Bag
-    /// receiver it yields a Set (an ordered set receiver yields an ordered set).
+    /// The result has the kind of the receiver, with these exceptions, which follow
+    /// OCL and the Eclipse ATL EMFTVM:
+    ///
+    /// - `symmetricDifference` is a set operation, so on a Sequence or a Bag
+    ///   receiver it yields a Set (an ordered set receiver yields an ordered set).
+    /// - The `union` of a Set or an OrderedSet with a Bag is a Bag.
+    /// - The `intersection` of a Bag with a Set or an OrderedSet is a Set. The
+    ///   intersection of a Bag with another collection is a Bag that holds each
+    ///   element as often as the operand that holds it least.
+    /// - The conversions give the kind they name. When `bags` is
+    ///   ``ATLBagRepresentation/sequence``, `asBag` gives a Sequence and `asSet` gives a
+    ///   duplicate-free Sequence for a Sequence or a single value, as in swift-atl 0.6.
     ///
     /// - Parameters:
     ///   - operation: The operation.
     ///   - receiver: The receiver; a single value acts as a one-element collection
     ///     and the undefined value as an empty one.
     ///   - arguments: The evaluated arguments.
+    ///   - bags: What a Bag value is, which decides whether operations produce Bags.
     /// - Returns: The result, or `nil` when the operation does not take that many
     ///   arguments or does not apply to the receiver.
     /// - Throws: ``ATLExecutionError`` when an argument is invalid.
     private static func collectionOperation(
-        _ operation: ATLOperation, _ receiver: (any EcoreValue)?, _ arguments: [(any EcoreValue)?]
+        _ operation: ATLOperation, _ receiver: (any EcoreValue)?, _ arguments: [(any EcoreValue)?],
+        bags: ATLBagRepresentation
     ) throws -> ATLBuiltinResult? {
         let items = ATLCollections.elements(of: receiver)
         let kind = ATLCollections.kind(of: receiver) ?? .sequence
@@ -205,12 +217,22 @@ enum ATLBuiltinOperations {
                 ATLCollections.make(
                     kind: kind, items.filter { !ATLValues.areEqual($0, arguments[0]) }))
         case (.union, 1):
+            let joinsBag =
+                bags == .bag && kind.isUnique && ATLCollections.kind(of: arguments[0]) == .bag
             return result(
-                ATLCollections.make(kind: kind, items + ATLCollections.elements(of: arguments[0])))
+                ATLCollections.make(
+                    kind: joinsBag ? .bag : kind, items + ATLCollections.elements(of: arguments[0])))
         case (.intersection, 1):
             let other = ATLCollections.elements(of: arguments[0])
-            return result(
-                ATLCollections.make(kind: kind, items.filter { ATLValues.contains(other, $0) }))
+            guard kind == .bag else {
+                return result(
+                    ATLCollections.make(kind: kind, items.filter { ATLValues.contains(other, $0) }))
+            }
+            if ATLCollections.kind(of: arguments[0])?.isUnique == true {
+                return result(
+                    ATLCollections.make(kind: .set, items.filter { ATLValues.contains(other, $0) }))
+            }
+            return result(ATLCollections.make(kind: .bag, bagIntersection(items, other)))
         case (.includes, 1):
             return result(ATLValues.contains(items, arguments[0]))
         case (.excludes, 1):
@@ -222,18 +244,18 @@ enum ATLBuiltinOperations {
             return result(
                 !ATLCollections.elements(of: arguments[0]).contains { ATLValues.contains(items, $0) })
         case (.asSet, 0):
-            // A plain collection becomes a duplicate-free array, which is what model features store
+            // swift-atl 0.6 turned a plain sequence into a duplicate-free sequence
+            let keepsSequence = bags == .sequence && !(receiver is ATLCollectionValue) && kind == .sequence
             let deduplicated = ATLValues.removingDuplicates(items)
             return result(
-                receiver is ATLCollectionValue
-                    ? ATLCollectionValue(kind: .set, values: deduplicated)
-                    : EcoreValueArray(deduplicated))
+                keepsSequence
+                    ? EcoreValueArray(deduplicated) : ATLCollectionValue(kind: .set, values: deduplicated))
         case (.asOrderedSet, 0):
             return result(ATLCollections.make(kind: .orderedSet, items))
         case (.asSequence, 0):
             return result(ATLCollections.make(kind: .sequence, items))
         case (.asBag, 0):
-            return result(ATLCollections.make(kind: .bag, items))
+            return result(ATLCollections.make(kind: bags.kind(for: .bag), items))
         case (.flatten, 0):
             return result(ATLCollections.make(kind: kind, flattened(items)))
         case (.reverse, 0):
@@ -262,6 +284,30 @@ enum ATLBuiltinOperations {
         default:
             return nil
         }
+    }
+
+    /// The elements that two bags have in common.
+    ///
+    /// Each element occurs as often as it occurs in the operand that holds it
+    /// least, in the order of its occurrences in `items`.
+    ///
+    /// - Parameters:
+    ///   - items: The elements of the receiving bag.
+    ///   - other: The elements of the other operand.
+    /// - Returns: The elements of the intersection.
+    private static func bagIntersection(_ items: [any EcoreValue], _ other: [any EcoreValue])
+        -> [any EcoreValue]
+    {
+        var unmatched = other
+        var common: [any EcoreValue] = []
+        for item in items {
+            guard let match = unmatched.firstIndex(where: { ATLValues.areEqual(item, $0) }) else {
+                continue
+            }
+            unmatched.remove(at: match)
+            common.append(item)
+        }
+        return common
     }
 
     /// Appends elements to the elements of a collection.
@@ -721,7 +767,11 @@ enum ATLLambdaOperation: String {
 /// Evaluation of the iterator operations of the OCL collection library.
 ///
 /// The receiver may be any collection; a single value is treated as a collection
-/// of one element and the undefined value as an empty collection.
+/// of one element and the undefined value as an empty collection. `select` and
+/// `reject` keep the kind of the receiver, `sortedBy` gives an ordered set for a
+/// unique receiver and a sequence otherwise, and `collect` gives a Bag for a Set or
+/// a Bag receiver, as in OCL and the Eclipse ATL EMFTVM, and a Sequence otherwise.
+/// With ``ATLBagRepresentation/sequence``, `collect` gives a Sequence for every receiver.
 @MainActor
 enum ATLLambdaOperations {
 
@@ -762,7 +812,8 @@ enum ATLLambdaOperations {
                 }
                 collected.append(contentsOf: ATLCollections.isCollection(value) ? ATLCollections.elements(of: value) : [value])
             }
-            let collectedKind: ATLCollectionKind = (kind == .set || kind == .bag) ? .bag : .sequence
+            let collectedKind = ATLCollections.collectedKind(
+                over: kind, bags: context.options.bagRepresentation)
             return ATLBuiltinResult(value: ATLCollections.make(kind: collectedKind, collected))
         case .one:
             var matches = 0

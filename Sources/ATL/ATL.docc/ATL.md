@@ -104,6 +104,7 @@ deprecated in favour of the variant that takes options.
 | Integer ranges in collection literals, such as `Sequence{1..3}` | Accepted | ``ATLOptions/collectionRangeSyntax`` | ``ATLCollectionRangeSyntax/eclipse``: rejected, as in Eclipse ATL |
 | Collection ranges in XMI | ``ATLCollectionRangeEncoding/collectionRange`` | ``ATLOptions/collectionRangeEncoding`` | No ranges could be written; ``ATLCollectionRangeEncoding/portable`` writes them with expressions that 0.6 reads |
 | `/` on two Integers, such as `7 / 2` | ``ATLIntegerDivision/real``: a Real (`3.5`), as in OCL and Eclipse ATL | ``ATLOptions/integerDivision`` | ``ATLIntegerDivision/truncating``: an Integer truncated towards zero (`3`), as `div` gives |
+| Bag values, such as `Bag{1, 1}`, `asBag()`, `Set{...}->collect(...)` and a feature navigated over a Set | ``ATLBagRepresentation/bag``: Bags, as in OCL and the Eclipse ATL EMFTVM | ``ATLOptions/bagRepresentation`` | ``ATLBagRepresentation/sequence``: Sequences |
 
 With ``ATLCollectionRangeSyntax/eclipse``, `..` is read as two `.` tokens, and a range is
 reported as a syntax error whose message names the portable alternatives: listing the
@@ -113,6 +114,13 @@ integers, as in `Sequence{1, 2, 3}`, or calling `includingRange`, as in
 written as its integers, and any other range as a call of `includingRange`, with the items
 after it added by `includingAll`. Both operations exist in swift-atl 0.6 and in the Eclipse
 ATL EMFTVM, which however reports an error for an empty range.
+
+With ``ATLBagRepresentation/bag``, a Bag keeps its duplicates but is neither a Sequence nor
+a Set: it conforms to `Bag(T)` and `Collection(T)`, `oclType()` names it `Bag`, it is written
+as `Bag{...}`, helpers declared for `Bag(T)` apply to it while those for `Sequence(T)` do not,
+and it equals a collection that holds each element equally often, in any order. With
+``ATLBagRepresentation/sequence``, the same expressions give Sequences, which conform to
+`Sequence(T)` and compare element by element.
 
 To keep the 0.6 behaviour with the new APIs, pass ``ATLOptions/legacy``, for example
 `ATLParser(options: .legacy)` or `ATLVirtualMachine(module: module, options: .legacy)`.
@@ -186,6 +194,7 @@ models, in the container lookup scope configured for each resource or its resour
 - ``ATLCollectionRangeSyntax``
 - ``ATLCollectionRangeEncoding``
 - ``ATLIntegerDivision``
+- ``ATLBagRepresentation``
 - ``ATLMetamodelRegistry``
 
 ### Editor Support

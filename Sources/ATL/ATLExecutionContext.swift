@@ -115,7 +115,8 @@ public final class ATLExecutionContext: Sendable {
     /// The options that select how expressions are evaluated in this context.
     ///
     /// The ``ATLOptions/integerDivision`` decides whether `/` divides two Integers
-    /// into a Real or truncates the quotient. A context created with
+    /// into a Real or truncates the quotient, and the ``ATLOptions/bagRepresentation``
+    /// whether Bag values are Bags or Sequences. A context created with
     /// ``init(module:sources:targets:executionEngine:commandStack:)`` evaluates as
     /// swift-atl 0.6 did, with ``ATLOptions/legacy``; a virtual machine gives its
     /// context the options it was created with.
@@ -290,7 +291,7 @@ public final class ATLExecutionContext: Sendable {
     /// applies to the collection itself, such as `Sequence(T)`, `Set(T)` or
     /// `Collection(T)`, choosing the most specific one. Only when no helper applies
     /// to the collection is the property navigated from each element and the
-    /// results collected.
+    /// results collected, into the collection kind that `collect` gives.
     ///
     /// - Parameters:
     ///   - object: Source object
@@ -306,7 +307,7 @@ public final class ATLExecutionContext: Sendable {
             {
                 return try await invokeContextHelper(helper, receiver: object, arguments: [])
             }
-            return try await navigateCollection(ATLCollections.elements(of: object), property: property)
+            return try await navigateCollection(object, property: property)
         }
 
         guard var eObject = object as? (any EObject) else {

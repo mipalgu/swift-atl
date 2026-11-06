@@ -160,7 +160,7 @@ public final class ATLVirtualMachine {
     /// Creates a virtual machine that evaluates expressions as swift-atl 0.6 did.
     ///
     /// The machine uses ``ATLOptions/legacy``, so `/` truncates the quotient of two
-    /// Integers to an Integer.
+    /// Integers to an Integer and Bag values are Sequences.
     ///
     /// - Parameters:
     ///   - module: The ATL module to execute

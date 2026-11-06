@@ -2628,7 +2628,9 @@ public struct ATLCollectionLiteralExpression: ATLExpression, Sendable, Equatable
     ///
     /// Elements are evaluated in order; an undefined element is left out and a range
     /// contributes each integer it spans. A `Set` or an `OrderedSet` keeps only the
-    /// first occurrence of each element.
+    /// first occurrence of each element. A `Bag` is a Bag or, when the
+    /// ``ATLOptions/bagRepresentation`` of the context is
+    /// ``ATLBagRepresentation/sequence``, a Sequence.
     ///
     /// - Parameter context: The execution context in which the elements are evaluated.
     /// - Returns: The collection of the evaluated elements.
@@ -2651,7 +2653,8 @@ public struct ATLCollectionLiteralExpression: ATLExpression, Sendable, Equatable
             }
         }
 
-        return ATLCollections.make(kind: kind, evaluatedElements)
+        return ATLCollections.make(
+            kind: context.options.bagRepresentation.kind(for: kind), evaluatedElements)
     }
 
     /// Equality comparison for collection literal expressions.
