@@ -35,6 +35,8 @@ transforms UML classes to database tables:
 
 ```atl
 -- Class2Table.atl
+-- @path UML=UML.ecore
+-- @path Database=Database.ecore
 module Class2Table;
 create OUT : Database from IN : UML;
 
@@ -63,7 +65,9 @@ rule Attribute2Column {
 
 ### Module Declaration
 
-The `module` line declares the transformation name. The `create` line specifies:
+The `-- @path` comments name the files of the metamodels, relative to the
+transformation. The `module` line declares the transformation name. The `create` line
+specifies:
 - `OUT : Database` - the output model uses the Database metamodel
 - `IN : UML` - the input model uses the UML metamodel
 
@@ -73,30 +77,18 @@ Each `rule` block defines a pattern match:
 - `from` - the source pattern to match
 - `to` - the target elements to create
 
-## Loading Metamodels
+## Parsing the Transformation
 
-Before running a transformation, load the source and target metamodels:
+Use ``ATLParser`` to parse the ATL file. The parser loads the metamodels that the
+`-- @path` directives name; metamodels that are not held in files can be supplied with
+an ``ATLMetamodelRegistry``, as <doc:UnderstandingATL> describes. The
+``ATLOptions/standard`` options give the current behaviour, such as accepting collection
+ranges like `Sequence{1..3}`:
 
 ```swift
 import ATL
 import ECore
 
-// Load metamodels from .ecore files
-let xmiParser = XMIParser()
-
-let umlResource = try await xmiParser.parse(URL(fileURLWithPath: "UML.ecore"))
-let umlMetamodel = umlResource.rootObjects.first as! EPackage
-
-let dbResource = try await xmiParser.parse(URL(fileURLWithPath: "Database.ecore"))
-let dbMetamodel = dbResource.rootObjects.first as! EPackage
-```
-
-## Parsing the Transformation
-
-Use ``ATLParser`` to parse the ATL file. The ``ATLOptions/standard`` options
-give the current behaviour, such as accepting collection ranges like `Sequence{1..3}`:
-
-```swift
 let parser = ATLParser(options: .standard)
 let module = try await parser.parse(URL(fileURLWithPath: "Class2Table.atl"))
 
@@ -104,46 +96,56 @@ print("Loaded module: \(module.name)")
 print("Rules: \(module.matchedRules.count)")
 ```
 
-## Configuring the Virtual Machine
+## Loading the Source Model
 
-Create an ``ATLVirtualMachine`` and register your metamodels and models. The
-``ATLOptions/standard`` options evaluate expressions as OCL and Eclipse ATL do, so
-`7 / 2` is the Real `3.5`:
+Register the source metamodel with a resource set, so that the XMI parser can resolve
+the types of the source model, and load the model:
 
 ```swift
-// Create the virtual machine
-let vm = ATLVirtualMachine(module: module, options: .standard)
-
-// Register metamodels (names must match the ATL module declaration)
-try await vm.registerSourceMetamodel(umlMetamodel, as: "UML")
-try await vm.registerTargetMetamodel(dbMetamodel, as: "Database")
-
-// Load and register the source model
-let sourceResource = try await xmiParser.parse(URL(fileURLWithPath: "my-classes.xmi"))
-try await vm.registerSourceModel(sourceResource, as: "IN")
+let resourceSet = ResourceSet()
+if let uml = module.sourceMetamodels["IN"] {
+    await resourceSet.registerMetamodel(uml, uri: uml.nsURI)
+}
+let source = try await XMIParser(resourceSet: resourceSet)
+    .parse(URL(fileURLWithPath: "my-classes.xmi"))
 ```
 
 ## Executing the Transformation
 
-Execute the transformation and retrieve results:
+Create an ``ATLVirtualMachine`` and execute the transformation with the source and
+target models, named as in the `create` line. The ``ATLOptions/standard`` options
+evaluate expressions as OCL and Eclipse ATL do, so `7 / 2` is the Real `3.5`:
 
 ```swift
-// Run the transformation
-let result = try await vm.execute()
+let target = Resource(uri: "tables.xmi")
+let vm = ATLVirtualMachine(module: module, options: .standard)
+try await vm.execute(sources: ["IN": source], targets: ["OUT": target])
 
 // Access execution statistics
-print("Elements created: \(result.statistics.elementsCreated)")
-print("Rules applied: \(result.statistics.rulesApplied)")
-
-// Get the target model
-guard let targetResource = result.targetModels["OUT"] else {
-    fatalError("Target model not found")
-}
+print("Elements created: \(vm.statistics.elementsCreated)")
+print("Rules executed: \(vm.statistics.rulesExecuted)")
 
 // Save the result
-let serialiser = XMISerializer()
-try serialiser.save(resource: targetResource, to: URL(fileURLWithPath: "tables.xmi"))
+try await XMISerializer().serialize(target, to: URL(fileURLWithPath: "tables.xmi"))
 ```
+
+### Reporting Progress and Cancelling
+
+``ATLVirtualMachine/execute(sources:targets:parameters:progress:)`` reports
+``ATLProgress`` values (the phase, the number of steps completed, the total when it is
+known and the current rule) to a callback on the main actor, and the run ends with a
+report in the ``ATLProgressPhase/finished`` phase:
+
+```swift
+try await vm.execute(sources: ["IN": source], targets: ["OUT": target]) { progress in
+    print(progress.phase, progress.completed, progress.total ?? 0)
+}
+```
+
+The run checks for cancellation of its task at every rule, element and binding, and
+regularly gives other work a turn, so a run started on the main actor keeps a user
+interface responsive. A cancelled run throws `CancellationError` and leaves the target
+models partly populated.
 
 ## Using Helpers
 
@@ -239,6 +241,46 @@ let written = try await vm.evaluateQuery(sources: ["Library": libraryModel])
 
 See <doc:UnderstandingATL> for how input models are named and how file paths are
 resolved.
+
+## Reading and Writing ATL XMI
+
+An ``ATLResource`` holds an ATL module and reads it from a file URI ending in `.atl` or
+`.xmi`. It writes the module to a `.xmi` file URI in the Eclipse ATL XMI format:
+
+```swift
+let resource = ATLResource(
+    uri: URL(fileURLWithPath: "Class2Table.atl").absoluteString, options: .standard)
+try await resource.load()
+
+if let module = resource.module {
+    let xmi = ATLResource(
+        uri: URL(fileURLWithPath: "Class2Table.xmi").absoluteString,
+        module: module, options: .standard)
+    try await xmi.save()
+}
+```
+
+## Supporting Editors
+
+``ATLSyntax/tokens(in:options:)`` classifies the tokens of ATL source text, including
+comments and unreadable text, and never fails.
+``ATLParser/parseDiagnosing(_:name:metamodelRegistry:)`` parses source text without
+throwing. It recovers at the level of declarations and bindings, and returns an
+``ATLParseResult`` with the module read so far, diagnostics with source ranges and stable
+``ATLDiagnosticCode`` values, an outline of the module and the tokens:
+
+```swift
+let result = await ATLParser(options: .standard)
+    .parseDiagnosing(text, name: "Class2Table.atl")
+for diagnostic in result.diagnostics {
+    print(diagnostic.severity, diagnostic.message)
+}
+```
+
+Parsed syntax tree nodes carry a `SourceOrigin` with their range in the source text,
+which does not take part in equality. ATL constructs that are not supported are reported
+as ``ATLDiagnosticCode/unsupportedConstruct`` errors; the Compatibility section of
+<doc:ATL> lists them.
 
 ## Debugging Transformations
 

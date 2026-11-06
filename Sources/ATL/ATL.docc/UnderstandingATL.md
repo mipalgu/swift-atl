@@ -39,6 +39,25 @@ its input models, as described under Queries below. A module whose header declar
 source models after `refining` instead of `from` changes copies of its source models,
 as described under Refining Mode below.
 
+### Binding Metamodels
+
+A metamodel named in the module header is bound, in order of precedence, by:
+
+1. a `-- @nsURI Name=http://example.org/model` directive, resolved through the
+   ``ATLMetamodelRegistry`` that the parser receives,
+2. a `-- @path Name=Name.ecore` directive, as described under Metamodel Paths below,
+3. a lookup of the name in the registry, which ignores letter case when only one
+   package matches.
+
+```swift
+let registry = ATLMetamodelRegistry(packages: [ecorePackage, genModelPackage])
+let module = try await ATLParser(options: .standard).parse(url, metamodelRegistry: registry)
+```
+
+A registry can also be built from a table of namespace URIs, or given a resolver closure
+for namespace URIs that it does not hold. Type references such as `Ecore!EClass` use the
+name from the module header, which need not equal the name of the bound package.
+
 ### Metamodel Paths
 
 A `-- @path Name=Name.ecore` directive in the header names the file of a metamodel. A
@@ -50,6 +69,30 @@ in the project `Families2Persons`. It is looked up in each search directory, fir
 as `Families.ecore`, with the search directory as the project directory itself. A
 transformation copied from an Eclipse project therefore finds its metamodels both in a
 copy of the workspace and in a copy of the project directory.
+
+### Module Parameters
+
+Header comments declare parameters of type `String`, `Integer`, `Boolean` or `Real`. A
+parameter without a default value is required:
+
+```atl
+-- @param basePackage : String = 'org.example'
+-- @param generateTests : Boolean = false
+-- @param projectName : String
+```
+
+The caller supplies the values when executing the module, and the transformation reads
+them as `thisModule.projectName`:
+
+```swift
+try await ATLVirtualMachine(module: module, options: .standard).execute(
+    sources: ["IN": input], targets: ["OUT": output],
+    parameters: ["projectName": "demo", "generateTests": true])
+```
+
+A missing required parameter, an undeclared parameter or a value of the wrong type is
+reported as an ``ATLExecutionError``. ``ATLModule/parameterValues(fromText:)`` converts
+textual values, for example from a command line, to the declared types.
 
 ## Rule Types
 
@@ -235,6 +278,15 @@ helper def: sqlTypes : Map(String, String) =
 
 Usage: `thisModule.sqlTypes.get('String')`
 
+### Dispatch and Evaluation
+
+Contextual helpers are identified by their context type and name. A call dispatches on the
+dynamic type of the receiver, and the most specific context type wins, so
+`helper context A def : f()` and `helper context B def : f()` can coexist. A helper
+declared without a parameter list (`def : name : Type = ...`) is an attribute whose value
+is computed once per receiver. A host application can add helpers written in Swift; see
+``ATLNativeHelper``.
+
 ## Execution Model
 
 ATL executes in phases:
@@ -268,6 +320,21 @@ values and in collections become the target elements they were transformed into,
 elements of the same target model are stored by identifier, other elements are
 stored as cross-resource proxies, and enumeration-typed attributes accept only
 the literals the enumeration declares.
+
+Because every matched rule creates its target elements before any binding is applied,
+the order of the rules never matters for references. Abstract rules, rule inheritance
+with `extends`, `unique lazy` rules, `entrypoint` and `endpoint` rules, `using`
+variables, several source pattern elements and imperative `do` statements are all
+supported.
+
+### Reading Unset Features
+
+Reading an attribute that the model leaves unset gives the default value of the feature,
+as `eGet` does in the Eclipse Modeling Framework: the declared default, otherwise
+`false`, `0` or `0.0`. Unset strings and references read as `OclUndefined`. A guard such
+as `not c.isAbstract` therefore holds for an element whose XMI omits the attribute. A
+virtual machine created with `unsetFeatureReads: .undefined` instead reads every unset
+feature as `OclUndefined`, which is not standard behaviour.
 
 ## The Trace Model
 
@@ -308,6 +375,57 @@ size > 0                          -- Comparisons
 a and b                           -- Boolean logic
 if cond then x else y endif       -- Conditionals
 ```
+
+### Literals and Operators
+
+- Strings support the escapes `\'`, `\"`, `\\`, `\n`, `\r`, `\t`, `\b`, `\f`, `\uXXXX`
+  and octal escapes. Any other backslash sequence is kept as written, so regular
+  expressions such as `'\s+'` need no doubling.
+- Real literals (`3.14`, `1e-3`), enumeration literals (`#Editable`) and `OclUndefined`
+  (or `null`) are supported. An enumeration literal evaluates to the name of the literal,
+  which is how enumeration-typed attributes of dynamic objects are stored. Binding it to an
+  attribute checks that the enumeration declares the literal.
+- `Sequence{}`, `OrderedSet{}`, `Set{}` and `Bag{}` literals keep their elements. Sets
+  and ordered sets remain free of duplicates through `union`, `including`, `append` and
+  similar operations.
+- Collection literals accept OCL integer ranges `first..last`, alone or mixed with items:
+  `Sequence{0, 2..4, 9}` holds `0, 2, 3, 4, 9`. Both bounds may be expressions but must
+  be Integers. A range whose first value exceeds its last is empty, and sets keep each
+  integer once. Eclipse ATL does not accept ranges; see the Compatibility section of
+  <doc:ATL>.
+- `implies`, `xor`, `div` and `mod` are infix operators with OCL precedence: `implies`
+  binds weakest, then `or` and `xor`, then `and`. Logical operators use three-valued
+  logic with `OclUndefined`.
+- `/` divides as OCL and Eclipse ATL do: the quotient is a Real even for two Integers, so
+  `7 / 2` is `3.5` and `8 / 2` is `4.0`. ``ATLOptions/integerDivision`` selects the
+  truncating division of swift-atl 0.6 instead. `div` and `mod` take Integers: `div`
+  truncates the quotient towards zero and `mod` gives the remainder with the sign of the
+  dividend, so `-7 div 2` is `-3` and `-7 mod 2` is `-1`. Dividing by zero is an error.
+
+### Built-in Operations
+
+Positions in collections and strings are 1-based. A single value behaves as a collection
+of one element.
+
+- **Collections**: `any`, `count`, `sum`, `at`, `append`, `prepend`, `insertAt`,
+  `subSequence`, `subOrderedSet`, `including`, `includingAll`, `includingRange`,
+  `excluding`, `excludingAll`, `union`, `intersection`, `symmetricDifference`,
+  `indexOf`, `lastIndexOf`, `includesAll`, `excludesAll`, `isUnique`, `one`, `exists`
+  and `forAll` (with several iterator variables), `sortedBy`, `flatten`, `reverse`,
+  `max`, `min`, and the conversions `asSet`, `asOrderedSet`, `asSequence` and `asBag`.
+  `first()` and `last()` return `OclUndefined` for an empty collection.
+- **Strings**: `concat`, `substring`, `toInteger`, `toReal`, `toUpper`, `toLower`,
+  `toSequence`, `trim`, `startsWith`, `endsWith`, `indexOf`, `lastIndexOf`, `split`,
+  `replaceAll` and `regexReplaceAll`. `println()` prints the string to standard output,
+  and `writeTo` and `writeToWithCharset` write it to a file, as described under Writing
+  Files below.
+- **Numbers**: the method form `div(n)`, `longValue()`, and the Real functions `sqrt`,
+  `exp`, `log`, `sin`, `cos`, `tan`, `asin`, `acos`, `atan`, `toDegrees` and
+  `toRadians`.
+- **Types**: `oclIsKindOf` and `oclIsTypeOf` (over the complete supertype closure),
+  `oclAsType`, `oclType`, `oclIsUndefined`, `MM!Class.allInstances()` and
+  `MM!Class.allInstancesFrom('IN')`.
+- **Reflection**: the operations described under Reflection and Containment below.
 
 ### Reflection and Containment
 
@@ -396,7 +514,13 @@ rule Rename {
 }
 ```
 
-``ATLModule/refining(_:)`` selects the same mode for a module whose header uses `from`.
+``ATLModule/refining(_:)`` selects the same mode for a module whose header uses `from`:
+
+```swift
+try await ATLVirtualMachine(module: module.refining(), options: .standard).execute(
+    sources: ["IN": input], targets: ["OUT": output])
+```
+
 The transformation behaves like the in-place refining mode of Eclipse ATL:
 
 - Each target model starts as a copy of its source model. Elements that no rule matches

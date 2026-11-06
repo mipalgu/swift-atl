@@ -36,6 +36,10 @@ metamodelling framework.
 - **Queries**: `query Name = expression;` units evaluated to a value with ``ATLVirtualMachine/evaluateQuery(sources:parameters:)``
 - **File output**: `writeTo` and `writeToWithCharset`, disabled unless the host enables them with an ``ATLFileOutputPolicy``
 - **Two-phase execution**: Targets are created before bindings, with implicit trace resolution, `resolveTemp`, unique lazy rules, entrypoint and endpoint rules, and imperative `do` blocks
+- **Native helpers**: Helpers implemented in Swift with ``ATLNativeHelper``, which take precedence over module helpers of the same name
+- **Progress and cancellation**: ``ATLProgress`` reports while a transformation runs, and a cancelled task stops it
+- **Editor support**: ``ATLSyntax`` classifies tokens, and ``ATLParser/parseDiagnosing(_:name:metamodelRegistry:)`` parses with error recovery and stable ``ATLDiagnosticCode`` values
+- **XMI serialisation**: ``ATLResource`` reads and writes ATL modules in the Eclipse ATL XMI format
 
 ### Quick Example
 
@@ -43,27 +47,57 @@ metamodelling framework.
 import ATL
 import ECore
 
-// Parse the transformation
-let parser = ATLParser(options: .standard)
-let module = try await parser.parse(URL(fileURLWithPath: "Class2Table.atl"))
+// Parse the transformation; its header binds the metamodels
+let module = try await ATLParser(options: .standard)
+    .parse(URL(fileURLWithPath: "Families2Persons.atl"))
 
-// Create and configure the virtual machine
+// Load the source model against the source metamodel
+let resourceSet = ResourceSet()
+if let families = module.sourceMetamodels["IN"] {
+    await resourceSet.registerMetamodel(families, uri: families.nsURI)
+}
+let source = try await XMIParser(resourceSet: resourceSet)
+    .parse(URL(fileURLWithPath: "Families.xmi"))
+
+// Run the transformation and save the target model
+let target = Resource(uri: "Persons.xmi")
 let vm = ATLVirtualMachine(module: module, options: .standard)
-try await vm.registerSourceMetamodel(umlMetamodel, as: "UML")
-try await vm.registerTargetMetamodel(dbMetamodel, as: "DB")
-try await vm.registerSourceModel(classModel, as: "IN")
-
-// Execute and get results
-let result = try await vm.execute()
-let tableModel = result.targetModels["OUT"]
+try await vm.execute(sources: ["IN": source], targets: ["OUT": target])
+try await XMISerializer().serialize(target, to: URL(fileURLWithPath: "Persons.xmi"))
 ```
+
+## Compatibility
+
+### Eclipse ATL
+
+The parser accepts the syntax of Eclipse ATL transformations, and ``ATLResource``,
+``ATLXMIParser`` and ``ATLXMISerializer`` read and write ATL modules in the Eclipse ATL
+XMI format, so that a module survives a round trip unchanged.
+
+The following ATL constructs are not supported. The parser reports each of them as an
+``ATLDiagnosticCode/unsupportedConstruct`` error at the offending token:
+
+- libraries (`library`) and library imports (`uses`),
+- the `nodefault` rule modifier,
+- iterated target patterns with `foreach` or `distinct`,
+- `extends` on lazy or called rules.
+
+Integer ranges in collection literals, such as `Sequence{0, 2..4, 9}`, are an OCL feature
+that the Eclipse ATL compilers do not accept, so a transformation that uses them does not
+run on Eclipse ATL. `includingRange` is the portable alternative, and parsing with
+`ATLOptions(collectionRangeSyntax: .eclipse)` rejects ranges as Eclipse ATL does.
 
 ### Compatibility with 0.6
 
 APIs that take an ``ATLOptions`` value default to the current behaviour,
-``ATLOptions/standard``. The APIs of swift-atl 0.6, which take no options, keep the
-behaviour of 0.6 by using ``ATLOptions/legacy``; those whose behaviour now differs
-from the default are deprecated in favour of the variant that takes options.
+``ATLOptions/standard``, which `ATLOptions()` also gives. These are the initialisers of
+``ATLParser``, ``ATLVirtualMachine``, ``ATLResource``, ``ATLXMISerializer`` and
+``ATLExpressionXMISerializer``, and ``ATLSyntax/tokens(in:options:)``. The APIs of
+swift-atl 0.6, which take no options, keep the behaviour of 0.6 by using
+``ATLOptions/legacy``; those whose behaviour now differs from the default
+(`ATLParser(enableDebugging:)`, `ATLVirtualMachine(module:enableDebugging:unsetFeatureReads:nativeHelpers:fileOutput:)`,
+`ATLResource(uri:)`, `ATLResource(uri:module:)` and ``ATLSyntax/tokens(in:)``) are
+deprecated in favour of the variant that takes options.
 
 | Behaviour | Default | Option | 0.6 behaviour |
 | :-- | :-- | :-- | :-- |
@@ -71,10 +105,16 @@ from the default are deprecated in favour of the variant that takes options.
 | Collection ranges in XMI | ``ATLCollectionRangeEncoding/collectionRange`` | ``ATLOptions/collectionRangeEncoding`` | No ranges could be written; ``ATLCollectionRangeEncoding/portable`` writes them with expressions that 0.6 reads |
 | `/` on two Integers, such as `7 / 2` | ``ATLIntegerDivision/real``: a Real (`3.5`), as in OCL and Eclipse ATL | ``ATLOptions/integerDivision`` | ``ATLIntegerDivision/truncating``: an Integer truncated towards zero (`3`), as `div` gives |
 
-A rejected range is reported with a message that names the portable alternatives:
-listing the integers, as in `Sequence{1, 2, 3}`, or calling `includingRange`, as in
-`Sequence{}->includingRange(1, 3)`, which the Eclipse ATL EMFTVM provides. To keep the
-0.6 behaviour with the new APIs, pass ``ATLOptions/legacy``, for example
+With ``ATLCollectionRangeSyntax/eclipse``, `..` is read as two `.` tokens, and a range is
+reported as a syntax error whose message names the portable alternatives: listing the
+integers, as in `Sequence{1, 2, 3}`, or calling `includingRange`, as in
+`Sequence{}->includingRange(1, 3)`, which the Eclipse ATL EMFTVM provides. With
+``ATLCollectionRangeEncoding/portable``, a range whose bounds are integer literals is
+written as its integers, and any other range as a call of `includingRange`, with the items
+after it added by `includingAll`. Both operations exist in swift-atl 0.6 and in the Eclipse
+ATL EMFTVM, which however reports an error for an empty range.
+
+To keep the 0.6 behaviour with the new APIs, pass ``ATLOptions/legacy``, for example
 `ATLParser(options: .legacy)` or `ATLVirtualMachine(module: module, options: .legacy)`.
 Parse errors now also describe themselves through `localizedDescription`.
 
@@ -88,7 +128,7 @@ the sign of the dividend, as in OCL and Eclipse ATL.
 ``ATLOptions/init(semantics:)`` selects ``ATLOptions/standard`` or ``ATLOptions/legacy``
 from a `ModellingSemantics` value, and ``ATLOptions/fromEnvironment(_:)`` reads that choice
 from the `SWIFT_MODELLING_SEMANTICS` environment variable (`standard` or `legacy`;
-``ATLOptions/standard`` if it is unset):
+``ATLOptions/standard`` if it is unset or empty, and an error for any other value):
 
 ```swift
 let parser = ATLParser(options: try ATLOptions.fromEnvironment())
@@ -109,33 +149,33 @@ models, in the container lookup scope configured for each resource or its resour
 
 - ``ATLVirtualMachine``
 - ``ATLExecutionContext``
-- ``ATLExecutionResult``
 - ``ATLExecutionStatistics``
+- ``ATLProgress``
+- ``ATLProgressPhase``
 - ``ATLFileOutputPolicy``
 
 ### Modules and Rules
 
 - ``ATLModule``
 - ``ATLUnitKind``
+- ``ATLModuleParameter``
 - ``ATLMatchedRule``
 - ``ATLCalledRule``
-- ``ATLLazyRule``
 - ``ATLHelper``
 - ``ATLNativeHelper``
 
 ### Patterns and Bindings
 
-- ``ATLInPattern``
-- ``ATLOutPattern``
-- ``ATLBinding``
-- ``ATLSimpleInPatternElement``
-- ``ATLSimpleOutPatternElement``
+- ``ATLSourcePattern``
+- ``ATLTargetPattern``
+- ``ATLPropertyBinding``
 
 ### Expressions
 
 - ``ATLExpression``
 - ``ATLNavigationExpression``
-- ``ATLOperationCallExpression``
+- ``ATLOperationExpression``
+- ``ATLMethodCallExpression``
 - ``ATLCollectionExpression``
 - ``ATLLiteralExpression``
 
@@ -146,8 +186,20 @@ models, in the container lookup scope configured for each resource or its resour
 - ``ATLCollectionRangeSyntax``
 - ``ATLCollectionRangeEncoding``
 - ``ATLIntegerDivision``
-- ``ATLLexer``
-- ``ATLSyntaxParser``
+- ``ATLMetamodelRegistry``
+
+### Editor Support
+
+- ``ATLSyntax``
+- ``ATLParseResult``
+- ``ATLDiagnosticCode``
+- ``ATLOutlineKind``
+
+### XMI Serialisation
+
+- ``ATLResource``
+- ``ATLXMIParser``
+- ``ATLXMISerializer``
 
 ### Model Adapters
 
