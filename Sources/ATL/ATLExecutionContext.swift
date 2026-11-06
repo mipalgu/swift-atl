@@ -286,6 +286,12 @@ public final class ATLExecutionContext: Sendable {
     ///
     /// Navigate to a property on an object.
     ///
+    /// A collection receiver first looks for an attribute helper whose context type
+    /// applies to the collection itself, such as `Sequence(T)`, `Set(T)` or
+    /// `Collection(T)`, choosing the most specific one. Only when no helper applies
+    /// to the collection is the property navigated from each element and the
+    /// results collected.
+    ///
     /// - Parameters:
     ///   - object: Source object
     ///   - property: Property name
@@ -294,7 +300,12 @@ public final class ATLExecutionContext: Sendable {
     public func navigate(from object: (any EcoreValue)?, property: String) async throws -> (
         any EcoreValue
     )? {
-        if ATLCollections.isCollection(object) {
+        if let object, ATLCollections.isCollection(object) {
+            if let helper = bestContextHelper(
+                named: property, receiver: object, argumentCount: 0, includingOclAny: true)
+            {
+                return try await invokeContextHelper(helper, receiver: object, arguments: [])
+            }
             return try await navigateCollection(ATLCollections.elements(of: object), property: property)
         }
 

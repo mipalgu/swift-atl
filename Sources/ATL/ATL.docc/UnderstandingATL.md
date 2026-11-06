@@ -354,7 +354,15 @@ ATL uses OCL (Object Constraint Language) for expressions:
 c.name                           -- Attribute access
 c.package                        -- Reference navigation
 c.package.classes                -- Chained navigation
+c.package.classes.name           -- The name of each class
 ```
+
+An operation called on a collection, with `.` or `->`, is the collection's own operation, so
+`classes.size()` and `classes->size()` both count the classes. Navigating a feature of a
+collection, as in `c.package.classes.name`, collects the feature of each element; Eclipse
+ATL reports this as an error. An attribute helper defined for the collection itself, with a
+context such as `Sequence(UML!Class)`, `Collection(UML!Class)` or `OclAny`, is used first,
+as in ATL.
 
 ### Collections
 
