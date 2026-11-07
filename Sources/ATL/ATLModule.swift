@@ -515,6 +515,28 @@ public protocol ATLHelperType: Sendable {
 extension ATLHelperType {
     /// The source range the node was parsed from, or an empty origin for a node built in code.
     public var origin: SourceOrigin { SourceOrigin() }
+
+    /// The ATL expression that computes the value of the helper, if it has one.
+    ///
+    /// This is the body of an ``ATLHelper`` or the ``ATLHelperWrapper/bodyExpression`` of an
+    /// ``ATLHelperWrapper``, so that tools can analyse the body of any helper of a module.
+    /// It is `nil` for a helper whose value is computed in Swift, such as an
+    /// ``ATLNativeHelper``.
+    public var expressionBody: (any ATLExpression)? {
+        if let wrapper = self as? ATLHelperWrapper { return wrapper.bodyExpression }
+        return (self as? any ATLExpressionBodiedHelper)?.anyBodyExpression
+    }
+}
+
+/// A helper whose body is an ATL expression of a static type.
+protocol ATLExpressionBodiedHelper {
+    /// The body expression, whatever its static type.
+    var anyBodyExpression: any ATLExpression { get }
+}
+
+extension ATLHelper: ATLExpressionBodiedHelper {
+    /// The ``body`` of the helper.
+    var anyBodyExpression: any ATLExpression { body }
 }
 
 // MARK: - ATL Helper

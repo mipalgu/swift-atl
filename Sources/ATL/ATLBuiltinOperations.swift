@@ -750,6 +750,9 @@ enum ATLBuiltinOperations {
             classFound = true
             let resource = isSource ? context.getSource(alias) : context.getTarget(alias)
             guard let resource else { continue }
+            if context.dependencyRecorder.isRecording {
+                context.recordExtent(className, isSource: isSource)
+            }
             found.append(contentsOf: await resource.getAllInstancesOf(eClass).map { $0 as any EcoreValue })
         }
         guard classFound else {
@@ -1188,6 +1191,7 @@ enum ATLReflectiveOperations {
                     text, to: path, charset: charset, operation: operation.rawValue))
         case (.newInstance, 0):
             guard let typeName = receiver as? String else { return nil }
+            context.noteIncrementalHazard(ATLIncrementalHazard.modelChange)
             return result(try await newInstance(of: typeName, context: context))
         case (.refInvokeOperation, 2):
             guard let receiver else { return nil }
@@ -1211,11 +1215,13 @@ enum ATLReflectiveOperations {
             return result(try await context.navigate(from: object, property: name))
         case (.refSetValue, 2):
             let name = try string(arguments[0], operation)
+            context.noteIncrementalHazard(ATLIncrementalHazard.modelChange)
             let target = try await writableTarget(object, feature: name, operation, context)
             try await context.assignFeature(on: target, feature: name, value: arguments[1])
             return result(object)
         case (.refUnsetValue, 1):
             let name = try string(arguments[0], operation)
+            context.noteIncrementalHazard(ATLIncrementalHazard.modelChange)
             let target = try await writableTarget(object, feature: name, operation, context)
             try await context.assignFeature(
                 on: target, feature: name, value: unsetValue(of: name, in: target))

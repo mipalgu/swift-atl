@@ -40,6 +40,7 @@ metamodelling framework.
 - **Progress and cancellation**: ``ATLProgress`` reports while a transformation runs, and a cancelled task stops it
 - **Editor support**: ``ATLSyntax`` classifies tokens, and ``ATLParser/parseDiagnosing(_:name:metamodelRegistry:)`` parses with error recovery and stable ``ATLDiagnosticCode`` values
 - **XMI serialisation**: ``ATLResource`` reads and writes ATL modules in the Eclipse ATL XMI format
+- **Incremental execution**: ``ATLIncrementalTransformation`` propagates source model changes to the target models match by match and binding by binding, with results identical to a batch execution; see <doc:IncrementalTransformations>
 
 ### Quick Example
 
@@ -152,6 +153,7 @@ models, in the container lookup scope configured for each resource or its resour
 
 - <doc:GettingStarted>
 - <doc:UnderstandingATL>
+- <doc:IncrementalTransformations>
 
 ### Transformation Execution
 

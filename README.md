@@ -27,6 +27,7 @@ This package provides the ATL library. The `swift-atl` command-line tool is part
 - **Host integration**: module parameters, native helpers written in Swift, metamodel
   registries, progress reporting and cancellation
 - **Editor support**: token classification and error-tolerant parsing with diagnostics
+- **Incremental execution**: source changes propagated to targets, matching a batch run
 - **[swift-ecore](https://github.com/mipalgu/swift-ecore) integration**: transforms
   models held in ECore resources
 

@@ -33,6 +33,18 @@ let package = Package(
             ]
         ),
         .testTarget(
+            name: "ATLMultiLevelTests",
+            dependencies: [
+                "ATL",
+                .product(name: "ECore", package: "swift-ecore"),
+                .product(name: "EMFBase", package: "swift-ecore"),
+                .product(name: "MultiLevel", package: "swift-ecore"),
+            ],
+            swiftSettings: [
+                .enableUpcomingFeature("StrictConcurrency")
+            ]
+        ),
+        .testTarget(
             name: "ATLTests",
             dependencies: [
                 "ATL",

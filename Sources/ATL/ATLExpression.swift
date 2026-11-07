@@ -1341,6 +1341,7 @@ public struct ATLMethodCallExpression: ATLExpression, Sendable, Equatable, Hasha
         }
 
         // Get all instances of this class from the source resource
+        if context.dependencyRecorder.isRecording { context.recordExtent(className, isSource: true) }
         let instances = await sourceResource.getAllInstancesOf(eClass)
 
         // Return an EcoreValueArray containing all instances

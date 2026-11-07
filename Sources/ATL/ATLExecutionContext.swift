@@ -125,6 +125,29 @@ public final class ATLExecutionContext: Sendable {
     /// Back-reference to the owning virtual machine for called rule dispatch.
     public weak var virtualMachine: ATLVirtualMachine?
 
+    /// The recorder of the model reads made while an incremental transformation records
+    /// dependencies; nothing is recorded unless a frame is open.
+    var dependencyRecorder = ModelDependencyRecorder()
+
+    /// Why the evaluations recorded so far cannot be propagated incrementally, if they cannot.
+    ///
+    /// Evaluations that read target elements, change models or defer bindings set it while
+    /// dependencies are recorded.
+    var incrementalHazard: String?
+
+    /// The attribute helper values cached with recorded dependencies and not yet collected
+    /// by ``takeRecordedHelperKeys()``.
+    var recordedHelperKeys: [ATLAttributeCacheKey] = []
+
+    /// Removes and returns the keys of the attribute helper values cached with recorded
+    /// dependencies since the previous call.
+    ///
+    /// - Returns: The keys, in the order the values were cached.
+    func takeRecordedHelperKeys() -> [ATLAttributeCacheKey] {
+        defer { recordedHelperKeys = [] }
+        return recordedHelperKeys
+    }
+
     // MARK: - Initialisation
 
     /// Creates a new ATL execution context.
@@ -324,6 +347,9 @@ public final class ATLExecutionContext: Sendable {
         // Target elements change while a transformation runs, so navigate their current state
         if let current = await findTargetObject(eObject.id) {
             eObject = current
+            if dependencyRecorder.isRecording { noteIncrementalHazard(ATLIncrementalHazard.targetRead) }
+        } else if dependencyRecorder.isRecording {
+            recordRead(of: property, from: eObject)
         }
 
         // First try ECore navigation for actual properties
@@ -526,6 +552,9 @@ public final class ATLExecutionContext: Sendable {
         }
         let patternName = arguments.count > 1 ? arguments[1] as? String : nil
 
+        if dependencyRecorder.isRecording {
+            for id in sourceIDs { dependencyRecorder.recordFeature(ATLReservedNames.traceDependency, of: id) }
+        }
         let links = getTraceLinks(forSources: sourceIDs)
         for link in links {
             let targetID: EUUID?
@@ -742,6 +771,15 @@ public final class ATLExecutionContext: Sendable {
     public func addTraceLink(_ link: ATLTraceLink) {
         traceLinkIndex[link.sourceElement, default: []].append(traceLinks.count)
         traceLinks.append(link)
+    }
+
+    /// Replaces every trace link with the given links, in order.
+    ///
+    /// - Parameter links: The links to record.
+    func replaceTraceLinks(_ links: [ATLTraceLink]) {
+        traceLinks.removeAll(keepingCapacity: true)
+        traceLinkIndex.removeAll(keepingCapacity: true)
+        for link in links { addTraceLink(link) }
     }
 
     /// Get trace links for a source element.

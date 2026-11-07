@@ -23,6 +23,13 @@ enum ATLReservedNames {
     /// The operation that looks up a named target element of a transformed source element.
     static let resolveTemp = "resolveTemp"
 
+    /// The pseudo-feature under which incremental execution records that a computation
+    /// read the trace of a source element.
+    ///
+    /// The name cannot be the name of a structural feature, so it never collides with
+    /// a read of the model.
+    static let traceDependency = "#trace"
+
     /// The rule modifier marking a lazy rule as memoised.
     static let unique = "unique"
 
@@ -151,6 +158,10 @@ enum ATLReferenceStorage {
     private static func referenceValue(
         for object: any EObject, in resource: Resource, context: ATLExecutionContext
     ) async -> any EcoreValue {
+        let recording = context.dependencyRecorder.isRecording
+        if recording {
+            context.dependencyRecorder.recordFeature(ATLReservedNames.traceDependency, of: object.id)
+        }
         let referenced: any EObject
         if let targetID = context.defaultTargetID(for: object.id),
             let target = await context.findTargetObject(targetID)
@@ -168,6 +179,12 @@ enum ATLReferenceStorage {
                 await home.resourceSet === sharedSet
             {
                 return referenced.id
+            }
+            if recording {
+                // The fragment locates the element by its position or by the names of the
+                // elements containing it
+                context.dependencyRecorder.recordContainmentStructure()
+                context.dependencyRecorder.recordUnbounded()
             }
             return ResourceProxy(
                 uri: home.uri, fragment: await fragment(for: referenced, in: home))
