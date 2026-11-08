@@ -12,7 +12,8 @@ import Foundation
 /// Serializes ATL/OCL expressions to Eclipse ATL XMI format.
 ///
 /// This serializer converts expression trees into the standard Eclipse ATL XMI
-/// representation, following the OCL metamodel structure defined in the ATL specification.
+/// representation, following the OCL metamodel structure defined in the
+/// [ATL specification](https://eclipse.dev/atl/documentation/).
 ///
 /// ## Expression Types Supported
 ///

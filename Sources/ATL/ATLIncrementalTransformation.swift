@@ -141,7 +141,8 @@ public struct ATLIncrementalUpdate: Sendable, Equatable {
 /// ``ModelDependencies``). It then watches the source models for changes made through the
 /// editing operations of ``Resource`` (see ``Resource/addChangeObserver(_:)``). Each call
 /// of ``update()`` propagates the changes collected since the previous one, following
-/// incremental ATL (Jouault and Tisi), YAMTL (Boronat) and the dependency tracking of
+/// incremental ATL ([Jouault and Tisi](https://doi.org/10.1007/978-3-642-13688-7_9)), YAMTL
+/// ([Boronat](https://doi.org/10.1007/s10009-020-00583-y)) and the dependency tracking of
 /// incremental query engines:
 ///
 /// 1. Guards whose dependencies changed are evaluated again, and the rules whose source
