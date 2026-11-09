@@ -666,9 +666,21 @@ directory of the Java process when it runs outside Eclipse, and accepts any path
 
 `writeToWithCharset` accepts `UTF-8`, `UTF-16` (big-endian with a byte order mark, as
 Java writes it), `UTF-16BE`, `UTF-16LE`, `UTF-32`, `UTF-32BE`, `UTF-32LE`, `ISO-8859-1`
-and `US-ASCII`, matched without regard to case. An unknown charset, or a string that the
+and `US-ASCII`, matched without regard to case, and also `windows-1252` and the other names
+and aliases of the encodings that the modelling tools read, such as `cp1252`. An unknown
+charset, or a string that the
 charset cannot represent, is reported as an error instead of being written with
 substitute characters.
+
+`writeTo` writes UTF-8 unless the host names another encoding with
+``ATLFileOutputPolicy/defaultEncoding``, such as `windows-1252`. A string with a
+character that this encoding cannot hold is not written; the error names the file and
+the line and column of the character in the string.
+
+```swift
+var policy = ATLFileOutputPolicy.confined(to: outputDirectory)
+policy.defaultEncoding = .isoLatin1
+```
 
 ## Best Practices
 

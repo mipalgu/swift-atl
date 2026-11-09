@@ -352,6 +352,37 @@ struct ATLFileOutputTests {
         }
     }
 
+    @Test(
+        "writeToWithCharset accepts the encodings and aliases that the modelling tools know",
+        arguments: [
+            ("windows-1252", "'\\u20AC'", [0x80]),
+            ("cp1252", "'\\u00E9'", [0xE9]),
+            ("l1", "'\\u00E9'", [0xE9]),
+            ("iso_8859-1:1987", "'e\\u0301'", [0xE9]),
+        ] as [(String, String, [UInt8])])
+    func textEncodingCharsets(charset: String, literal: String, expected: [UInt8]) async throws {
+        try await withDirectory { directory in
+            let value = try await evaluate(
+                "\(literal).writeToWithCharset('out.txt', '\(charset)')", fileOutput: .confined(to: directory))
+            #expect(value as? Bool == true)
+            #expect(try bytes(directory.appendingPathComponent("out.txt")) == expected)
+        }
+    }
+
+    @Test("A windows-1252 string that the charset cannot hold is an error and writes no file")
+    func textEncodingCharsetRejects() async throws {
+        try await withDirectory { directory in
+            await #expect {
+                try await evaluate(
+                    "'\\u2603'.writeToWithCharset('out.txt', 'windows-1252')", fileOutput: .confined(to: directory))
+            } throws: { error in
+                guard case .runtimeError(let message)? = error as? ATLExecutionError else { return false }
+                return message.contains("windows-1252") && message.contains("U+2603")
+            }
+            #expect(!FileManager.default.fileExists(atPath: directory.appendingPathComponent("out.txt").path))
+        }
+    }
+
     @Test("An unknown charset is reported by name")
     func unknownCharset() async throws {
         try await withDirectory { directory in
@@ -362,6 +393,62 @@ struct ATLFileOutputTests {
             } throws: { invalidOperation($0)?.contains("NO-SUCH-CHARSET") == true }
             #expect(ATLCharset.encoding(named: "NO-SUCH-CHARSET") == nil)
             #expect(ATLCharset.encoding(named: "UTF-8") != nil)
+        }
+    }
+
+    // MARK: Default Encoding
+
+    @Test("A policy writes UTF-8 with writeTo unless it names another encoding")
+    func defaultEncodingIsUTF8() {
+        #expect(ATLFileOutputPolicy.disabled.defaultEncoding == .utf8)
+        #expect(ATLFileOutputPolicy.confined(to: URL(fileURLWithPath: "/tmp")).defaultEncoding == .utf8)
+        #expect(ATLFileOutputPolicy.unrestricted(relativeTo: URL(fileURLWithPath: "/tmp")).defaultEncoding == .utf8)
+        #expect(ATLFileOutputPolicy(baseDirectory: nil).defaultEncoding == .utf8)
+    }
+
+    @Test(
+        "writeTo writes in the default encoding of the policy",
+        arguments: [
+            (TextEncoding.utf8, "'A\\u00E9'", [0x41, 0xC3, 0xA9]),
+            (TextEncoding.isoLatin1, "'A\\u00E9'", [0x41, 0xE9]),
+            (TextEncoding.windows1252, "'\\u20AC\\u00E9'", [0x80, 0xE9]),
+            (TextEncoding.utf16BigEndian, "'A'", [0x00, 0x41]),
+        ] as [(TextEncoding, String, [UInt8])])
+    func writesInDefaultEncoding(encoding: TextEncoding, literal: String, expected: [UInt8]) async throws {
+        try await withDirectory { directory in
+            var policy = ATLFileOutputPolicy.confined(to: directory)
+            policy.defaultEncoding = encoding
+            let value = try await evaluate("\(literal).writeTo('out.txt')", fileOutput: policy)
+            #expect(value as? Bool == true)
+            #expect(try bytes(directory.appendingPathComponent("out.txt")) == expected)
+        }
+    }
+
+    @Test("writeToWithCharset keeps its own charset whatever the default encoding of the policy")
+    func explicitCharsetWins() async throws {
+        try await withDirectory { directory in
+            var policy = ATLFileOutputPolicy.confined(to: directory)
+            policy.defaultEncoding = .isoLatin1
+            _ = try await evaluate("'\\u00E9'.writeToWithCharset('out.txt', 'UTF-8')", fileOutput: policy)
+            #expect(try bytes(directory.appendingPathComponent("out.txt")) == [0xC3, 0xA9])
+        }
+    }
+
+    @Test("writeTo reports a character that the default encoding cannot hold with the file, line and column")
+    func unrepresentableInDefaultEncoding() async throws {
+        try await withDirectory { directory in
+            var policy = ATLFileOutputPolicy.confined(to: directory)
+            policy.defaultEncoding = .isoLatin1
+            await #expect {
+                try await evaluate("'ab\\nc\\u20AC'.writeTo('euro.txt')", fileOutput: policy)
+            } throws: { error in
+                guard case .runtimeError(let message)? = error as? ATLExecutionError else { return false }
+                return message.contains("writeTo") && message.contains("euro.txt")
+                    && message.contains("line 2, column 2") && message.contains("U+20AC")
+                    && message.contains(TextEncoding.isoLatin1.name)
+            }
+            #expect(!FileManager.default.fileExists(
+                atPath: directory.appendingPathComponent("euro.txt").path))
         }
     }
 
