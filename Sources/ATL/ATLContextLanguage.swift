@@ -56,6 +56,9 @@ struct ATLAttributeCacheKey: Hashable, Sendable {
 struct ATLCachedValue {
     /// The cached value, or `nil` for the undefined value.
     let value: (any EcoreValue)?
+
+    /// What computing the value read from the models, if dependencies were recorded.
+    var dependencies: ModelDependencies? = nil
 }
 
 extension ATLExecutionContext {
@@ -128,6 +131,7 @@ extension ATLExecutionContext {
             helper.isAttribute && arguments.isEmpty
             ? ATLAttributeCacheKey.key(for: helper, receiver: receiver) : nil
         if let key, let cached = attributeHelperCache[key] {
+            if let dependencies = cached.dependencies { dependencyRecorder.merge(dependencies) }
             return cached.value
         }
 
@@ -137,10 +141,20 @@ extension ATLExecutionContext {
         for (parameter, argument) in zip(helper.parameters, arguments) {
             setVariable(parameter.name, value: argument)
         }
-        let value = try await helper.bodyExpression.evaluate(in: self)
+        let recording = key != nil && dependencyRecorder.isRecording
+        if recording { dependencyRecorder.begin() }
+        let value: (any EcoreValue)?
+        do {
+            value = try await helper.bodyExpression.evaluate(in: self)
+        } catch {
+            if recording { dependencyRecorder.end() }
+            throw error
+        }
 
         if let key {
-            attributeHelperCache[key] = ATLCachedValue(value: value)
+            attributeHelperCache[key] = ATLCachedValue(
+                value: value, dependencies: recording ? dependencyRecorder.end() : nil)
+            if recording { recordedHelperKeys.append(key) }
         }
         return value
     }
@@ -156,10 +170,21 @@ extension ATLExecutionContext {
         }
         let key = ATLAttributeCacheKey.key(forGlobal: helper)
         if let cached = attributeHelperCache[key] {
+            if let dependencies = cached.dependencies { dependencyRecorder.merge(dependencies) }
             return cached.value
         }
-        let value = try await callHelper(helper.name, arguments: [])
-        attributeHelperCache[key] = ATLCachedValue(value: value)
+        let recording = dependencyRecorder.isRecording
+        if recording { dependencyRecorder.begin() }
+        let value: (any EcoreValue)?
+        do {
+            value = try await callHelper(helper.name, arguments: [])
+        } catch {
+            if recording { dependencyRecorder.end() }
+            throw error
+        }
+        attributeHelperCache[key] = ATLCachedValue(
+            value: value, dependencies: recording ? dependencyRecorder.end() : nil)
+        if recording { recordedHelperKeys.append(key) }
         return value
     }
 
@@ -175,22 +200,29 @@ extension ATLExecutionContext {
 
     /// Navigates a feature over every element of a collection and collects the results.
     ///
+    /// The results form the collection kind that `collect` gives for the receiver:
+    /// a Bag for a Set or a Bag, and a Sequence for a Sequence or an OrderedSet, or
+    /// always a Sequence when the ``ATLOptions/bagRepresentation`` is
+    /// ``ATLBagRepresentation/sequence``.
+    ///
     /// - Parameters:
-    ///   - elements: The elements to navigate from.
+    ///   - collection: The collection to navigate from.
     ///   - property: The feature name.
-    /// - Returns: The flattened results as a sequence; undefined results are dropped.
+    /// - Returns: The flattened results; undefined results are dropped.
     /// - Throws: ``ATLExecutionError`` when navigation from an element fails.
-    func navigateCollection(_ elements: [any EcoreValue], property: String) async throws
+    func navigateCollection(_ collection: any EcoreValue, property: String) async throws
         -> (any EcoreValue)?
     {
         var collected: [any EcoreValue] = []
-        for element in elements {
+        for element in ATLCollections.elements(of: collection) {
             guard let value = try await navigate(from: element, property: property) else { continue }
             collected.append(
                 contentsOf: ATLCollections.isCollection(value)
                     ? ATLCollections.elements(of: value) : [value])
         }
-        return EcoreValueArray(collected)
+        let kind = ATLCollections.collectedKind(
+            over: ATLCollections.kind(of: collection) ?? .sequence, bags: options.bagRepresentation)
+        return ATLCollections.make(kind: kind, collected)
     }
 
     // MARK: - Module Parameters

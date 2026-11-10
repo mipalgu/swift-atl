@@ -12,11 +12,12 @@ import Foundation
 /// A set or ordered set value produced by ATL expressions.
 ///
 /// ATL distinguishes four collection kinds. Sequences and bags are carried as
-/// `EcoreValueArray`, which is also what model navigation produces. Sets and
-/// ordered sets are carried by this type so that operations such as `union`,
-/// `including` and `append` keep their elements unique. The elements keep the
-/// order in which they were first added, and the wrapper is converted to an
-/// `EcoreValueArray` whenever a value is stored into a model.
+/// `EcoreValueArray`, which is also what model navigation produces; a bag is an
+/// array whose `kind` is `EcoreCollectionKind.bag`. Sets and ordered sets are
+/// carried by this type so that operations such as `union`, `including` and
+/// `append` keep their elements unique. The elements keep the order in which they
+/// were first added, and the wrapper is converted to an `EcoreValueArray`
+/// whenever a value is stored into a model.
 ///
 /// ## Example Usage
 ///
@@ -94,11 +95,15 @@ enum ATLCollections {
 
     /// The kind of a collection value.
     ///
+    /// An `EcoreValueArray` has the kind it was created with, which is a sequence
+    /// unless stated otherwise; a typed array such as `[String]` is a sequence.
+    ///
     /// - Parameter value: The value to inspect.
     /// - Returns: The kind, or `nil` when the value is not a collection.
     static func kind(of value: (any EcoreValue)?) -> ATLCollectionKind? {
         if let collection = value as? ATLCollectionValue { return collection.kind }
-        if value is EcoreValueArray || value is [Any] { return .sequence }
+        if let array = value as? EcoreValueArray { return ATLCollectionKind(array.kind) }
+        if value is [Any] { return .sequence }
         return nil
     }
 
@@ -107,13 +112,63 @@ enum ATLCollections {
     /// - Parameters:
     ///   - kind: The collection kind.
     ///   - values: The elements of the collection.
-    /// - Returns: An `EcoreValueArray` for sequences and bags, an ``ATLCollectionValue`` otherwise.
+    /// - Returns: An `EcoreValueArray` of the kind for sequences and bags, an
+    ///   ``ATLCollectionValue`` otherwise.
     static func make(kind: ATLCollectionKind, _ values: [any EcoreValue]) -> any EcoreValue {
         switch kind {
-        case .sequence, .bag:
+        case .sequence:
             return EcoreValueArray(values)
+        case .bag:
+            return EcoreValueArray(values, kind: .bag)
         case .set, .orderedSet:
             return ATLCollectionValue(kind: kind, values: values)
+        }
+    }
+
+    /// The kind of the collection that collecting values over a collection gives.
+    ///
+    /// As in OCL and the Eclipse ATL EMFTVM, `collect` over a Set or a Bag gives a Bag,
+    /// and over a Sequence or an OrderedSet a Sequence. With
+    /// ``ATLBagRepresentation/sequence``, the result is always a Sequence.
+    ///
+    /// - Parameters:
+    ///   - kind: The kind of the collection collected over.
+    ///   - bags: What a Bag value is.
+    /// - Returns: The kind of the collected values.
+    static func collectedKind(over kind: ATLCollectionKind, bags: ATLBagRepresentation)
+        -> ATLCollectionKind
+    {
+        bags.kind(for: kind == .set || kind == .bag ? .bag : .sequence)
+    }
+
+    /// The form of a collection value that is stored into a model.
+    ///
+    /// A model holds the elements of a many-valued feature as a plain list, so a set,
+    /// an ordered set or a bag is stored as an `EcoreValueArray` sequence of its
+    /// elements, in their current order. Any other value is stored as it is.
+    ///
+    /// - Parameter value: The value to store.
+    /// - Returns: The value in the form that a model holds.
+    static func storable(_ value: any EcoreValue) -> any EcoreValue {
+        if let collection = value as? ATLCollectionValue { return collection.asEcoreValueArray }
+        if let array = value as? EcoreValueArray, array.kind != .sequence {
+            return EcoreValueArray(array.values)
+        }
+        return value
+    }
+}
+
+extension ATLCollectionKind {
+
+    /// Creates the ATL collection kind that corresponds to an Ecore collection kind.
+    ///
+    /// - Parameter kind: The kind of an `EcoreValueArray`.
+    init(_ kind: EcoreCollectionKind) {
+        switch kind {
+        case .sequence: self = .sequence
+        case .orderedSet: self = .orderedSet
+        case .set: self = .set
+        case .bag: self = .bag
         }
     }
 }
@@ -124,8 +179,10 @@ enum ATLValues {
     /// Compares two possibly undefined values.
     ///
     /// Model objects are equal when their identifiers are equal, integers and
-    /// reals compare numerically, and collections compare element-wise (without
-    /// regard to order when both are unique collections).
+    /// reals compare numerically, and collections compare element-wise. Order is
+    /// disregarded when either collection is a bag, or when both are unique and
+    /// either is a set: such collections are equal when they hold each element
+    /// equally often.
     ///
     /// - Parameters:
     ///   - lhs: The first value.
@@ -153,20 +210,34 @@ enum ATLValues {
             let l = ATLCollections.elements(of: left)
             let r = ATLCollections.elements(of: right)
             guard l.count == r.count else { return false }
-            let bothUnique =
-                (ATLCollections.kind(of: left)?.isUnique ?? false)
-                && (ATLCollections.kind(of: right)?.isUnique ?? false)
-            let isUnordered =
-                bothUnique
-                && (ATLCollections.kind(of: left) == .set || ATLCollections.kind(of: right) == .set)
+            let kinds = [ATLCollections.kind(of: left), ATLCollections.kind(of: right)]
+            let bothUnique = kinds.allSatisfy { $0?.isUnique ?? false }
+            let isUnordered = kinds.contains(.bag) || (bothUnique && kinds.contains(.set))
             if isUnordered {
-                return l.allSatisfy { element in r.contains { areEqualDefined(element, $0) } }
+                return haveEqualCounts(l, r)
             }
             return zip(l, r).allSatisfy { areEqualDefined($0, $1) }
         }
         if let l = left as? Int, let r = right as? Double { return Double(l) == r }
         if let l = left as? Double, let r = right as? Int { return l == Double(r) }
         return EMFBase.areEqual(left, right)
+    }
+
+    /// Whether two lists of equal length hold each element equally often, in any order.
+    ///
+    /// - Parameters:
+    ///   - lhs: The first list.
+    ///   - rhs: The second list, as long as the first.
+    /// - Returns: `true` when every element of `lhs` matches a distinct equal element of `rhs`.
+    private static func haveEqualCounts(_ lhs: [any EcoreValue], _ rhs: [any EcoreValue]) -> Bool {
+        var unmatched = rhs
+        for element in lhs {
+            guard let match = unmatched.firstIndex(where: { areEqualDefined(element, $0) }) else {
+                return false
+            }
+            unmatched.remove(at: match)
+        }
+        return true
     }
 
     /// Whether a collection of values contains an element equal to a candidate.

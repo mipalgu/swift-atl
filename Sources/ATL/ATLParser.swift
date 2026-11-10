@@ -106,19 +106,47 @@ public actor ATLParser {
         debug = enableDebugging
     }
 
+    /// The warnings of decoding the file that ``parse(_:metamodelRegistry:encoding:)`` read last.
+    ///
+    /// A file that is not valid UTF-8 is read as ISO-8859-1, and the warning, whose code is
+    /// `TextDecodingDiagnostic.decodedAsISOLatin1`, names the file and the first byte that
+    /// is not UTF-8. The list is empty if the file was read in UTF-8 or in an explicit
+    /// encoding, and each call of ``parse(_:metamodelRegistry:encoding:)`` replaces it.
+    public private(set) var decodingWarnings: [SourceDiagnostic] = []
+
     /// Parse an ATL file and return an ATL module
+    ///
+    /// The file is read in UTF-8 unless an encoding is given. A file that is not valid UTF-8
+    /// is read as ISO-8859-1 instead, and ``decodingWarnings`` reports the substitution.
+    ///
     /// - Returns: An ATLModule representing the parsed ATL content
-    /// - Throws: ATLParseError if parsing fails
+    /// - Throws: ``ATLParseError/fileNotFound(_:)`` if the file cannot be read,
+    ///   ``ATLParseError/invalidEncoding`` if it is not valid in an explicit encoding, or
+    ///   another ATLParseError if parsing fails
     ///
     /// - Parameters:
     ///   - url: The URL of the ATL file to parse
     ///   - metamodelRegistry: Packages that `@nsURI` directives and metamodel names may bind to
-    public func parse(_ url: URL, metamodelRegistry: ATLMetamodelRegistry = .empty) async throws
-        -> ATLModule
-    {
-        guard let content = try? String(contentsOf: url, encoding: .utf8) else {
+    ///   - encoding: The encoding of the file, or `nil` (the default) to read UTF-8 and fall
+    ///     back to ISO-8859-1
+    public func parse(
+        _ url: URL, metamodelRegistry: ATLMetamodelRegistry = .empty, encoding: TextEncoding? = nil
+    ) async throws -> ATLModule {
+        decodingWarnings = []
+        let data: Data
+        do {
+            data = try Data(contentsOf: url)
+        } catch {
             throw ATLParseError.fileNotFound(url.path)
         }
+        let decoded: DecodedText
+        do {
+            decoded = try DecodedText(decoding: data, encoding: encoding, document: url.absoluteString)
+        } catch {
+            throw ATLParseError.invalidEncoding
+        }
+        decodingWarnings = decoded.warning.map { [$0] } ?? []
+        let content = decoded.text
 
         // Pass the full path for proper relative path resolution
         return try await parseContent(

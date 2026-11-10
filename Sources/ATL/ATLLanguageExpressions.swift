@@ -330,7 +330,7 @@ enum ATLValueConversion {
 
     /// Prepares a value for storing into a structural feature.
     ///
-    /// Set and ordered set values become plain arrays, because models store
+    /// Set, ordered set and bag values become plain arrays, because models store
     /// collections as arrays. Values of many-valued attributes are stored as
     /// typed arrays (`[String]`, `[Int]`, `[Double]` or `[Bool]`). A collection
     /// assigned to a many-valued attribute contributes its elements, nested
@@ -350,10 +350,8 @@ enum ATLValueConversion {
     static func prepare(_ value: Any?, for feature: any EStructuralFeature) throws
         -> (any EcoreValue)?
     {
-        guard var prepared = value as? (any EcoreValue) else { return nil }
-        if let collection = prepared as? ATLCollectionValue {
-            prepared = collection.asEcoreValueArray
-        }
+        guard let value = value as? (any EcoreValue) else { return nil }
+        let prepared = ATLCollections.storable(value)
         guard let attribute = feature as? EAttribute else { return prepared }
 
         let enumeration = attribute.eType as? EEnum
@@ -388,7 +386,7 @@ enum ATLValueConversion {
         guard let eClass = object.eClass as? EClass,
             let feature = eClass.getStructuralFeature(name: property)
         else {
-            return (value as? ATLCollectionValue)?.asEcoreValueArray ?? value as? (any EcoreValue)
+            return (value as? (any EcoreValue)).map(ATLCollections.storable)
         }
         return try prepare(value, for: feature)
     }

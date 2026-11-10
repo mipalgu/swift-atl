@@ -155,6 +155,7 @@ extension ATLExecutionContext {
     func invokeNativeHelper(
         _ helper: ATLNativeHelper, receiver: (any EcoreValue)?, arguments: [(any EcoreValue)?]
     ) async throws -> (any EcoreValue)? {
+        if dependencyRecorder.isRecording { dependencyRecorder.recordUnbounded() }
         do {
             return try await helper.body(receiver, arguments)
         } catch is CancellationError {

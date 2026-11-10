@@ -109,7 +109,12 @@ public final class ATLVirtualMachine {
     ///
     /// The execution context provides access to models, variables, trace links,
     /// and other state required for transformation execution.
-    private var executionContext: ATLExecutionContext
+    var executionContext: ATLExecutionContext
+
+    /// The journal that records what a run reads and creates, for incremental propagation.
+    ///
+    /// Without a journal, which is the default, nothing is recorded.
+    var incrementalJournal: ATLIncrementalJournal?
 
     /// Statistics tracking transformation execution.
     ///
@@ -138,6 +143,13 @@ public final class ATLVirtualMachine {
     /// The monitor of the run in progress, if any.
     private var monitor: ATLRunMonitor?
 
+    /// The number of times the last run compared two matches to decide whether a rule
+    /// extending another hides one of them.
+    ///
+    /// Each comparison looks at one other match of the same source elements, so the
+    /// count grows with the number of matches rather than with its square.
+    private(set) var hidingComparisons = 0
+
     /// In refining mode, the target model that refines each source model, by source model name.
     private var refiningTargets: [String: String] = [:]
 
@@ -160,7 +172,7 @@ public final class ATLVirtualMachine {
     /// Creates a virtual machine that evaluates expressions as swift-atl 0.6 did.
     ///
     /// The machine uses ``ATLOptions/legacy``, so `/` truncates the quotient of two
-    /// Integers to an Integer.
+    /// Integers to an Integer and Bag values are Sequences.
     ///
     /// - Parameters:
     ///   - module: The ATL module to execute
@@ -328,6 +340,7 @@ public final class ATLVirtualMachine {
         }
 
         statistics.reset()
+        hidingComparisons = 0
         let startTime = Date()
 
         // Validate model aliases against module specifications
@@ -488,7 +501,7 @@ public final class ATLVirtualMachine {
     // MARK: - Matched Rule Execution
 
     /// A matched rule whose target elements have been created and await their bindings.
-    private struct PendingMatch {
+    struct PendingMatch {
 
         /// The rule that matched.
         let rule: ATLEffectiveMatchedRule
@@ -501,7 +514,7 @@ public final class ATLVirtualMachine {
     }
 
     /// A tuple of source elements that satisfies a rule's source patterns and guards.
-    private struct MatchCandidate {
+    struct MatchCandidate {
 
         /// The rule the elements satisfy.
         let rule: ATLEffectiveMatchedRule
@@ -517,7 +530,7 @@ public final class ATLVirtualMachine {
     ///
     /// - Returns: The non-abstract matched rules with their inheritance resolved
     /// - Throws: ATL execution errors for invalid `extends` relationships
-    private func effectiveMatchedRules() throws -> [ATLEffectiveMatchedRule] {
+    func effectiveMatchedRules() throws -> [ATLEffectiveMatchedRule] {
         return try ATLRuleInheritance.effectiveRules(for: module.matchedRules) { sub, base in
             let subClass = try self.sourceClass(forType: sub.type).eClass
             let baseClass = try self.sourceClass(forType: base.type).eClass
@@ -531,7 +544,7 @@ public final class ATLVirtualMachine {
     ///   - candidate: The potential subtype
     ///   - base: The potential supertype
     /// - Returns: `true` if `candidate` conforms to `base`
-    private static func conforms(_ candidate: EClass, to base: EClass) -> Bool {
+    static func conforms(_ candidate: EClass, to base: EClass) -> Bool {
         if candidate.name == base.name { return true }
         return candidate.eSuperTypes.contains { conforms($0, to: base) }
     }
@@ -541,7 +554,7 @@ public final class ATLVirtualMachine {
     /// - Parameter type: The qualified type, such as `Families!Member`
     /// - Returns: The model alias and class
     /// - Throws: ATL execution errors for malformed or unknown types
-    private func sourceClass(forType type: String) throws -> (alias: String, eClass: EClass) {
+    func sourceClass(forType type: String) throws -> (alias: String, eClass: EClass) {
         let typeComponents = type.split(separator: "!")
         guard typeComponents.count == 2 else {
             throw ATLExecutionError.typeError("Invalid source type specification: '\(type)'")
@@ -592,13 +605,17 @@ public final class ATLVirtualMachine {
         }
 
         monitor.report(.matching, completed: rules.count, total: rules.count)
+        // Only candidates for the same source elements can hide each other
+        let sourceIDs = candidates.map(\.sourceIDs)
+        let sameSources = Dictionary(grouping: candidates.indices) { sourceIDs[$0] }
         var matches: [PendingMatch] = []
-        for candidate in candidates {
+        for (position, candidate) in candidates.enumerated() {
             try await monitor.checkpoint()
-            let isHidden = candidates.contains { other in
-                other.sourceIDs == candidate.sourceIDs
-                    && other.rule.rule.name != candidate.rule.rule.name
-                    && other.rule.chainNames.contains(candidate.rule.rule.name)
+            let name = candidate.rule.rule.name
+            let isHidden = (sameSources[sourceIDs[position]] ?? []).contains { other in
+                hidingComparisons += 1
+                let rule = candidates[other].rule
+                return rule.rule.name != name && rule.chainNames.contains(name)
             }
             if !isHidden {
                 matches.append(try await createTargets(for: candidate))
@@ -631,11 +648,36 @@ public final class ATLVirtualMachine {
         for tuple in tuples {
             try await monitor?.checkpoint()
             statistics.elementsProcessed += 1
-            if try await satisfiesGuards(rule, sources: tuple) {
+            if try await journalledGuards(rule, sources: tuple) {
                 result.append(MatchCandidate(rule: rule, sources: tuple))
             }
         }
         return result
+    }
+
+    /// Evaluates the guards of a rule for a source element tuple, recording what they read
+    /// while a journal is installed.
+    ///
+    /// - Parameters:
+    ///   - rule: The rule whose guards are evaluated
+    ///   - sources: The source elements bound to the source patterns
+    /// - Returns: `true` if every guard holds
+    /// - Throws: Errors raised while evaluating a guard
+    func journalledGuards(_ rule: ATLEffectiveMatchedRule, sources: [any EObject]) async throws -> Bool {
+        guard incrementalJournal != nil else { return try await satisfiesGuards(rule, sources: sources) }
+        executionContext.dependencyRecorder.begin()
+        let holds: Bool
+        do {
+            holds = try await satisfiesGuards(rule, sources: sources)
+        } catch {
+            executionContext.dependencyRecorder.end()
+            throw error
+        }
+        incrementalJournal?.guards.append(
+            ATLIncrementalJournal.GuardRecord(
+                ruleName: rule.rule.name, sourceIDs: sources.map(\.id), holds: holds,
+                dependencies: executionContext.dependencyRecorder.end()))
+        return holds
     }
 
     /// Evaluates the guards of a rule and the rules it extends for a source element tuple.
@@ -645,7 +687,7 @@ public final class ATLVirtualMachine {
     ///   - sources: The source elements bound to the source patterns
     /// - Returns: `true` if every guard holds
     /// - Throws: Errors raised while evaluating a guard
-    private func satisfiesGuards(_ rule: ATLEffectiveMatchedRule, sources: [any EObject])
+    func satisfiesGuards(_ rule: ATLEffectiveMatchedRule, sources: [any EObject])
         async throws -> Bool
     {
         executionContext.pushScope()
@@ -674,7 +716,7 @@ public final class ATLVirtualMachine {
     /// - Parameters:
     ///   - rule: The rule whose variables are bound
     ///   - sources: The source elements, in source pattern order
-    private func bindSourceVariables(of rule: ATLEffectiveMatchedRule, sources: [any EObject]) {
+    func bindSourceVariables(of rule: ATLEffectiveMatchedRule, sources: [any EObject]) {
         for member in rule.chain {
             for (pattern, element) in zip(member.sourcePatterns, sources) {
                 executionContext.setVariable(pattern.variableName, value: element)
@@ -692,7 +734,7 @@ public final class ATLVirtualMachine {
     /// - Parameter candidate: The matched rule and source elements
     /// - Returns: The pending match awaiting its bindings
     /// - Throws: ATL execution errors for rule execution failures
-    private func createTargets(for candidate: MatchCandidate) async throws -> PendingMatch {
+    func createTargets(for candidate: MatchCandidate) async throws -> PendingMatch {
         let rule = candidate.rule
         executionContext.pushScope()
         defer { executionContext.popScope() }
@@ -704,11 +746,19 @@ public final class ATLVirtualMachine {
                 variables.append((pattern.variableName, element))
             }
         }
-        for local in rule.localVariables {
-            let value = try await local.expression.evaluate(in: executionContext)
-            executionContext.setVariable(local.name, value: value)
-            variables.append((local.name, value))
+        let journalled = incrementalJournal != nil
+        if journalled { executionContext.dependencyRecorder.begin() }
+        do {
+            for local in rule.localVariables {
+                let value = try await local.expression.evaluate(in: executionContext)
+                executionContext.setVariable(local.name, value: value)
+                variables.append((local.name, value))
+            }
+        } catch {
+            if journalled { executionContext.dependencyRecorder.end() }
+            throw error
         }
+        let localDependencies = journalled ? executionContext.dependencyRecorder.end() : ModelDependencies()
 
         let inPlace = rule.rule.dropsSourceElement ? nil : try inPlacePatternIndex(of: rule)
         if rule.rule.dropsSourceElement {
@@ -734,6 +784,12 @@ public final class ATLVirtualMachine {
                 kind: .matched
             ))
         statistics.traceLinksCreated += 1
+        if journalled {
+            incrementalJournal?.matches.append(
+                ATLIncrementalJournal.MatchRecord(
+                    ruleName: rule.rule.name, sourceIDs: ids, variables: variables, targetIDs: targetIDs,
+                    dependencies: localDependencies))
+        }
 
         return PendingMatch(rule: rule, variables: variables, targetIDs: targetIDs)
     }
@@ -858,7 +914,7 @@ public final class ATLVirtualMachine {
     /// - Parameter type: The qualified type, such as `Persons!Male`
     /// - Returns: The created target element
     /// - Throws: ATL execution errors for element creation failures
-    private func createTargetElement(type: String) async throws -> any EObject {
+    func createTargetElement(type: String) async throws -> any EObject {
         let typeComponents = type.split(separator: "!")
         guard typeComponents.count == 2 else {
             throw ATLExecutionError.typeError("Invalid target type specification: '\(type)'")
@@ -875,7 +931,7 @@ public final class ATLVirtualMachine {
     ///   - patterns: The target patterns
     ///   - targetIDs: The identifiers of the elements created for the patterns
     /// - Throws: ATL execution errors for binding failures
-    private func applyTargetPatterns(_ patterns: [ATLEffectiveTargetPattern], targetIDs: [EUUID])
+    func applyTargetPatterns(_ patterns: [ATLEffectiveTargetPattern], targetIDs: [EUUID])
         async throws
     {
         var elements: [any EObject] = []
@@ -887,8 +943,8 @@ public final class ATLVirtualMachine {
             executionContext.setVariable(pattern.variableName, value: element)
         }
         for (pattern, element) in zip(patterns, elements) {
-            for binding in pattern.bindings {
-                try await applyBinding(binding, to: element)
+            for (ordinal, binding) in pattern.bindings.enumerated() {
+                try await applyBinding(binding, to: element, ordinal: ordinal)
             }
         }
     }
@@ -901,14 +957,27 @@ public final class ATLVirtualMachine {
     /// - Parameters:
     ///   - binding: The binding to apply
     ///   - element: The target element to configure
+    ///   - ordinal: The position of the binding among the bindings of its target pattern
     /// - Throws: ``ATLExecutionError/invalidEnumerationLiteral(_:)`` when the value is
     ///   not a literal of the enumeration the feature is typed by
-    private func applyBinding(_ binding: ATLPropertyBinding, to element: any EObject) async throws {
+    func applyBinding(_ binding: ATLPropertyBinding, to element: any EObject, ordinal: Int = 0) async throws {
+        let journalled = incrementalJournal != nil
+        if journalled { executionContext.dependencyRecorder.begin() }
         do {
             let value = try await binding.expression.evaluate(in: executionContext)
             try await executionContext.assignFeature(
                 on: element, feature: binding.property, value: value)
+            if journalled {
+                incrementalJournal?.bindings.append(
+                    ATLIncrementalJournal.BindingRecord(
+                        targetID: element.id, ordinal: ordinal,
+                        dependencies: executionContext.dependencyRecorder.end()))
+            }
         } catch {
+            if journalled {
+                executionContext.noteIncrementalHazard(ATLIncrementalHazard.deferredBinding)
+                executionContext.dependencyRecorder.end()
+            }
             if case ATLExecutionError.invalidEnumerationLiteral = error { throw error }
             if debug {
                 print(
@@ -1063,7 +1132,7 @@ public final class ATLVirtualMachine {
     ///   - sources: Source models to validate
     ///   - targets: Target models to validate
     /// - Throws: ATL execution errors for mismatched aliases
-    private func validateModelAliases(
+    func validateModelAliases(
         sources: OrderedDictionary<String, Resource>,
         targets: OrderedDictionary<String, Resource>
     ) throws {

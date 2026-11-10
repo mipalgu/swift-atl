@@ -5,6 +5,7 @@
 //  Created by Rene Hexel on 26/10/2026.
 //  Copyright © 2026 Rene Hexel. All rights reserved.
 //
+import EMFBase
 import Foundation
 
 /// Where the `writeTo` and `writeToWithCharset` string operations may write files.
@@ -28,7 +29,8 @@ import Foundation
 ///
 /// Missing intermediate directories are created and an existing file is replaced,
 /// as Eclipse ATL does. The string is written exactly as it is, without a trailing
-/// line break.
+/// line break, by `writeTo` in the ``defaultEncoding`` of the policy (UTF-8 unless the
+/// host chooses another) and by `writeToWithCharset` in the charset that it names.
 ///
 /// ## Example
 ///
@@ -43,6 +45,15 @@ public struct ATLFileOutputPolicy: Sendable, Hashable {
 
     /// Whether paths outside the base directory, including absolute paths, are accepted.
     public let allowsUnrestrictedPaths: Bool
+
+    /// The character encoding in which `writeTo` writes a string.
+    ///
+    /// `writeTo` names no charset, so it writes in this encoding, which is UTF-8 unless the
+    /// host chooses another. `writeToWithCharset` writes in the charset that it names. A
+    /// string with a character that this encoding cannot hold is not written: the operation
+    /// fails with an error that names the file, and the line and column of the character in
+    /// the string.
+    public var defaultEncoding: TextEncoding = .utf8
 
     /// Whether files may be written at all.
     public var isEnabled: Bool { baseDirectory != nil }
@@ -152,14 +163,24 @@ public struct ATLFileOutputPolicy: Sendable, Hashable {
     /// - Parameters:
     ///   - text: The string to write.
     ///   - path: The path as written in the transformation.
-    ///   - charset: The name of the charset, or `nil` for UTF-8.
+    ///   - charset: The name of the charset, or `nil` for ``defaultEncoding``.
     ///   - operation: The name of the operation, for messages.
     /// - Returns: `true` once the file has been written.
     /// - Throws: ``ATLExecutionError`` when the policy rejects the path, the charset is
     ///   unknown or cannot encode the string, or the file cannot be written.
     func write(_ text: String, to path: String, charset: String?, operation: String) throws -> Bool {
         let url = try resolve(path, for: operation)
-        let data = try ATLCharset.encode(text, charset: charset, operation: operation)
+        let data: Data
+        if charset == nil && defaultEncoding != .utf8 {
+            do {
+                data = try defaultEncoding.encode(text)
+            } catch {
+                throw ATLExecutionError.runtimeError(
+                    "\(operation) cannot write '\(path)': \(String(describing: error))")
+            }
+        } else {
+            data = try ATLCharset.encode(text, charset: charset, operation: operation)
+        }
         do {
             try FileManager.default.createDirectory(
                 at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
@@ -302,6 +323,10 @@ enum ATLCharset {
 
     /// Encodes a string in a charset.
     ///
+    /// A name that the table of Java charset names does not hold is looked up among the
+    /// encodings that `TextEncoding` knows, with their aliases, such as `windows-1252` or
+    /// `cp1252`; such an encoding precomposes the text as `TextEncoding.encode(_:)` describes.
+    ///
     /// - Parameters:
     ///   - text: The string to encode.
     ///   - charset: The charset name, or `nil` for ``defaultName``.
@@ -312,7 +337,16 @@ enum ATLCharset {
     static func encode(_ text: String, charset: String?, operation: String) throws -> Data {
         let name = charset ?? defaultName
         guard let entry = encodings[normalised(name)] else {
-            let supported = encodings.keys.sorted().joined(separator: ", ")
+            if let encoding = TextEncoding(name: name) {
+                do {
+                    return try encoding.encode(text)
+                } catch {
+                    throw ATLExecutionError.runtimeError(
+                        "\(operation) cannot encode the string in the charset '\(name)': \(String(describing: error))")
+                }
+            }
+            let supported = Set(encodings.keys).union(TextEncoding.allCases.map(\.name)).sorted()
+                .joined(separator: ", ")
             throw ATLExecutionError.invalidOperation(
                 "\(operation) does not support the charset '\(name)' (supported: \(supported))")
         }
