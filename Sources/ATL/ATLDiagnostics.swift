@@ -91,7 +91,7 @@ extension ATLParseError: LocalizedError {
 
 /// The kinds of node in the outline of an ATL module.
 ///
-/// The kinds are the values of ``OutlineNode/kind`` in the outline that
+/// The kinds are the values of [`OutlineNode/kind`](https://mipalgu.github.io/swift-ecore/documentation/emfbase/outlinenode/kind/) in the outline that
 /// ``ATLParseResult`` carries.
 public enum ATLOutlineKind {
     /// The module declaration, which contains every other node.
@@ -166,9 +166,9 @@ public enum ATLSyntax {
     /// Splits ATL source text into classified tokens.
     ///
     /// The tokeniser never fails: text that cannot be read becomes a token of kind
-    /// ``SourceTokenKind/invalid``. Comments are included, and a comment that holds a
+    /// [`SourceTokenKind/invalid`](https://mipalgu.github.io/swift-ecore/documentation/emfbase/sourcetokenkind/invalid/). Comments are included, and a comment that holds a
     /// header directive such as `-- @path Name=file.ecore` is of kind
-    /// ``SourceTokenKind/directive``. Whitespace is not reported. Positions count UTF-8
+    /// [`SourceTokenKind/directive`](https://mipalgu.github.io/swift-ecore/documentation/emfbase/sourcetokenkind/directive/). Whitespace is not reported. Positions count UTF-8
     /// offsets, lines from one and columns in Unicode scalars from one, and the line
     /// terminators `\r\n`, `\r` and `\n` each end one line.
     ///
@@ -189,9 +189,9 @@ public enum ATLSyntax {
     /// Splits ATL source text into classified tokens with the given options.
     ///
     /// The tokeniser never fails: text that cannot be read becomes a token of kind
-    /// ``SourceTokenKind/invalid``. Comments are included, and a comment that holds a
+    /// [`SourceTokenKind/invalid`](https://mipalgu.github.io/swift-ecore/documentation/emfbase/sourcetokenkind/invalid/). Comments are included, and a comment that holds a
     /// header directive such as `-- @path Name=file.ecore` is of kind
-    /// ``SourceTokenKind/directive``. Whitespace is not reported. Positions count UTF-8
+    /// [`SourceTokenKind/directive`](https://mipalgu.github.io/swift-ecore/documentation/emfbase/sourcetokenkind/directive/). Whitespace is not reported. Positions count UTF-8
     /// offsets, lines from one and columns in Unicode scalars from one, and the line
     /// terminators `\r\n`, `\r` and `\n` each end one line. With the OCL
     /// ``ATLOptions/collectionRangeSyntax``, the range separator `..` is one token;

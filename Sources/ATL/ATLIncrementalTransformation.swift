@@ -39,7 +39,7 @@ public enum ATLBindingPropagation: Sendable, Equatable {
 ///
 /// Each count of computations is the number of records of that kind, and each count of
 /// entries is the number of model parts that those records name together (see
-/// ``ModelDependencies/count``).
+/// [`ModelDependencies/count`](https://mipalgu.github.io/swift-ecore/documentation/ecore/modeldependencies/count/)).
 public struct ATLIncrementalDependencyStatistics: Sendable, Equatable {
     /// The number of source element tuples whose guard outcomes are kept.
     public let candidates: Int
@@ -138,8 +138,8 @@ public struct ATLIncrementalUpdate: Sendable, Equatable {
 /// An incremental transformation first executes its module as ``ATLVirtualMachine`` does,
 /// producing the same target models, while recording what each rule guard, `using`
 /// variable and binding reads from the source models and the trace (see
-/// ``ModelDependencies``). It then watches the source models for changes made through the
-/// editing operations of ``Resource`` (see ``Resource/addChangeObserver(_:)``). Each call
+/// [`ModelDependencies`](https://mipalgu.github.io/swift-ecore/documentation/ecore/modeldependencies/)). It then watches the source models for changes made through the
+/// editing operations of [`Resource`](https://mipalgu.github.io/swift-ecore/documentation/ecore/resource/) (see [`Resource/addChangeObserver(_:)`](https://mipalgu.github.io/swift-ecore/documentation/ecore/resource/addchangeobserver(_:)/)). Each call
 /// of ``update()`` propagates the changes collected since the previous one, following
 /// incremental ATL ([Jouault and Tisi](https://doi.org/10.1007/978-3-642-13688-7_9)), YAMTL
 /// ([Boronat](https://doi.org/10.1007/s10009-020-00583-y)) and the dependency tracking of
@@ -415,7 +415,7 @@ public final class ATLIncrementalTransformation {
     }
 
     /// Propagates source changes reported elsewhere, such as by
-    /// ``Resource/recordingChanges(_:)``.
+    /// [`Resource/recordingChanges(_:)`](https://mipalgu.github.io/swift-ecore/documentation/ecore/resource/recordingchanges(_:)/).
     ///
     /// Use this method instead of ``update()`` when the changes are not collected by the
     /// transformation itself, for example after ``stop()``.
