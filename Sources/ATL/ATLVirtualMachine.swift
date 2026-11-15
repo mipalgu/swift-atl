@@ -127,8 +127,8 @@ public final class ATLVirtualMachine {
 
     /// How transformations executed by this machine read features that the model leaves unset.
     ///
-    /// ``UnsetFeatureReads/defaults`` gives the default value of the feature, as the
-    /// Eclipse Modeling Framework does. ``UnsetFeatureReads/undefined`` gives `OclUndefined`.
+    /// [`UnsetFeatureReads/defaults`](https://mipalgu.github.io/swift-ecore/documentation/ecore/unsetfeaturereads/defaults/) gives the default value of the feature, as the
+    /// Eclipse Modeling Framework does. [`UnsetFeatureReads/undefined`](https://mipalgu.github.io/swift-ecore/documentation/ecore/unsetfeaturereads/undefined/) gives `OclUndefined`.
     /// The mode is fixed when the machine is created.
     public let unsetFeatureReads: UnsetFeatureReads
 
@@ -178,8 +178,8 @@ public final class ATLVirtualMachine {
     ///   - module: The ATL module to execute
     ///   - enableDebugging: Whether to enable debug output for systematic tracing
     ///   - unsetFeatureReads: How navigation reads a feature that the model leaves unset.
-    ///     The default, ``UnsetFeatureReads/defaults``, gives the feature's default value as
-    ///     the Eclipse Modeling Framework does; ``UnsetFeatureReads/undefined`` gives
+    ///     The default, [`UnsetFeatureReads/defaults`](https://mipalgu.github.io/swift-ecore/documentation/ecore/unsetfeaturereads/defaults/), gives the feature's default value as
+    ///     the Eclipse Modeling Framework does; [`UnsetFeatureReads/undefined`](https://mipalgu.github.io/swift-ecore/documentation/ecore/unsetfeaturereads/undefined/) gives
     ///     `OclUndefined` instead.
     ///   - nativeHelpers: Helpers implemented in Swift that the transformation can call.
     ///     They take precedence over module helpers of the same name; see ``ATLNativeHelper``.
@@ -210,8 +210,8 @@ public final class ATLVirtualMachine {
     ///     Integers into a Real.
     ///   - enableDebugging: Whether to enable debug output for systematic tracing.
     ///   - unsetFeatureReads: How navigation reads a feature that the model leaves unset.
-    ///     The default, ``UnsetFeatureReads/defaults``, gives the feature's default value as
-    ///     the Eclipse Modeling Framework does; ``UnsetFeatureReads/undefined`` gives
+    ///     The default, [`UnsetFeatureReads/defaults`](https://mipalgu.github.io/swift-ecore/documentation/ecore/unsetfeaturereads/defaults/), gives the feature's default value as
+    ///     the Eclipse Modeling Framework does; [`UnsetFeatureReads/undefined`](https://mipalgu.github.io/swift-ecore/documentation/ecore/unsetfeaturereads/undefined/) gives
     ///     `OclUndefined` instead.
     ///   - nativeHelpers: Helpers implemented in Swift that the transformation can call.
     ///     They take precedence over module helpers of the same name; see ``ATLNativeHelper``.
@@ -308,7 +308,7 @@ public final class ATLVirtualMachine {
     /// Navigation reads an unset single-valued attribute as its default value
     /// literal or, without one, as the default of its type (`false` or zero), as
     /// the Eclipse Modeling Framework does; unset strings and references read as
-    /// `OclUndefined`. A machine created with ``UnsetFeatureReads/undefined``
+    /// `OclUndefined`. A machine created with [`UnsetFeatureReads/undefined`](https://mipalgu.github.io/swift-ecore/documentation/ecore/unsetfeaturereads/undefined/)
     /// instead reads every unset feature as `OclUndefined`; see
     /// ``unsetFeatureReads``.
     ///

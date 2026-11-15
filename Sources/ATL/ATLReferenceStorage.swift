@@ -61,13 +61,13 @@ enum ATLReservedNames {
 /// resource set, which the serialiser locates itself. A reference to an
 /// element of any other resource, such as a source model element that no rule
 /// transformed, is stored as a
-/// ``ResourceProxy`` carrying the URI of that resource and an XPath-style
+/// [`ResourceProxy`](https://mipalgu.github.io/swift-ecore/documentation/ecore/resourceproxy/) carrying the URI of that resource and an XPath-style
 /// fragment locating the element, which the XMI serialiser writes as a
 /// cross-document `href`.
 ///
 /// Values bound to multi-valued references are stored as `[EUUID]` when every
 /// element lives in the target resource, as `[ResourceProxy]` when every
-/// element lives elsewhere, and as an ``EcoreValueArray`` of identifiers and
+/// element lives elsewhere, and as an [`EcoreValueArray`](https://mipalgu.github.io/swift-ecore/documentation/emfbase/ecorevaluearray/) of identifiers and
 /// proxies when the two are mixed.
 enum ATLReferenceStorage {
 
