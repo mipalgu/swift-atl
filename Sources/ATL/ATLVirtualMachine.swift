@@ -281,8 +281,9 @@ public final class ATLVirtualMachine {
     /// - Throws: ATL execution errors for transformation failures, including
     ///   ``ATLExecutionError/missingParameter(_:)`` for a required parameter without a value
     ///   and ``ATLExecutionError/invalidOperation(_:)`` when, in refining mode, the target
-    ///   models cannot be paired with the source models, or when a rule drops its matched
-    ///   element outside refining mode or is extended by another rule
+    ///   models cannot be paired with the source models, when a rule drops its matched
+    ///   element outside refining mode or is extended by another rule, or when two matched
+    ///   rules match the same source element or tuple of source elements
     ///
     /// - Note: Source and target model aliases must match the module's metamodel specifications.
     ///   In refining mode each target model starts as a copy of its source model, as the
@@ -585,11 +586,14 @@ public final class ATLVirtualMachine {
     /// Matches all rules against the source models and creates their target elements.
     ///
     /// A source element matched by both a rule and a rule extending it is
-    /// transformed by the extending rule only.
+    /// transformed by the extending rule only. Any other source element, or tuple of
+    /// source elements, that two rules match is an error, as in Eclipse ATL, because a
+    /// source element resolves to the target element of the one rule that transforms it.
     ///
     /// - Parameter rules: The effective matched rules
     /// - Returns: The matches, in rule and source element order
-    /// - Throws: ATL execution errors for rule execution failures
+    /// - Throws: ``ATLExecutionError/invalidOperation(_:)`` when two rules match the same
+    ///   source elements, and ATL execution errors for rule execution failures
     private func matchRules(_ rules: [ATLEffectiveMatchedRule]) async throws -> [PendingMatch] {
         let monitor = self.monitor ?? ATLRunMonitor(handler: nil)
         var candidates: [MatchCandidate] = []
@@ -608,7 +612,8 @@ public final class ATLVirtualMachine {
         // Only candidates for the same source elements can hide each other
         let sourceIDs = candidates.map(\.sourceIDs)
         let sameSources = Dictionary(grouping: candidates.indices) { sourceIDs[$0] }
-        var matches: [PendingMatch] = []
+        var visible: [MatchCandidate] = []
+        var ruleBySources: [[EUUID]: String] = [:]
         for (position, candidate) in candidates.enumerated() {
             try await monitor.checkpoint()
             let name = candidate.rule.rule.name
@@ -617,11 +622,33 @@ public final class ATLVirtualMachine {
                 let rule = candidates[other].rule
                 return rule.rule.name != name && rule.chainNames.contains(name)
             }
-            if !isHidden {
-                matches.append(try await createTargets(for: candidate))
+            guard !isHidden else { continue }
+            if let first = ruleBySources.updateValue(name, forKey: sourceIDs[position]) {
+                throw Self.severalRulesError(first: first, second: name, sources: candidate.sources)
             }
+            visible.append(candidate)
+        }
+        var matches: [PendingMatch] = []
+        for candidate in visible {
+            try await monitor.checkpoint()
+            matches.append(try await createTargets(for: candidate))
         }
         return matches
+    }
+
+    /// The error for source elements that two matched rules match.
+    ///
+    /// - Parameters:
+    ///   - first: The name of the rule that matched the elements first.
+    ///   - second: The name of the other rule.
+    ///   - sources: The matched source elements, in source pattern order.
+    /// - Returns: The error, naming both rules and the elements.
+    static func severalRulesError(first: String, second: String, sources: [any EObject])
+        -> ATLExecutionError
+    {
+        let elements = sources.map { ATLValueText.render($0) }.joined(separator: ", ")
+        return ATLExecutionError.invalidOperation(
+            ATLExecutionMessage.severalRules(elements: elements, first: first, second: second))
     }
 
     /// Finds the source element tuples that satisfy a rule's source patterns and guards.

@@ -119,6 +119,17 @@ The rule engine:
 2. Creates a `DB!Table` for each one
 3. Sets the `name` attribute from the source
 
+A source element, or a tuple of source elements matched by a rule with several source
+pattern elements, is transformed by at most one matched rule, because references to it
+resolve to the target elements of that rule. As in Eclipse ATL, two matched rules that
+match the same element or tuple stop the run with an
+``ATLExecutionError/invalidOperation(_:)`` that names both rules and the elements, before
+any rule creates a target element. A rule and a rule that extends it transform an element
+they both match once, through the extending rule, and rules whose guards select different
+elements, or that match an element together with different other elements, do not
+conflict. This holds under both ``ATLOptions/standard`` and ``ATLOptions/legacy``, in
+refining mode and in incremental updates.
+
 ### Called Rules
 
 Called rules are invoked explicitly using `thisModule.ruleName(args)`. They're

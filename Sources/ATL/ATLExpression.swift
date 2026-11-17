@@ -2078,6 +2078,21 @@ enum ATLExecutionMessage {
             + "element of a source model"
     }
 
+    /// Describes a source element that more than one matched rule transforms.
+    ///
+    /// - Parameters:
+    ///   - elements: The text of the matched source element or elements, as ATL writes them.
+    ///   - first: The name of the rule that matched the elements first.
+    ///   - second: The name of the other rule that matched them.
+    /// - Returns: The message.
+    static func severalRules(elements: String, first: String, second: String) -> String {
+        "Rules '\(first)' and '\(second)' both match \(elements); "
+            + "a source element can be transformed by only one matched rule"
+    }
+
+    /// The words for a tuple of source elements that the message does not list.
+    static let sameSourceElements = "the same source elements"
+
     /// Describes an iterator operation that the engine does not provide.
     ///
     /// - Parameter operation: The name of the operation.

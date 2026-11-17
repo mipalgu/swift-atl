@@ -17,7 +17,8 @@ This package provides the ATL library. The `swift-atl` command-line tool is part
 - **Eclipse ATL compatible**: parses and runs Eclipse ATL transformations, and reads and
   writes ATL modules in the Eclipse ATL XMI format
 - **Complete rule language**: matched, lazy, unique lazy and called rules, rule
-  inheritance, entrypoint and endpoint rules, and imperative `do` blocks
+  inheritance, entrypoint and endpoint rules, and imperative `do` blocks; as in Eclipse
+  ATL, two matched rules that match the same source element are reported as an error
 - **OCL expressions**: navigation, collections and iterators, `let`, tuples, three-valued
   logic and a broad library of built-in and reflective operations
 - **Refining mode**: in-place transformations that keep unmatched elements, including

@@ -713,7 +713,7 @@ public final class ATLIncrementalTransformation {
                 }
             }
         }
-        let order = candidatesChanged ? matchOrder() : []
+        let order = candidatesChanged ? try matchOrder() : []
         var added: [MatchKey] = []
         var removed: [MatchKey] = []
         var traceChanged = Set<EUUID>()
@@ -876,12 +876,17 @@ public final class ATLIncrementalTransformation {
     ///
     /// A source element tuple matched both by a rule and by a rule extending it is
     /// transformed by the extending rule only.
-    private func matchOrder() -> [MatchKey] {
+    ///
+    /// - Returns: The matches.
+    /// - Throws: A fallback to executing the module again, which reports the error, when
+    ///   two rules match the same source element tuple.
+    private func matchOrder() throws -> [MatchKey] {
         var rulesBySources: [[EUUID]: [Int]] = [:]
         for (position, tuples) in candidates.enumerated() {
             for (ids, holds) in tuples where holds { rulesBySources[ids, default: []].append(position) }
         }
         var order: [MatchKey] = []
+        var ruleBySources: [[EUUID]: String] = [:]
         for (position, tuples) in candidates.enumerated() {
             let name = rules[position].rule.name
             for (ids, holds) in tuples where holds {
@@ -889,7 +894,13 @@ public final class ATLIncrementalTransformation {
                     other != position && rules[other].rule.name != name
                         && rules[other].chainNames.contains(name)
                 }
-                if !hidden { order.append(MatchKey(rule: position, sources: ids)) }
+                guard !hidden else { continue }
+                if let first = ruleBySources.updateValue(name, forKey: ids) {
+                    throw Fallback(
+                        reason: ATLExecutionMessage.severalRules(
+                            elements: ATLExecutionMessage.sameSourceElements, first: first, second: name))
+                }
+                order.append(MatchKey(rule: position, sources: ids))
             }
         }
         return order
