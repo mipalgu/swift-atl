@@ -55,9 +55,10 @@ following are kept up to date by executing the module again on each update, as
 Expressions that call native helpers, and bindings that store a reference to an
 untransformed source element, are evaluated again after every change.
 
-An update after which two matched rules match the same source element, or the same tuple
-of source elements, executes the module again, which reports the error that a batch run
-reports; the transformation must then be executed again before it can be updated.
+An update after which two matched rules match the same source element, or bind the same
+tuple of source elements to the same variables, as <doc:UnderstandingATL> describes,
+executes the module again, which reports the error that a batch run reports; the
+transformation must then be executed again before it can be updated.
 
 ## Topics
 

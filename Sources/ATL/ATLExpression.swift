@@ -2078,16 +2078,28 @@ enum ATLExecutionMessage {
             + "element of a source model"
     }
 
-    /// Describes a source element that more than one matched rule transforms.
+    /// Describes a source element, or a tuple of source elements, that more than one
+    /// matched rule transforms.
     ///
     /// - Parameters:
-    ///   - elements: The text of the matched source element or elements, as ATL writes them.
+    ///   - elements: The text of the matched source element, as ATL writes it, or the
+    ///     text of ``boundSourceElements(_:)`` for a tuple of source elements.
     ///   - first: The name of the rule that matched the elements first.
     ///   - second: The name of the other rule that matched them.
     /// - Returns: The message.
     static func severalRules(elements: String, first: String, second: String) -> String {
         "Rules '\(first)' and '\(second)' both match \(elements); "
-            + "a source element can be transformed by only one matched rule"
+            + "a source element, or a tuple of source elements bound to the same variables, "
+            + "can be transformed by only one matched rule"
+    }
+
+    /// Describes a tuple of source elements by the variables they are bound to.
+    ///
+    /// - Parameter bindings: The name of each source pattern variable and the text of the
+    ///   element bound to it, as ATL writes it, in declaration order.
+    /// - Returns: The description, such as `the source elements s = Task 't1', p = Project 'p'`.
+    static func boundSourceElements(_ bindings: [(variable: String, element: String)]) -> String {
+        "the source elements " + bindings.map { "\($0.variable) = \($0.element)" }.joined(separator: ", ")
     }
 
     /// The words for a tuple of source elements that the message does not list.

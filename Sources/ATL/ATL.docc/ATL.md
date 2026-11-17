@@ -132,8 +132,9 @@ type, so a Real bound to an `EInt` attribute stops the run with a type error ins
 being stored, and a source element that no rule transforms is left out of a containment
 reference with a warning instead of being stored as a reference into its source model, as
 <doc:UnderstandingATL> describes. Two matched rules that match the same source element, or
-the same tuple of source elements, stop the run with an error that names both rules, as in
-Eclipse ATL, instead of both being applied with references resolving to the first.
+that bind the same tuple of source elements to the same variables, stop the run with an
+error that names both rules, as in Eclipse ATL, instead of both being applied with
+references resolving to the first.
 
 A virtual machine created with
 ``ATLVirtualMachine/init(module:options:enableDebugging:unsetFeatureReads:nativeHelpers:fileOutput:)``

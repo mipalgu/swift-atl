@@ -122,13 +122,35 @@ The rule engine:
 A source element, or a tuple of source elements matched by a rule with several source
 pattern elements, is transformed by at most one matched rule, because references to it
 resolve to the target elements of that rule. As in Eclipse ATL, two matched rules that
-match the same element or tuple stop the run with an
-``ATLExecutionError/invalidOperation(_:)`` that names both rules and the elements, before
-any rule creates a target element. A rule and a rule that extends it transform an element
-they both match once, through the extending rule, and rules whose guards select different
-elements, or that match an element together with different other elements, do not
-conflict. This holds under both ``ATLOptions/standard`` and ``ATLOptions/legacy``, in
-refining mode and in incremental updates.
+make the same match stop the run with an ``ATLExecutionError/invalidOperation(_:)`` that
+names both rules and the elements, before any rule creates a target element:
+
+- Two rules with one source pattern element make the same match when they match the same
+  element, whatever their variables are called.
+- Two rules with several source pattern elements make the same match when they bind the
+  same elements to the same variables, in whatever order they declare the variables. Rules
+  that bind the same elements to different variables do not conflict, even when they
+  declare them in the same order, and the error names each element with its variable.
+- A rule with one source pattern element and a rule with several never make the same
+  match, even when they share an element.
+
+```atl
+rule Assignment {
+    from t : Plan!Task, p : Plan!Person (t.owner = p)
+    to a : Report!Assignment
+}
+-- Conflicts with Assignment: it binds the same elements to t and p
+rule Responsibility {
+    from p : Plan!Person, t : Plan!Task (t.owner = p)
+    to r : Report!Responsibility
+}
+```
+
+A rule and a rule that extends it transform a match they both make once, through the
+extending rule, and rules whose guards select different elements, or that match an
+element together with different other elements, do not conflict. This holds under both
+``ATLOptions/standard`` and ``ATLOptions/legacy``, in refining mode and in incremental
+updates.
 
 ### Called Rules
 

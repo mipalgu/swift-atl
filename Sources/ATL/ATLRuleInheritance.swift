@@ -54,6 +54,53 @@ struct ATLEffectiveMatchedRule {
 
     /// The imperative statements of the chain in execution order.
     var doStatements: [any ATLStatement] { chain.flatMap(\.doStatements) }
+
+    /// Identifies a match of the rule among the matches of all matched rules.
+    ///
+    /// - Parameter sources: The identifiers of the matched source elements, in the order
+    ///   in which ``rule`` declares its source pattern elements.
+    /// - Returns: The identity of the match.
+    func matchIdentity(of sources: [EUUID]) -> ATLMatchIdentity {
+        ATLMatchIdentity(variables: rule.sourcePatterns.map(\.variableName), sources: sources)
+    }
+}
+
+// MARK: - Match Identity
+
+/// What identifies the match of a matched rule, as Eclipse ATL identifies it.
+///
+/// A source element, or a tuple of source elements, is transformed by at most one matched
+/// rule, so two matches with the same identity are a conflict. A match of a rule with one
+/// source pattern element is identified by that element alone, whatever its variable is
+/// called. A match of a rule with several source pattern elements is identified by the
+/// variable that each element is bound to: two rules that bind the same elements to the
+/// same variables match the same tuple even when they declare the variables in different
+/// orders, and two rules that bind the same elements to different variables do not.
+enum ATLMatchIdentity: Hashable {
+
+    /// The match of a rule with one source pattern element.
+    ///
+    /// - Parameter element: The identifier of the matched element.
+    case element(EUUID)
+
+    /// The match of a rule with several source pattern elements.
+    ///
+    /// - Parameter elements: The identifier of each matched element, indexed by the name
+    ///   of the variable it is bound to.
+    case tuple([String: EUUID])
+
+    /// Creates the identity of a match.
+    ///
+    /// - Parameters:
+    ///   - variables: The names of the source pattern variables, in declaration order.
+    ///   - sources: The identifiers of the matched elements, parallel to `variables`.
+    init(variables: [String], sources: [EUUID]) {
+        if sources.count == 1, let element = sources.first {
+            self = .element(element)
+        } else {
+            self = .tuple(Dictionary(zip(variables, sources)) { _, last in last })
+        }
+    }
 }
 
 // MARK: - Rule Inheritance

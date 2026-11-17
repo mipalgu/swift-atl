@@ -529,7 +529,10 @@ public final class ATLExecutionContext: Sendable {
     /// `resolveTemp(source, 'name')` returns the target element that the rule
     /// transforming `source` created for the target pattern called `name`.
     /// When `source` is a collection, it identifies a rule with several source
-    /// elements by their tuple. Without a name, the default (first) target
+    /// elements by their tuple, listed in the order in which the rule declares its
+    /// source pattern elements. When several rules match the same elements in that
+    /// order, binding them to different variables, the rule declared first that has a
+    /// target pattern called `name` is used. Without a name, the default (first) target
     /// element is returned. Lazy rule results are found as well as matched rule
     /// results.
     ///

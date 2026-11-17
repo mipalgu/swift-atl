@@ -874,28 +874,31 @@ public final class ATLIncrementalTransformation {
 
     /// The matches that an execution would create, in creation order.
     ///
-    /// A source element tuple matched both by a rule and by a rule extending it is
-    /// transformed by the extending rule only.
+    /// A match of a rule that a rule extending it also matches is made by the extending
+    /// rule only.
     ///
     /// - Returns: The matches.
     /// - Throws: A fallback to executing the module again, which reports the error, when
-    ///   two rules match the same source element tuple.
+    ///   two rules make matches with the same ``ATLMatchIdentity``.
     private func matchOrder() throws -> [MatchKey] {
-        var rulesBySources: [[EUUID]: [Int]] = [:]
+        var rulesByMatch: [ATLMatchIdentity: [Int]] = [:]
         for (position, tuples) in candidates.enumerated() {
-            for (ids, holds) in tuples where holds { rulesBySources[ids, default: []].append(position) }
+            for (ids, holds) in tuples where holds {
+                rulesByMatch[rules[position].matchIdentity(of: ids), default: []].append(position)
+            }
         }
         var order: [MatchKey] = []
-        var ruleBySources: [[EUUID]: String] = [:]
+        var ruleByMatch: [ATLMatchIdentity: String] = [:]
         for (position, tuples) in candidates.enumerated() {
             let name = rules[position].rule.name
             for (ids, holds) in tuples where holds {
-                let hidden = (rulesBySources[ids] ?? []).contains { other in
+                let identity = rules[position].matchIdentity(of: ids)
+                let hidden = (rulesByMatch[identity] ?? []).contains { other in
                     other != position && rules[other].rule.name != name
                         && rules[other].chainNames.contains(name)
                 }
                 guard !hidden else { continue }
-                if let first = ruleBySources.updateValue(name, forKey: ids) {
+                if let first = ruleByMatch.updateValue(name, forKey: identity) {
                     throw Fallback(
                         reason: ATLExecutionMessage.severalRules(
                             elements: ATLExecutionMessage.sameSourceElements, first: first, second: name))

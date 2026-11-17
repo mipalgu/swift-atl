@@ -146,7 +146,7 @@ public final class ATLVirtualMachine {
     /// The number of times the last run compared two matches to decide whether a rule
     /// extending another hides one of them.
     ///
-    /// Each comparison looks at one other match of the same source elements, so the
+    /// Each comparison looks at one other match with the same identity, so the
     /// count grows with the number of matches rather than with its square.
     private(set) var hidingComparisons = 0
 
@@ -283,7 +283,8 @@ public final class ATLVirtualMachine {
     ///   and ``ATLExecutionError/invalidOperation(_:)`` when, in refining mode, the target
     ///   models cannot be paired with the source models, when a rule drops its matched
     ///   element outside refining mode or is extended by another rule, or when two matched
-    ///   rules match the same source element or tuple of source elements
+    ///   rules match the same source element or bind the same tuple of source elements to
+    ///   the same variables
     ///
     /// - Note: Source and target model aliases must match the module's metamodel specifications.
     ///   In refining mode each target model starts as a copy of its source model, as the
@@ -586,9 +587,11 @@ public final class ATLVirtualMachine {
     /// Matches all rules against the source models and creates their target elements.
     ///
     /// A source element matched by both a rule and a rule extending it is
-    /// transformed by the extending rule only. Any other source element, or tuple of
-    /// source elements, that two rules match is an error, as in Eclipse ATL, because a
-    /// source element resolves to the target element of the one rule that transforms it.
+    /// transformed by the extending rule only. Any other two matches with the same
+    /// ``ATLMatchIdentity`` are an error, as in Eclipse ATL, because a source element
+    /// resolves to the target element of the one rule that transforms it: two rules that
+    /// match the same element, or that bind the same elements to the same variables of
+    /// their source patterns, in whatever order they declare them.
     ///
     /// - Parameter rules: The effective matched rules
     /// - Returns: The matches, in rule and source element order
@@ -609,22 +612,22 @@ public final class ATLVirtualMachine {
         }
 
         monitor.report(.matching, completed: rules.count, total: rules.count)
-        // Only candidates for the same source elements can hide each other
-        let sourceIDs = candidates.map(\.sourceIDs)
-        let sameSources = Dictionary(grouping: candidates.indices) { sourceIDs[$0] }
+        // Only candidates for the same match can hide each other
+        let identities = candidates.map { $0.rule.matchIdentity(of: $0.sourceIDs) }
+        let sameMatch = Dictionary(grouping: candidates.indices) { identities[$0] }
         var visible: [MatchCandidate] = []
-        var ruleBySources: [[EUUID]: String] = [:]
+        var ruleByMatch: [ATLMatchIdentity: String] = [:]
         for (position, candidate) in candidates.enumerated() {
             try await monitor.checkpoint()
             let name = candidate.rule.rule.name
-            let isHidden = (sameSources[sourceIDs[position]] ?? []).contains { other in
+            let isHidden = (sameMatch[identities[position]] ?? []).contains { other in
                 hidingComparisons += 1
                 let rule = candidates[other].rule
                 return rule.rule.name != name && rule.chainNames.contains(name)
             }
             guard !isHidden else { continue }
-            if let first = ruleBySources.updateValue(name, forKey: sourceIDs[position]) {
-                throw Self.severalRulesError(first: first, second: name, sources: candidate.sources)
+            if let first = ruleByMatch.updateValue(name, forKey: identities[position]) {
+                throw Self.severalRulesError(first: first, second: name, match: candidate)
             }
             visible.append(candidate)
         }
@@ -638,15 +641,26 @@ public final class ATLVirtualMachine {
 
     /// The error for source elements that two matched rules match.
     ///
+    /// The error names the matched element of a rule with one source pattern element, and
+    /// each matched element with the variable it is bound to for a rule with several.
+    ///
     /// - Parameters:
     ///   - first: The name of the rule that matched the elements first.
     ///   - second: The name of the other rule.
-    ///   - sources: The matched source elements, in source pattern order.
+    ///   - match: The match of the other rule.
     /// - Returns: The error, naming both rules and the elements.
-    static func severalRulesError(first: String, second: String, sources: [any EObject])
+    static func severalRulesError(first: String, second: String, match: MatchCandidate)
         -> ATLExecutionError
     {
-        let elements = sources.map { ATLValueText.render($0) }.joined(separator: ", ")
+        let sources = match.sources.map { ATLValueText.render($0) }
+        let elements: String
+        if sources.count == 1 {
+            elements = sources[0]
+        } else {
+            let variables = match.rule.rule.sourcePatterns.map(\.variableName)
+            elements = ATLExecutionMessage.boundSourceElements(
+                zip(variables, sources).map { (variable: $0, element: $1) })
+        }
         return ATLExecutionError.invalidOperation(
             ATLExecutionMessage.severalRules(elements: elements, first: first, second: second))
     }
