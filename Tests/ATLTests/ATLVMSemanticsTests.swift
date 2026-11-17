@@ -430,10 +430,10 @@ struct ATLResolveTempTests {
                 to t : Tgt!TNode (name <- a.name + '/' + b.name)
             }
             rule Again {
-                from a : Src!Node, b : Src!Leaf (a.name = b.name)
+                from n : Src!Node, l : Src!Leaf (n.leaf = l and l.name = 'alpha')
                 to u : Tgt!TNode (
                     name <- 'again',
-                    next <- thisModule.resolveTemp(Sequence{a, b}, 't')
+                    next <- thisModule.resolveTemp(Sequence{l.owner, l}, 't')
                 )
             }
             """)
@@ -501,9 +501,12 @@ struct ATLCalledRuleTests {
                 from h : Src!Holder
                 to t : Tgt!TNode (name <- 'one', kids <- h.items->collect(i | thisModule.Copy(i)))
             }
-            rule H2U {
-                from h : Src!Holder
-                to t : Tgt!TNode (name <- 'two', kids <- h.items->collect(i | thisModule.Copy(i)))
+            rule L2U {
+                from l : Src!Leaf (l.name = 'alpha')
+                to t : Tgt!TNode (
+                    name <- 'two',
+                    kids <- l.refImmediateComposite().items->collect(i | thisModule.Copy(i))
+                )
             }
             """)
         #expect(await fixture.targets("Marker").count == 4)
@@ -526,9 +529,12 @@ struct ATLCalledRuleTests {
                 from h : Src!Holder
                 to t : Tgt!TNode (name <- 'one', kids <- h.items->collect(i | thisModule.Copy(i)))
             }
-            rule H2U {
-                from h : Src!Holder
-                to t : Tgt!TNode (name <- 'two', kids <- h.items->collect(i | thisModule.Copy(i)))
+            rule L2U {
+                from l : Src!Leaf (l.name = 'alpha')
+                to t : Tgt!TNode (
+                    name <- 'two',
+                    kids <- l.refImmediateComposite().items->collect(i | thisModule.Copy(i))
+                )
             }
             """)
         #expect(await fixture.targets("Marker").count == 8)

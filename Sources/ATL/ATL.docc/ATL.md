@@ -26,7 +26,7 @@ metamodelling framework.
 - **Lazy rules**: Create target elements on-demand
 - **Helpers**: Define reusable query operations
 - **OCL expressions**: Full support for guards, bindings, and navigation
-- **Language coverage**: String escapes, real, enumeration and `OclUndefined` literals, collection literals that keep their objects and accept integer ranges such as `Sequence{1..3}`, three-valued logical operators, and extensive collection, string and type operations
+- **Language coverage**: String escapes, real, enumeration and `OclUndefined` literals, collection literals that keep their objects and accept integer ranges such as `Sequence{1..3}`, tuples such as `Tuple{name = 'a', size = 3}`, three-valued logical operators, and extensive collection, string and type operations
 - **Options**: ``ATLOptions`` selects between the current behaviour and that of swift-atl 0.6 or Eclipse ATL
 - **Reflective operations**: `refImmediateComposite()`, `refGetValue`, `refSetValue`, `refUnsetValue`, `refInvokeOperation` and the `eContainer()` family navigate and modify models by name
 - **Helper overloads**: Contextual helpers dispatch on the dynamic type of the receiver
@@ -88,6 +88,15 @@ that the Eclipse ATL compilers do not accept, so a transformation that uses them
 run on Eclipse ATL. `includingRange` is the portable alternative, and parsing with
 `ATLOptions(collectionRangeSyntax: .eclipse)` rejects ranges as Eclipse ATL does.
 
+When several rules that extend the same rule match an element, the first of them in the
+order of Eclipse ATL transforms it, as there, and the run also reports a warning;
+`ATLOptions(siblingRuleConflicts: .error)` makes this an error instead. A rule that extends
+another may declare the source pattern variables of that rule in any order, as in Eclipse
+ATL, and may also give them other names. <doc:UnderstandingATL> describes rule
+inheritance, and where it differs from Eclipse ATL, in detail. Tuples written to the
+console or as query results list their parts in the order in which they were written,
+where Eclipse ATL lists them in no particular order.
+
 ### Compatibility with 0.6
 
 APIs that take an ``ATLOptions`` value default to the current behaviour,
@@ -106,6 +115,7 @@ deprecated in favour of the variant that takes options.
 | Collection ranges in XMI | ``ATLCollectionRangeEncoding/collectionRange`` | ``ATLOptions/collectionRangeEncoding`` | No ranges could be written; ``ATLCollectionRangeEncoding/portable`` writes them with expressions that 0.6 reads |
 | `/` on two Integers, such as `7 / 2` | ``ATLIntegerDivision/real``: a Real (`3.5`), as in OCL and Eclipse ATL | ``ATLOptions/integerDivision`` | ``ATLIntegerDivision/truncating``: an Integer truncated towards zero (`3`), as `div` gives |
 | Bag values, such as `Bag{1, 1}`, `asBag()`, `Set{...}->collect(...)` and a feature navigated over a Set | ``ATLBagRepresentation/bag``: Bags, as in OCL and the Eclipse ATL EMFTVM | ``ATLOptions/bagRepresentation`` | ``ATLBagRepresentation/sequence``: Sequences |
+| Two rules extending the same rule that match the same element | ``ATLSiblingRuleConflicts/warning``: the first in Eclipse ATL's order applies, with a warning, under both presets | ``ATLOptions/siblingRuleConflicts`` | Both were applied; ``ATLSiblingRuleConflicts/error`` stops the run instead |
 
 With ``ATLCollectionRangeSyntax/eclipse``, `..` is read as two `.` tokens, and a range is
 reported as a syntax error whose message names the portable alternatives: listing the
@@ -126,6 +136,19 @@ and it equals a collection that holds each element equally often, in any order. 
 To keep the 0.6 behaviour with the new APIs, pass ``ATLOptions/legacy``, for example
 `ATLParser(options: .legacy)` or `ATLVirtualMachine(module: module, options: .legacy)`.
 Parse errors now also describe themselves through `localizedDescription`.
+
+Under both options, a value bound to an attribute of a primitive Ecore type must have that
+type, so a Real bound to an `EInt` attribute stops the run with a type error instead of
+being stored, and a source element that no rule transforms is left out of a containment
+reference with a warning instead of being stored as a reference into its source model, as
+<doc:UnderstandingATL> describes. Two matched rules that match the same source element, or
+that bind the same tuple of source elements to the same variables, stop the run with an
+error that names both rules, as in Eclipse ATL, instead of both being applied with
+references resolving to the first, unless both extend the same rule. A rule that extends
+another must declare as many source pattern elements as that rule, and a tuple literal
+gives a tuple rather than `OclUndefined`. A reference into a source model with several
+root elements locates the element below its own root, as EMF does, such as `/1/@tasks.0`,
+where 0.6 located every element below the first root.
 
 A virtual machine created with
 ``ATLVirtualMachine/init(module:options:enableDebugging:unsetFeatureReads:nativeHelpers:fileOutput:)``
@@ -237,6 +260,8 @@ Related chapters:
 - ``ATLMethodCallExpression``
 - ``ATLCollectionExpression``
 - ``ATLLiteralExpression``
+- ``ATLTupleExpression``
+- ``ATLTupleValue``
 
 ### Parsing
 
@@ -246,6 +271,7 @@ Related chapters:
 - ``ATLCollectionRangeEncoding``
 - ``ATLIntegerDivision``
 - ``ATLBagRepresentation``
+- ``ATLSiblingRuleConflicts``
 - ``ATLMetamodelRegistry``
 
 ### Editor Support

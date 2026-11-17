@@ -104,6 +104,13 @@ public struct ATLIncrementalUpdate: Sendable, Equatable {
     /// The number of bindings marked as stale for on-demand evaluation.
     public let bindingsDeferred: Int
 
+    /// The warnings that the update reported, in order.
+    ///
+    /// They include a warning for each match that the update makes and that sub-rules of
+    /// one rule both make, unless an earlier execution or update reported it already, and,
+    /// for an update that executed the transformation again, the warnings of that execution.
+    public let warnings: [String]
+
     /// Creates an update report.
     ///
     /// - Parameters:
@@ -116,10 +123,11 @@ public struct ATLIncrementalUpdate: Sendable, Equatable {
     ///   - localsEvaluated: The number of evaluations of `using` variables.
     ///   - bindingsEvaluated: The number of bindings evaluated.
     ///   - bindingsDeferred: The number of bindings marked as stale.
+    ///   - warnings: The warnings that the update reported.
     public init(
         changeCount: Int, reexecuted: Bool = false, reason: String? = nil, guardsEvaluated: Int = 0,
         matchesAdded: Int = 0, matchesRemoved: Int = 0, localsEvaluated: Int = 0,
-        bindingsEvaluated: Int = 0, bindingsDeferred: Int = 0
+        bindingsEvaluated: Int = 0, bindingsDeferred: Int = 0, warnings: [String] = []
     ) {
         self.changeCount = changeCount
         self.reexecuted = reexecuted
@@ -130,6 +138,7 @@ public struct ATLIncrementalUpdate: Sendable, Equatable {
         self.localsEvaluated = localsEvaluated
         self.bindingsEvaluated = bindingsEvaluated
         self.bindingsDeferred = bindingsDeferred
+        self.warnings = warnings
     }
 }
 
@@ -306,6 +315,10 @@ public final class ATLIncrementalTransformation {
 
     /// Whether the root elements of the target models may be out of order.
     private var rootsNeedOrdering = false
+
+    /// The warnings about sub-rules of one rule that make the same match, for the matches
+    /// currently made.
+    private var siblingWarnings: Set<String> = []
 
     // MARK: - Initialisation
 
@@ -594,7 +607,8 @@ public final class ATLIncrementalTransformation {
         for target in targets.values { await target.clear() }
         try await executeModule()
         hasExecuted = true
-        let report = ATLIncrementalUpdate(changeCount: changes, reexecuted: true, reason: reason)
+        let report = ATLIncrementalUpdate(
+            changeCount: changes, reexecuted: true, reason: reason, warnings: statistics.warnings)
         lastUpdate = report
         return report
     }
@@ -616,6 +630,7 @@ public final class ATLIncrementalTransformation {
         orphanCandidates = []
         reorderCandidates = []
         rootsNeedOrdering = false
+        siblingWarnings = []
     }
 
     /// Builds the incremental state from the journal of an execution.
@@ -651,6 +666,7 @@ public final class ATLIncrementalTransformation {
                 for: BindingKey(match: owner.match, pattern: owner.pattern, binding: record.ordinal))
         }
         indexHelperCache()
+        siblingWarnings = Set(machine.siblingWarnings)
         machine.incrementalJournal = ATLIncrementalJournal()
     }
 
@@ -688,6 +704,7 @@ public final class ATLIncrementalTransformation {
         -> ATLIncrementalUpdate
     {
         let context = machine.executionContext
+        let earlierWarnings = machine.getStatistics().warnings.count
         context.incrementalHazard = nil
         machine.incrementalJournal = ATLIncrementalJournal()
         await context.executionEngine.invalidateCaches(for: changes)
@@ -713,7 +730,12 @@ public final class ATLIncrementalTransformation {
                 }
             }
         }
-        let order = candidatesChanged ? matchOrder() : []
+        var order: [MatchKey] = []
+        if candidatesChanged {
+            let selection = try matchOrder()
+            order = selection.matches
+            try await reportSiblingChoices(selection.choices)
+        }
         var added: [MatchKey] = []
         var removed: [MatchKey] = []
         var traceChanged = Set<EUUID>()
@@ -770,7 +792,8 @@ public final class ATLIncrementalTransformation {
         return ATLIncrementalUpdate(
             changeCount: changes.count, guardsEvaluated: guardsEvaluated, matchesAdded: added.count,
             matchesRemoved: removed.count, localsEvaluated: localsEvaluated,
-            bindingsEvaluated: bindingsEvaluated, bindingsDeferred: bindingsDeferred)
+            bindingsEvaluated: bindingsEvaluated, bindingsDeferred: bindingsDeferred,
+            warnings: Array(machine.getStatistics().warnings.dropFirst(earlierWarnings)))
     }
 
     /// Discards the cached attribute helper values that changes affect.
@@ -874,25 +897,48 @@ public final class ATLIncrementalTransformation {
 
     /// The matches that an execution would create, in creation order.
     ///
-    /// A source element tuple matched both by a rule and by a rule extending it is
-    /// transformed by the extending rule only.
-    private func matchOrder() -> [MatchKey] {
-        var rulesBySources: [[EUUID]: [Int]] = [:]
+    /// The matches are chosen as an execution chooses them; see ``ATLMatchSelection``.
+    ///
+    /// - Returns: The matches, and the choices between sub-rules of one rule that decided
+    ///   which of them are made.
+    /// - Throws: A fallback to executing the module again, which reports the error, when
+    ///   two rules make matches with the same ``ATLMatchIdentity`` that rule inheritance
+    ///   does not decide between.
+    private func matchOrder() throws -> (matches: [MatchKey], choices: [(key: MatchKey, choice: ATLSiblingChoice)]) {
+        var keys: [MatchKey] = []
         for (position, tuples) in candidates.enumerated() {
-            for (ids, holds) in tuples where holds { rulesBySources[ids, default: []].append(position) }
+            for (ids, holds) in tuples where holds { keys.append(MatchKey(rule: position, sources: ids)) }
         }
-        var order: [MatchKey] = []
-        for (position, tuples) in candidates.enumerated() {
-            let name = rules[position].rule.name
-            for (ids, holds) in tuples where holds {
-                let hidden = (rulesBySources[ids] ?? []).contains { other in
-                    other != position && rules[other].rule.name != name
-                        && rules[other].chainNames.contains(name)
-                }
-                if !hidden { order.append(MatchKey(rule: position, sources: ids)) }
+        let selection: ATLMatchSelection
+        do {
+            selection = try ATLMatchSelection(
+                rules: keys.map { rules[$0.rule] }, identities: keys.map { rules[$0.rule].matchIdentity(of: $0.sources) },
+                declarationOrder: machine.ruleDeclarationOrder, conflicts: options.siblingRuleConflicts)
+        } catch {
+            throw Fallback(
+                reason: ATLExecutionMessage.severalRules(
+                    elements: ATLExecutionMessage.sameSourceElements, first: error.first, second: error.second))
+        }
+        return (selection.selected.map { keys[$0] }, selection.choices.map { (keys[$0.position], $0) })
+    }
+
+    /// Reports the choices between sub-rules that an execution would report and that no
+    /// earlier execution or update has reported.
+    ///
+    /// - Parameter choices: The choices that decided the matches now made, with their matches.
+    /// - Throws: A fallback to executing the module again when a matched element is missing.
+    private func reportSiblingChoices(_ choices: [(key: MatchKey, choice: ATLSiblingChoice)]) async throws {
+        var current: Set<String> = []
+        for (key, choice) in choices {
+            guard let tuple = await sourceObjects(key.sources) else {
+                throw Fallback(reason: ATLIncrementalHazard.missingSourceElement)
             }
+            let warning = ATLVirtualMachine.siblingWarning(
+                choice, match: ATLVirtualMachine.MatchCandidate(rule: rules[key.rule], sources: tuple))
+            current.insert(warning)
+            if !siblingWarnings.contains(warning) { machine.executionContext.reportWarning(warning) }
         }
-        return order
+        siblingWarnings = current
     }
 
     /// Deletes the target elements of a match that no longer holds.
@@ -927,7 +973,7 @@ public final class ATLIncrementalTransformation {
     /// - Returns: The state of the match, whose bindings remain to be applied.
     private func createMatch(_ key: MatchKey) async throws -> MatchState {
         guard let tuple = await sourceObjects(key.sources) else {
-            throw Fallback(reason: "a matched source element is missing")
+            throw Fallback(reason: ATLIncrementalHazard.missingSourceElement)
         }
         let pending = try await machine.createTargets(
             for: ATLVirtualMachine.MatchCandidate(rule: rules[key.rule], sources: tuple))
@@ -950,7 +996,8 @@ public final class ATLIncrementalTransformation {
                 ATLTraceLink(
                     ruleName: rule.rule.name, sourceElement: key.sources[0], targetElements: state.targetIDs,
                     additionalSourceElements: Array(key.sources.dropFirst()),
-                    targetNames: rule.targetPatterns.map(\.variableName), kind: .matched))
+                    targetNames: rule.targetPatterns.map(\.variableName), kind: .matched,
+                    sourceNames: rule.identityVariables))
         }
         machine.executionContext.replaceTraceLinks(links)
     }
@@ -965,12 +1012,8 @@ public final class ATLIncrementalTransformation {
         context.pushScope()
         defer { context.popScope() }
         machine.bindSourceVariables(of: rule, sources: tuple)
-        var variables: [(name: String, value: (any EcoreValue)?)] = []
-        for member in rule.chain {
-            for (pattern, element) in zip(member.sourcePatterns, tuple) {
-                variables.append((pattern.variableName, element))
-            }
-        }
+        var variables: [(name: String, value: (any EcoreValue)?)] = rule.sourceBindings(of: tuple)
+            .map { ($0.name, $0.value) }
         context.dependencyRecorder.begin()
         do {
             for local in rule.localVariables {

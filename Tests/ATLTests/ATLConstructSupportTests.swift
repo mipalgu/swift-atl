@@ -73,9 +73,10 @@ struct ATLConstructSupportTests {
                 from h : Src!Holder
                 to t : Tgt!TNode (name <- 'h', kids <- h.items->collect(i | thisModule.Copy(i)))
             }
-            rule H2U {
-                from h : Src!Holder
-                to t : Tgt!TNode (name <- 'u', kids <- h.items->collect(i | thisModule.Copy(i)))
+            rule L2U {
+                from l : Src!Leaf (l.name = 'alpha')
+                to t : Tgt!TNode (
+                    name <- 'u', kids <- l.refImmediateComposite().items->collect(i | thisModule.Copy(i)))
             }
             """, .runs(className: "Marker", count: 4)),
         Construct(

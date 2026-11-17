@@ -764,7 +764,7 @@ enum ATLBuiltinOperations {
 
 /// Operations that take iterator variables, such as `select(e | ...)`.
 enum ATLLambdaOperation: String {
-    case select, reject, collect, exists, forAll, one, any, isUnique, sortedBy
+    case select, reject, collect, collectNested, exists, forAll, one, any, isUnique, sortedBy
 }
 
 /// Evaluation of the iterator operations of the OCL collection library.
@@ -772,9 +772,12 @@ enum ATLLambdaOperation: String {
 /// The receiver may be any collection; a single value is treated as a collection
 /// of one element and the undefined value as an empty collection. `select` and
 /// `reject` keep the kind of the receiver, `sortedBy` gives an ordered set for a
-/// unique receiver and a sequence otherwise, and `collect` gives a Bag for a Set or
-/// a Bag receiver, as in OCL and the Eclipse ATL EMFTVM, and a Sequence otherwise.
-/// With ``ATLBagRepresentation/sequence``, `collect` gives a Sequence for every receiver.
+/// unique receiver and a sequence otherwise, and `collect` and `collectNested` give a
+/// Bag for a Set or a Bag receiver, as in OCL and the Eclipse ATL EMFTVM, and a
+/// Sequence otherwise. With ``ATLBagRepresentation/sequence``, `collect` and
+/// `collectNested` give a Sequence for every receiver. `collect` flattens the
+/// collections that its body yields by one level, whereas `collectNested` keeps them
+/// as elements. Both leave out the undefined values that the body yields.
 @MainActor
 enum ATLLambdaOperations {
 
@@ -807,13 +810,15 @@ enum ATLLambdaOperations {
                 if try await holds(lambda, [item], context) == keep { selected.append(item) }
             }
             return ATLBuiltinResult(value: ATLCollections.make(kind: kind, selected))
-        case .collect:
+        case .collect, .collectNested:
+            let flattens = operation == .collect
             var collected: [any EcoreValue] = []
             for item in items {
                 guard let value = try await lambda.evaluate(binding: [item], in: context) else {
                     continue
                 }
-                collected.append(contentsOf: ATLCollections.isCollection(value) ? ATLCollections.elements(of: value) : [value])
+                let flattened = flattens && ATLCollections.isCollection(value)
+                collected.append(contentsOf: flattened ? ATLCollections.elements(of: value) : [value])
             }
             let collectedKind = ATLCollections.collectedKind(
                 over: kind, bags: context.options.bagRepresentation)
@@ -1021,6 +1026,7 @@ public enum ATLValueText {
     ///
     /// Strings are quoted, the undefined value is written as `OclUndefined`,
     /// collections are written as collection literals such as `Sequence{1, 2}`,
+    /// tuples as Eclipse ATL writes them, such as `Tuple {name = 'a', size = 3}`,
     /// and model elements by their class followed by their quoted name, if they
     /// have one.
     ///
@@ -1235,8 +1241,9 @@ enum ATLReflectiveOperations {
     ///
     /// Strings are quoted, the undefined value is written as `OclUndefined`,
     /// collections are written as collection literals such as `Sequence{1, 2}`,
-    /// and model elements by their class followed by their quoted name, if they
-    /// have one.
+    /// tuples as Eclipse ATL writes them, such as `Tuple {name = 'a', size = 3}`, with
+    /// their parts in the order in which they were written, and model elements by their
+    /// class followed by their quoted name, if they have one.
     ///
     /// - Parameter value: The value to render, or `nil` for the undefined value.
     /// - Returns: The text that represents the value.
@@ -1245,6 +1252,10 @@ enum ATLReflectiveOperations {
         if let kind = ATLCollections.kind(of: value) {
             let elements = ATLCollections.elements(of: value).map { render($0) }
             return "\(kind.rawValue){\(elements.joined(separator: ", "))}"
+        }
+        if let tuple = value as? ATLTupleValue {
+            let parts = tuple.parts.map { "\($0.name) = \(render($0.value))" }
+            return "\(ATLLanguage.tupleLiteral) {\(parts.joined(separator: ", "))}"
         }
         switch value {
         case nil:

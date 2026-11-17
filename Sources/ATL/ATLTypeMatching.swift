@@ -15,7 +15,8 @@ import Foundation
 /// and as arguments of `oclIsKindOf`, `oclIsTypeOf` and `oclAsType`. A type name
 /// may be qualified with a metamodel name (`MM!Class`) and may carry type
 /// arguments (`Sequence(Integer)`); only the unqualified base name takes part
-/// in matching.
+/// in matching. A tuple conforms to `TupleType(...)`, whatever its parts, and to `Tuple`,
+/// the name of its type.
 enum ATLTypeMatching {
 
     /// The distance assigned to the top type `OclAny`, which is less specific than any other match.
@@ -95,6 +96,7 @@ enum ATLTypeMatching {
         case is Bool: return ATLLanguage.PrimitiveType.boolean.rawValue
         case let collection? where ATLCollections.isCollection(collection):
             return ATLCollections.kind(of: collection)?.rawValue ?? ATLLanguage.SpecialType.collection
+        case is ATLTupleValue: return ATLLanguage.tupleLiteral
         case let object as any EObject: return (object.eClass as? EClass)?.name ?? ATLLanguage.SpecialType.any
         default: return ATLLanguage.SpecialType.any
         }
@@ -135,6 +137,8 @@ enum ATLTypeMatching {
             return name == Primitive.real.rawValue ? 1 : nil
         case is Double:
             return name == Primitive.real.rawValue ? 0 : nil
+        case is ATLTupleValue:
+            return name == ATLLanguage.tupleLiteral || name == ATLLanguage.SpecialType.tuple ? 0 : nil
         default:
             guard let kind = ATLCollections.kind(of: value) else { return nil }
             if name == kind.rawValue { return 0 }

@@ -17,7 +17,11 @@ This package provides the ATL library. The `swift-atl` command-line tool is part
 - **Eclipse ATL compatible**: parses and runs Eclipse ATL transformations, and reads and
   writes ATL modules in the Eclipse ATL XMI format
 - **Complete rule language**: matched, lazy, unique lazy and called rules, rule
-  inheritance, entrypoint and endpoint rules, and imperative `do` blocks
+  inheritance, entrypoint and endpoint rules, and imperative `do` blocks; as in Eclipse
+  ATL, two matched rules that match the same source element, or bind the same source
+  elements to the same variables, are reported as an error, unless both extend the same
+  rule: then the first in Eclipse ATL's order applies, with a warning, or with an error
+  when `ATLOptions.siblingRuleConflicts` is `.error`
 - **OCL expressions**: navigation, collections and iterators, `let`, tuples, three-valued
   logic and a broad library of built-in and reflective operations
 - **Refining mode**: in-place transformations that keep unmatched elements, including
@@ -99,7 +103,13 @@ try await XMISerializer().serialize(target, to: URL(fileURLWithPath: "Persons.xm
 ```
 
 `ATLOptions.standard` selects the current behaviour; `ATLOptions.legacy` keeps that of
-swift-atl 0.6.
+swift-atl 0.6. Both report rules that extend the same rule and match the same element
+with a warning; set `siblingRuleConflicts` to `.error` to stop the run instead:
+
+```swift
+var options = ATLOptions.standard
+options.siblingRuleConflicts = .error
+```
 
 ## Documentation
 

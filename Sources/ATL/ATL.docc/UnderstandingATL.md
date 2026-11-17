@@ -119,6 +119,102 @@ The rule engine:
 2. Creates a `DB!Table` for each one
 3. Sets the `name` attribute from the source
 
+A source element, or a tuple of source elements matched by a rule with several source
+pattern elements, is transformed by at most one matched rule, because references to it
+resolve to the target elements of that rule. As in Eclipse ATL, two matched rules that
+make the same match stop the run with an ``ATLExecutionError/invalidOperation(_:)`` that
+names both rules and the elements, before any rule creates a target element:
+
+- Two rules with one source pattern element make the same match when they match the same
+  element, whatever their variables are called.
+- Two rules with several source pattern elements make the same match when they bind the
+  same elements to the same variables, in whatever order they declare the variables. Rules
+  that bind the same elements to different variables do not conflict, even when they
+  declare them in the same order, and the error names each element with its variable.
+- A rule with one source pattern element and a rule with several never make the same
+  match, even when they share an element.
+
+```atl
+rule Assignment {
+    from t : Plan!Task, p : Plan!Person (t.owner = p)
+    to a : Report!Assignment
+}
+-- Conflicts with Assignment: it binds the same elements to t and p
+rule Responsibility {
+    from p : Plan!Person, t : Plan!Task (t.owner = p)
+    to r : Report!Responsibility
+}
+```
+
+A rule and a rule that extends it transform a match they both make once, through the
+extending rule, and two rules that extend the same rule are applied one at a time, as
+Rule Inheritance below describes. Rules whose guards select different elements, or that
+match an element together with different other elements, do not conflict. This holds
+under both ``ATLOptions/standard`` and ``ATLOptions/legacy``, in refining mode and in
+incremental updates.
+
+### Rule Inheritance
+
+A matched rule can extend another with `extends`. It inherits the target patterns and
+bindings of the rule it extends, redeclares target patterns of the same name to change
+their type or override bindings, and adds its own guard, which applies together with the
+guards of the rules it extends. An `abstract` rule matches nothing on its own.
+
+```atl
+abstract rule Member2Person {
+    from s : Families!Member
+    to t : Persons!Person (fullName <- s.firstName + ' ' + s.familyName)
+}
+rule Member2Female extends Member2Person {
+    from s : Families!Member (s.isFemale())
+    to t : Persons!Female
+}
+rule Member2Male extends Member2Person {
+    from s : Families!Member (not s.isFemale())
+    to t : Persons!Male
+}
+```
+
+A rule that extends another declares the same source pattern variables, as in Eclipse
+ATL, and each of its variables stands for the variable of the same name of the rule it
+extends, in whatever order the two rules declare them; each rule sees the matched
+elements under its own variable names. The type of each variable must be the type of the
+variable it stands for or a subtype of it. A rule that declares fewer or more source
+pattern elements than the rule it extends stops the run with an
+``ATLExecutionError/invalidOperation(_:)``, and a variable whose type does not conform
+with an ``ATLExecutionError/typeError(_:)``; both name the two rules and the variable.
+
+When several rules that extend the same rule match an element, or bind the same tuple of
+elements to the same variables, the element is transformed as in Eclipse ATL by the first
+of them that matches: the rules with a guard are tried before the rules without one, each
+in declaration order, and the rules that extend the chosen rule are tried in turn in the
+same way. The run then reports a warning that names the element, the rule they extend and
+the rules that match, and says which of them is applied. The warning is written to
+standard error and recorded in ``ATLExecutionStatistics/warnings``. Had `Member2Male`
+no guard, a female member would match both rules and be transformed by `Member2Female`,
+with a warning. With ``ATLSiblingRuleConflicts/error`` for
+``ATLOptions/siblingRuleConflicts``, such rules instead stop the run with the
+``ATLExecutionError/invalidOperation(_:)`` that two unrelated rules matching the same
+element give; both presets report a warning.
+
+```swift
+var options = ATLOptions.standard
+options.siblingRuleConflicts = .error
+let machine = ATLVirtualMachine(module: module, options: options)
+```
+
+Rule inheritance differs from Eclipse ATL in three respects:
+
+- A rule may extend a rule whose variables have other names, provided it declares as many;
+  the variables whose names the two rules do not share stand for each other in
+  declaration order. Eclipse ATL requires the same names.
+- A rule that extends another always takes precedence over it for an element they both
+  match. Eclipse ATL tries a rule that has a guard and is not abstract before the rules
+  extending it that have none, so such rules never transform an element there.
+- When an abstract rule that extends another matches an element but none of the rules
+  extending it do, the next rule in order is tried. Eclipse ATL leaves such an element
+  untransformed.
+
 ### Called Rules
 
 Called rules are invoked explicitly using `thisModule.ruleName(args)`. They're
@@ -241,6 +337,25 @@ rule Class2Table {
 pk <- thisModule.resolveTemp(someClass, 'pk')
 ```
 
+A rule with several source pattern elements is identified by a tuple that binds each of
+its source pattern variables to an element, as in Eclipse ATL:
+
+```atl
+rule Assignment {
+    from t : Plan!Task, p : Plan!Person (t.owner = p)
+    to a : Report!Assignment, n : Report!Note
+}
+
+note <- thisModule.resolveTemp(Tuple{t = task, p = person}, 'n')
+assignment <- Tuple{p = person, t = task}   -- the default target element, a
+```
+
+The parts of the tuple are matched to the variables by name, in any order, and a tuple
+that identifies no match is an error. A Sequence of the elements, listed in the order in
+which the rule declares its source pattern elements, is also accepted by `resolveTemp`;
+when several rules bind the same elements in that order to different variables, it finds
+the first of them that has a target pattern of that name.
+
 ## Helpers
 
 Helpers are reusable operations that can be:
@@ -320,6 +435,26 @@ values and in collections become the target elements they were transformed into,
 elements of the same target model are stored by identifier, other elements are
 stored as cross-resource proxies, and enumeration-typed attributes accept only
 the literals the enumeration declares.
+
+A containment reference holds only elements of target models. A source element that no
+matched rule transforms is therefore left out of the value assigned to a containment
+reference, as Eclipse ATL leaves it out, and the run reports a warning that names the
+element, the reference and its class. The warning is written to standard error, as
+`debug` writes its text, and recorded in ``ATLExecutionStatistics/warnings``. A
+non-containment reference keeps such an element as a reference into its source model.
+Such a reference into a source model in another resource set is written as EMF writes
+it: the only root of a model as `/` and the elements below it as `//@tasks.0`, and root
+`n` of a model with several roots as `/n` and the elements below it as `/n/@tasks.0`.
+
+An attribute typed by a primitive Ecore type accepts only values of that type, as the
+Eclipse Modeling Framework does: an Integer for `EInt`, `ELong`, `EShort`, `EByte` and
+`EBigInteger`, a Real or an Integer for `EDouble`, `EFloat` and `EBigDecimal`, a Boolean
+for `EBoolean` and a String for `EString`, together with their object types. Any other
+value stops the run with a ``ATLExecutionError/typeError(_:)`` that names the attribute,
+its class, its type and the type of the value. Because `/` gives a Real, the quotient
+`(done * 100) / total` cannot be bound to an `EInt` attribute, even when it happens to be
+integral; `(done * 100) div total` or `((done * 100) / total).round()` gives an Integer.
+Integers bound to `EDouble` and `EFloat` attributes become Reals.
 
 Because every matched rule creates its target elements before any binding is applied,
 the order of the rules never matters for references. Abstract rules, rule inheritance
@@ -410,6 +545,14 @@ if cond then x else y endif       -- Conditionals
   be Integers. A range whose first value exceeds its last is empty, and sets keep each
   integer once. Eclipse ATL does not accept ranges; see the Compatibility section of
   <doc:ATL>.
+- `Tuple{name = 'a', size = 3}` creates a tuple, whose parts are read by name, as in
+  `t.name`, and may be undefined. A part may carry a type, as in `Tuple{name : String =
+  'a'}`. Tuples are equal when they have parts of the same names with equal values, in any
+  order. They can be held in collections, bound to variables, and passed to and returned
+  from helpers, whose parameters and contexts declare them as `TupleType(name : String,
+  size : Integer)`. Their type is `Tuple`, and `toString()`, `debug` and query results write
+  them as Eclipse ATL does, with the parts in the order in which they were written:
+  `Tuple {name = 'a', size = 3}`. Reading a part that a tuple does not have is an error.
 - `implies`, `xor`, `div` and `mod` are infix operators with OCL precedence: `implies`
   binds weakest, then `or` and `xor`, then `and`. Logical operators use three-valued
   logic with `OclUndefined`.
@@ -428,8 +571,15 @@ of one element.
   `subSequence`, `subOrderedSet`, `including`, `includingAll`, `includingRange`,
   `excluding`, `excludingAll`, `union`, `intersection`, `symmetricDifference`,
   `indexOf`, `lastIndexOf`, `includesAll`, `excludesAll`, `isUnique`, `one`, `exists`
-  and `forAll` (with several iterator variables), `sortedBy`, `flatten`, `reverse`,
-  `max`, `min`, and the conversions `asSet`, `asOrderedSet`, `asSequence` and `asBag`.
+  and `forAll` (with several iterator variables), `sortedBy`, `collect`, `collectNested`,
+  `flatten`, `reverse`, `max`, `min`, and the conversions `asSet`, `asOrderedSet`,
+  `asSequence` and `asBag`. `collect` flattens the collections that its body yields by one
+  level, whereas `collectNested` keeps them, so `Sequence{1, 2}->collectNested(x |
+  Sequence{x, x})` is `Sequence{Sequence{1, 1}, Sequence{2, 2}}`; both give a Bag for a Set
+  or a Bag and a Sequence otherwise. An iterator operation that does not exist is reported
+  as unknown. `toString()` writes a collection as a collection literal, such as
+  `Sequence{30, 10}`, as `debug` and query results write it, and a tuple as
+  `Tuple {a = 1}`.
   `at` applies to Sequences and OrderedSets only and is an error on a Set or a Bag.
   `asSet()` and `asOrderedSet()` give a Set and an OrderedSet for every receiver, except
   that with ``ATLBagRepresentation/sequence`` `asSet()` on a Sequence gives a Sequence

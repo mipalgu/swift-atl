@@ -314,7 +314,9 @@ public final class ATLExecutionContext: Sendable {
     /// applies to the collection itself, such as `Sequence(T)`, `Set(T)` or
     /// `Collection(T)`, choosing the most specific one. Only when no helper applies
     /// to the collection is the property navigated from each element and the
-    /// results collected, into the collection kind that `collect` gives.
+    /// results collected, into the collection kind that `collect` gives. A tuple
+    /// receiver gives the value of its part of that name, or else the value of an
+    /// attribute helper declared for tuples.
     ///
     /// - Parameters:
     ///   - object: Source object
@@ -333,12 +335,20 @@ public final class ATLExecutionContext: Sendable {
             return try await navigateCollection(object, property: property)
         }
 
+        if let tuple = object as? ATLTupleValue, tuple.hasPart(property) {
+            return tuple[property]
+        }
+
         guard var eObject = object as? (any EObject) else {
             // Attribute helpers can be declared for primitive types too
             if let object, let helper = bestContextHelper(
                 named: property, receiver: object, argumentCount: 0, includingOclAny: true)
             {
                 return try await invokeContextHelper(helper, receiver: object, arguments: [])
+            }
+            if let tuple = object as? ATLTupleValue {
+                throw ATLExecutionError.invalidOperation(
+                    ATLExecutionMessage.missingTuplePart(property, tuple: ATLValueText.render(tuple)))
             }
             let objectType = object != nil ? String(reflecting: type(of: object!)) : "nil"
             throw ATLExecutionError.typeError("Source is not an EObject of type: \(objectType)")
@@ -528,16 +538,35 @@ public final class ATLExecutionContext: Sendable {
     ///
     /// `resolveTemp(source, 'name')` returns the target element that the rule
     /// transforming `source` created for the target pattern called `name`.
+    /// When `source` is a tuple, as in `resolveTemp(Tuple{s = task, p = project}, 'name')`,
+    /// it identifies the match of a matched rule with several source elements that binds
+    /// each part to the source pattern variable of the same name, as in Eclipse ATL.
     /// When `source` is a collection, it identifies a rule with several source
-    /// elements by their tuple. Without a name, the default (first) target
+    /// elements by their tuple, listed in the order in which the rule declares its
+    /// source pattern elements. When several rules match the same elements in that
+    /// order, binding them to different variables, the rule declared first that has a
+    /// target pattern called `name` is used. Without a name, the default (first) target
     /// element is returned. Lazy rule results are found as well as matched rule
     /// results.
     ///
     /// - Parameter arguments: The evaluated ATL arguments: the source object (or a
-    ///   collection of source objects) followed by the optional target pattern name.
+    ///   tuple or collection of source objects) followed by the optional target pattern name.
     /// - Returns: The resolved target object.
     /// - Throws: `ATLExecutionError` if the arguments are invalid or no traced target can be found.
     private func resolveTemp(_ arguments: [(any EcoreValue)?]) async throws -> (any EcoreValue)? {
+        let patternName = arguments.count > 1 ? arguments[1] as? String : nil
+        if let tuple = arguments.first.flatMap({ $0 }) as? ATLTupleValue {
+            guard let link = matchedLink(binding: tuple) else {
+                throw ATLExecutionError.runtimeError(
+                    ATLExecutionMessage.unresolvedTemporaryTuple(ATLValueText.render(tuple)))
+            }
+            let targetID = patternName.map { link.targetID(named: $0) } ?? link.targetElements.first
+            if let targetID, let targetObject = await findTargetObject(targetID) {
+                return targetObject
+            }
+            throw ATLExecutionError.runtimeError(
+                "resolveTemp() could not find target element '\(patternName ?? "")' for \(ATLValueText.render(tuple))")
+        }
         let sourceIDs: [EUUID]
         if let sourceObject = arguments.first as? (any EObject) {
             sourceIDs = [sourceObject.id]
@@ -550,7 +579,6 @@ public final class ATLExecutionContext: Sendable {
             throw ATLExecutionError.typeError(
                 "resolveTemp() requires a source EObject as its first argument")
         }
-        let patternName = arguments.count > 1 ? arguments[1] as? String : nil
 
         if dependencyRecorder.isRecording {
             for id in sourceIDs { dependencyRecorder.recordFeature(ATLReservedNames.traceDependency, of: id) }
@@ -612,18 +640,25 @@ public final class ATLExecutionContext: Sendable {
     /// form stored in the target model: a source element transformed by a
     /// matched rule is replaced by that rule's default target element, an
     /// element of the same target model is stored by identifier, and any other
-    /// element is stored as a cross-resource proxy. See ``ATLReferenceStorage``.
-    /// Collection values are unwrapped, so their elements are resolved the same way,
-    /// and enumeration and numeric attribute values are validated and converted
-    /// by ``ATLValueConversion``.
+    /// element is stored as a cross-resource proxy. A source element that no
+    /// matched rule transforms is left out of a containment reference, because a
+    /// target element cannot contain it, and the run reports a warning for it.
+    /// See ``ATLReferenceStorage``. A tuple of source elements is replaced by the
+    /// default target element of the match of a rule with several source elements that
+    /// binds each part to the variable of the same name. Collection values are unwrapped,
+    /// so their elements are resolved the same way, and the values of attributes are
+    /// checked against the types of the attributes and converted by ``ATLValueConversion``.
     ///
     /// - Parameters:
     ///   - element: The target element to modify
     ///   - name: The name of the feature to set
     ///   - value: The evaluated value to assign
     /// - Throws: ``ATLExecutionError`` if the element is not part of a target model,
-    ///   has no feature of that name, or the value is not valid for the feature (such as
-    ///   an unknown enumeration literal)
+    ///   has no feature of that name, or the value is not valid for the feature, such as
+    ///   an unknown enumeration literal (``ATLExecutionError/invalidEnumerationLiteral(_:)``),
+    ///   a value of another type than the primitive Ecore type of an attribute, such as a
+    ///   Real for an `EInt` attribute, or a tuple bound to a reference that identifies no
+    ///   match (``ATLExecutionError/typeError(_:)``)
     public func assignFeature(on element: any EObject, feature name: String, value: (any EcoreValue)?)
         async throws
     {
@@ -648,9 +683,9 @@ public final class ATLExecutionContext: Sendable {
             )
         }
 
-        let prepared = try ATLValueConversion.prepare(value, for: feature)
-        let stored = await ATLReferenceStorage.storedValue(
-            for: prepared, feature: feature, in: resource, context: self)
+        let prepared = try ATLValueConversion.prepare(value, for: feature, in: eClass.name)
+        let stored = try await ATLReferenceStorage.storedValue(
+            for: prepared, feature: feature, of: eClass, in: resource, context: self)
         guard await resource.eSet(objectId: element.id, feature: name, value: stored) else {
             throw ATLExecutionError.runtimeError(
                 "Could not set property '\(name)' of class '\(eClass.name)'")
@@ -658,6 +693,29 @@ public final class ATLExecutionContext: Sendable {
         if debug {
             print("[ATL DEBUG] Updated property '\(name)' = '\(String(describing: value))'")
         }
+    }
+
+    /// Whether an element belongs to a source model.
+    ///
+    /// - Parameter id: The identifier of the element.
+    /// - Returns: `true` if a source model holds the element.
+    func isSourceElement(_ id: EUUID) async -> Bool {
+        for resource in sources.values where await resource.contains(id: id) {
+            return true
+        }
+        return false
+    }
+
+    /// Reports a warning about the run in progress.
+    ///
+    /// The warning is written to the error destination of the console, as `debug`
+    /// writes its text, and recorded in the warnings of the statistics of the virtual
+    /// machine running the transformation.
+    ///
+    /// - Parameter message: The warning.
+    func reportWarning(_ message: String) {
+        console.writeError(ATLExecutionMessage.warningPrefix + message)
+        virtualMachine?.recordWarning(message)
     }
 
     /// Finds the target model that holds an element.
@@ -815,6 +873,30 @@ public final class ATLExecutionContext: Sendable {
             .first(where: { $0.kind == .matched && $0.additionalSourceElements.isEmpty })?
             .targetElements.first
             ?? refiningCopies[sourceElement]
+    }
+
+    /// The trace link of the matched rule match that a tuple identifies.
+    ///
+    /// A tuple whose parts are source elements identifies the match of a matched rule with
+    /// several source pattern elements that binds each part to the variable of the same
+    /// name, as in Eclipse ATL. While dependencies are recorded, the trace of each element
+    /// of the tuple counts as read.
+    ///
+    /// - Parameter tuple: The tuple.
+    /// - Returns: The link, or `nil` when no matched rule made such a match.
+    func matchedLink(binding tuple: ATLTupleValue) -> ATLTraceLink? {
+        let elements = tuple.parts.compactMap { $0.value as? any EObject }
+        if dependencyRecorder.isRecording {
+            for element in elements { dependencyRecorder.recordFeature(ATLReservedNames.traceDependency, of: element.id) }
+        }
+        guard elements.count == tuple.parts.count else { return nil }
+        // Links are indexed by their first source element, which may be any part
+        for element in elements {
+            if let link = getTraceLinks(for: element.id).first(where: { $0.kind == .matched && $0.binds(tuple) }) {
+                return link
+            }
+        }
+        return nil
     }
 
     /// Records the copies that refining mode made of the source elements.
@@ -1148,6 +1230,13 @@ public struct ATLTraceLink: Sendable, Equatable, Hashable {
     /// The kind of rule that created the link.
     public let kind: Kind
 
+    /// The names of the source pattern variables that ``allSourceElements`` are bound to,
+    /// in the same order.
+    ///
+    /// For a rule that extends another, these are the names of the variables of the rule
+    /// at the root of its hierarchy. Empty when the link was recorded without variable names.
+    public let sourceNames: [String]
+
     /// Creates a new trace link.
     ///
     /// - Parameters:
@@ -1157,13 +1246,16 @@ public struct ATLTraceLink: Sendable, Equatable, Hashable {
     ///   - additionalSourceElements: Source element IDs after the first
     ///   - targetNames: The target pattern names, parallel to `targetElements`
     ///   - kind: The kind of rule that created the link
+    ///   - sourceNames: The names of the source pattern variables, parallel to the source
+    ///     element IDs
     public init(
         ruleName: String,
         sourceElement: EUUID,
         targetElements: [EUUID],
         additionalSourceElements: [EUUID] = [],
         targetNames: [String] = [],
-        kind: Kind = .matched
+        kind: Kind = .matched,
+        sourceNames: [String] = []
     ) {
         self.ruleName = ruleName
         self.sourceElement = sourceElement
@@ -1171,11 +1263,27 @@ public struct ATLTraceLink: Sendable, Equatable, Hashable {
         self.targetElements = targetElements
         self.targetNames = targetNames
         self.kind = kind
+        self.sourceNames = sourceNames
     }
 
     /// All source element identifiers in pattern order.
     public var allSourceElements: [EUUID] {
         [sourceElement] + additionalSourceElements
+    }
+
+    /// Whether the link records a match of several source elements bound to variables as
+    /// a tuple binds its parts.
+    ///
+    /// - Parameter tuple: A tuple whose parts are model elements.
+    /// - Returns: `true` when the link has more than one source element and binds each
+    ///   to the variable that names the part of `tuple` holding it, and no others.
+    public func binds(_ tuple: ATLTupleValue) -> Bool {
+        let elements = allSourceElements
+        guard elements.count > 1, sourceNames.count == elements.count, tuple.names.count == elements.count
+        else { return false }
+        return zip(sourceNames, elements).allSatisfy { name, id in
+            (tuple[name] as? any EObject)?.id == id
+        }
     }
 
     /// The identifier of the target element created for a named target pattern.
