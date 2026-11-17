@@ -144,6 +144,10 @@ enum ATLLanguage {
     /// The name of the pseudo-variable that gives access to module-level members.
     static let thisModule = "thisModule"
 
+    /// The word that introduces a tuple literal, as in `Tuple{name = 'a'}`, which is also
+    /// the name of the type of a tuple value.
+    static let tupleLiteral = "Tuple"
+
     /// The name of the feature that names a model element.
     static let namePropertyName = "name"
 

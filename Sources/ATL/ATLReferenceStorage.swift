@@ -74,33 +74,58 @@ enum ATLReservedNames {
 /// that no matched rule transforms is left out of it, with a warning.
 enum ATLReferenceStorage {
 
-    /// Computes the XPath-style fragment locating an element in its resource.
+    /// Computes the XPath-style fragment locating an element in its resource, as the
+    /// Eclipse Modeling Framework writes it.
     ///
-    /// The first root element is addressed as `/`. Other elements are
-    /// addressed by their containment path, for example `//@members.0/@name`.
-    /// Elements of Ecore models, whether native or dynamic, are addressed by
-    /// the names along their containment path, as EMF does, for example
-    /// `//Book/title`. An element that cannot be located is addressed by its
-    /// identifier.
+    /// The only root element of a resource is addressed as `/` and the other elements by
+    /// their containment path below it, for example `//@members.0/@name`. Root `n` of a
+    /// resource with several roots is addressed as `/n`, and the elements it contains by
+    /// their path below it, for example `/1/@members.0`. Elements of Ecore models, whether
+    /// native or dynamic, are addressed by the names along their containment path, as EMF
+    /// does, for example `//Book/title`, or `/1/Book` below root `1` of a resource with
+    /// several roots. An element that cannot be located is addressed by its identifier.
     ///
     /// - Parameters:
     ///   - object: The element to locate
     ///   - resource: The resource containing the element
     /// - Returns: The fragment, without a leading `#`
     static func fragment(for object: any EObject, in resource: Resource) async -> String {
-        if let named = await FragmentNavigator(resource: resource).fragment(for: object.id) {
-            return named
-        }
         let roots = await resource.getRootObjects()
-        if let first = roots.first, first.id == object.id {
-            return "/"
+        if let position = roots.firstIndex(where: { $0.id == object.id }) {
+            return PositionalFragments.rootSegment(position, rootCount: roots.count)
         }
-        for root in roots {
-            if let path = await path(to: object.id, from: root, prefix: "//", in: resource) {
-                return path
-            }
+        let navigator = FragmentNavigator(resource: resource)
+        if let named = await navigator.fragment(for: object.id) {
+            return await rootedFragment(named, of: object, among: roots, navigator: navigator)
         }
-        return object.id.uuidString
+        return await PositionalFragments.fragment(for: object.id, in: resource) ?? object.id.uuidString
+    }
+
+    /// Places a name-based fragment below the root that contains an element.
+    ///
+    /// In a resource with several roots, the path `//Book` names the first element called
+    /// `Book` below any root, whereas EMF writes the path below the root that contains the
+    /// element, such as `/1/Book`.
+    ///
+    /// - Parameters:
+    ///   - named: The name-based fragment of the element, starting with `//`.
+    ///   - object: The element.
+    ///   - roots: The roots of the resource.
+    ///   - navigator: The navigator of the resource.
+    /// - Returns: The fragment below the root that contains the element, or `named` for a
+    ///   resource with one root or when no root is found.
+    private static func rootedFragment(
+        _ named: String, of object: any EObject, among roots: [any EObject], navigator: FragmentNavigator
+    ) async -> String {
+        let prefix = CrossReferenceSyntax.fragmentPathPrefix
+        guard roots.count > 1, named.hasPrefix(prefix) else { return named }
+        let path = named.dropFirst(prefix.count)
+        for position in roots.indices {
+            let candidate = PositionalFragments.rootSegment(position, rootCount: roots.count)
+                + String(CrossReferenceSyntax.segmentSeparator) + path
+            if await navigator.resolve(candidate)?.id == object.id { return candidate }
+        }
+        return named
     }
 
     /// Converts a value assigned to a feature into its stored form.
@@ -110,7 +135,10 @@ enum ATLReferenceStorage {
     /// A source element that no matched rule transforms is left out of the value of
     /// a containment reference, as Eclipse ATL leaves it out, because an element of
     /// a target model cannot contain an element of a source model; the run reports a
-    /// warning naming the element, the reference and the class.
+    /// warning naming the element, the reference and the class. A tuple of source
+    /// elements is replaced by the default target element of the match of a rule with
+    /// several source elements that binds each part of the tuple to the variable of the
+    /// same name, as in Eclipse ATL.
     ///
     /// - Parameters:
     ///   - value: The evaluated value
@@ -119,6 +147,8 @@ enum ATLReferenceStorage {
     ///   - resource: The target resource owning the element being assigned
     ///   - context: The execution context holding the sources, targets and trace
     /// - Returns: The value to store
+    /// - Throws: ``ATLExecutionError/typeError(_:)`` when a tuple bound to the reference
+    ///   identifies no such match.
     @MainActor
     static func storedValue(
         for value: (any EcoreValue)?,
@@ -126,7 +156,7 @@ enum ATLReferenceStorage {
         of owner: EClass,
         in resource: Resource,
         context: ATLExecutionContext
-    ) async -> (any EcoreValue)? {
+    ) async throws -> (any EcoreValue)? {
         guard let reference = feature as? EReference else {
             return value
         }
@@ -134,7 +164,16 @@ enum ATLReferenceStorage {
 
         var references: [any EcoreValue] = []
         for element in ATLCollectionValues.elements(of: value) {
-            if let object = element as? (any EObject) {
+            if let tuple = element as? ATLTupleValue {
+                guard let targetID = context.matchedLink(binding: tuple)?.targetElements.first,
+                    let target = await context.findTargetObject(targetID)
+                else {
+                    throw ATLExecutionError.typeError(
+                        ATLExecutionMessage.unresolvedTuple(
+                            ATLValueText.render(tuple), reference: reference.name, className: owner.name))
+                }
+                references.append(await referenceValue(for: target, in: resource, context: context))
+            } else if let object = element as? (any EObject) {
                 if reference.containment, await isUntransformedSourceElement(object, context: context) {
                     context.reportWarning(
                         ATLExecutionMessage.untransformedContainedElement(
@@ -233,49 +272,5 @@ enum ATLReferenceStorage {
             result.append(value)
         }
         return result
-    }
-
-    /// Finds the containment path from an element to a descendant.
-    ///
-    /// - Parameters:
-    ///   - target: The identifier of the element to find
-    ///   - current: The element whose containments are searched
-    ///   - prefix: The path accumulated so far
-    ///   - resource: The resource containing the elements
-    /// - Returns: The path, or `nil` if the element is not contained below `current`
-    private static func path(
-        to target: EUUID, from current: any EObject, prefix: String, in resource: Resource
-    ) async -> String? {
-        guard let eClass = current.eClass as? EClass else { return nil }
-        for featureName in await resource.getFeatureNames(objectId: current.id) {
-            guard let reference = eClass.getStructuralFeature(name: featureName) as? EReference,
-                reference.containment,
-                let value = await resource.eGet(objectId: current.id, feature: featureName)
-            else { continue }
-            let children: [EUUID]
-            let indexed: Bool
-            if let identifier = value as? EUUID {
-                children = [identifier]
-                indexed = false
-            } else if let identifiers = value as? [EUUID] {
-                children = identifiers
-                indexed = true
-            } else {
-                continue
-            }
-            for (index, child) in children.enumerated() {
-                let step = indexed ? "@\(featureName).\(index)" : "@\(featureName)"
-                if child == target {
-                    return prefix + step
-                }
-                if let childObject = await resource.resolve(child),
-                    let found = await path(
-                        to: target, from: childObject, prefix: prefix + step + "/", in: resource)
-                {
-                    return found
-                }
-            }
-        }
-        return nil
     }
 }

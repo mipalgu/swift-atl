@@ -182,7 +182,8 @@ enum ATLValues {
     /// reals compare numerically, and collections compare element-wise. Order is
     /// disregarded when either collection is a bag, or when both are unique and
     /// either is a set: such collections are equal when they hold each element
-    /// equally often.
+    /// equally often. Tuples are equal when they have parts of the same names whose
+    /// values are equal.
     ///
     /// - Parameters:
     ///   - lhs: The first value.
@@ -204,6 +205,12 @@ enum ATLValues {
             return l.id == r.id
         }
         if left is any EObject || right is any EObject {
+            return false
+        }
+        if let l = left as? ATLTupleValue, let r = right as? ATLTupleValue {
+            return l.hasSameParts(as: r)
+        }
+        if left is ATLTupleValue || right is ATLTupleValue {
             return false
         }
         if ATLCollections.isCollection(left) && ATLCollections.isCollection(right) {

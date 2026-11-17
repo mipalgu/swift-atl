@@ -1026,6 +1026,7 @@ public enum ATLValueText {
     ///
     /// Strings are quoted, the undefined value is written as `OclUndefined`,
     /// collections are written as collection literals such as `Sequence{1, 2}`,
+    /// tuples as Eclipse ATL writes them, such as `Tuple {name = 'a', size = 3}`,
     /// and model elements by their class followed by their quoted name, if they
     /// have one.
     ///
@@ -1240,8 +1241,9 @@ enum ATLReflectiveOperations {
     ///
     /// Strings are quoted, the undefined value is written as `OclUndefined`,
     /// collections are written as collection literals such as `Sequence{1, 2}`,
-    /// and model elements by their class followed by their quoted name, if they
-    /// have one.
+    /// tuples as Eclipse ATL writes them, such as `Tuple {name = 'a', size = 3}`, with
+    /// their parts in the order in which they were written, and model elements by their
+    /// class followed by their quoted name, if they have one.
     ///
     /// - Parameter value: The value to render, or `nil` for the undefined value.
     /// - Returns: The text that represents the value.
@@ -1250,6 +1252,10 @@ enum ATLReflectiveOperations {
         if let kind = ATLCollections.kind(of: value) {
             let elements = ATLCollections.elements(of: value).map { render($0) }
             return "\(kind.rawValue){\(elements.joined(separator: ", "))}"
+        }
+        if let tuple = value as? ATLTupleValue {
+            let parts = tuple.parts.map { "\($0.name) = \(render($0.value))" }
+            return "\(ATLLanguage.tupleLiteral) {\(parts.joined(separator: ", "))}"
         }
         switch value {
         case nil:

@@ -115,19 +115,48 @@ public enum ATLBagRepresentation: String, Sendable, CaseIterable, Hashable {
     }
 }
 
+/// What a source element that two sub-rules of the same rule both match gives.
+///
+/// Two rules that extend the same rule, directly or through other rules, can both match
+/// a source element, or the same tuple of source elements. Eclipse ATL then applies only
+/// the first of them that matches, trying the sub-rules of a rule that have a guard
+/// before those that have none, each in declaration order, and descending into the
+/// sub-rules of the one it applies. The raw value of each case is its spelling on a
+/// command line.
+public enum ATLSiblingRuleConflicts: String, Sendable, CaseIterable, Hashable {
+    /// The first matching sub-rule transforms the element, as in Eclipse ATL, and the run
+    /// reports a warning.
+    ///
+    /// The warning names the element, the sub-rules that match it and the rule they extend,
+    /// and says which sub-rule is applied. This is the default.
+    case warning
+
+    /// The run stops with an error naming two of the sub-rules and the element, before any
+    /// rule creates a target element.
+    ///
+    /// The error is ``ATLExecutionError/invalidOperation(_:)``, as for two unrelated rules
+    /// that match the same element.
+    case error
+}
+
 /// Options that choose between the current behaviour of ATL processing and the
 /// behaviour of swift-atl 0.6.
 ///
 /// Each property selects one behaviour. The default options, also available as
 /// ``standard``, give the current behaviour; ``legacy`` gives the behaviour of
 /// swift-atl 0.6. APIs that existed in swift-atl 0.6 and take no options use
-/// ``legacy``.
+/// ``legacy``. Both presets report two sub-rules that match the same element with a
+/// warning; ``siblingRuleConflicts`` makes that an error:
 ///
 /// ```swift
 /// let parser = ATLParser(options: .standard)
 /// let module = try await parser.parse(url)
 /// let xmi = try ATLXMISerializer(options: ATLOptions(collectionRangeEncoding: .portable))
 ///     .serialize(module)
+/// var strict = ATLOptions.standard
+/// strict.siblingRuleConflicts = .error
+/// try await ATLVirtualMachine(module: module, options: strict)
+///     .execute(sources: ["IN": source], targets: ["OUT": target])
 /// ```
 public struct ATLOptions: Sendable, Hashable {
     /// Whether ATL source may write integer ranges in collection literals.
@@ -148,6 +177,14 @@ public struct ATLOptions: Sendable, Hashable {
     /// produce Bags as this selects.
     public var bagRepresentation: ATLBagRepresentation
 
+    /// What a source element that two sub-rules of the same rule both match gives.
+    ///
+    /// The virtual machine and the incremental transformation that are given the options
+    /// apply the first matching sub-rule with a warning, or stop with an error, as this
+    /// selects. Two rules that do not extend the same rule and match the same element are
+    /// an error whatever this selects.
+    public var siblingRuleConflicts: ATLSiblingRuleConflicts
+
     /// Creates a set of options.
     ///
     /// - Parameters:
@@ -155,23 +192,28 @@ public struct ATLOptions: Sendable, Hashable {
     ///   - collectionRangeEncoding: How collection ranges are written to XMI.
     ///   - integerDivision: What the `/` operator yields for two Integer operands.
     ///   - bagRepresentation: What a Bag value is when ATL expressions evaluate.
+    ///   - siblingRuleConflicts: What a source element that two sub-rules of the same rule
+    ///     both match gives.
     public init(
         collectionRangeSyntax: ATLCollectionRangeSyntax = .ocl,
         collectionRangeEncoding: ATLCollectionRangeEncoding = .collectionRange,
         integerDivision: ATLIntegerDivision = .real,
-        bagRepresentation: ATLBagRepresentation = .bag
+        bagRepresentation: ATLBagRepresentation = .bag,
+        siblingRuleConflicts: ATLSiblingRuleConflicts = .warning
     ) {
         self.collectionRangeSyntax = collectionRangeSyntax
         self.collectionRangeEncoding = collectionRangeEncoding
         self.integerDivision = integerDivision
         self.bagRepresentation = bagRepresentation
+        self.siblingRuleConflicts = siblingRuleConflicts
     }
 
     /// The current behaviour, which the default initialiser also gives.
     ///
     /// Collection literals accept OCL integer ranges, ranges are written to XMI
-    /// as OCL collection ranges, `/` divides two Integers into a Real, and Bags are
-    /// a collection kind of their own.
+    /// as OCL collection ranges, `/` divides two Integers into a Real, Bags are
+    /// a collection kind of their own, and the first of two sub-rules that match the
+    /// same element transforms it, with a warning.
     public static let standard = ATLOptions()
 
     /// The behaviour of swift-atl 0.6.
@@ -179,7 +221,9 @@ public struct ATLOptions: Sendable, Hashable {
     /// Collection ranges are rejected as syntax errors, as swift-atl 0.6 rejected them.
     /// Ranges built in code are written to XMI as OCL collection ranges, because
     /// swift-atl 0.6 had no ranges that it could write. `/` truncates the quotient of
-    /// two Integers to an Integer, and Bags are Sequences.
+    /// two Integers to an Integer, and Bags are Sequences. As swift-atl 0.6 did not stop
+    /// a run for two sub-rules that match the same element, the first of them transforms
+    /// it, with a warning, as under ``standard``.
     public static let legacy = ATLOptions(
         collectionRangeSyntax: .eclipse, integerDivision: .truncating, bagRepresentation: .sequence)
 

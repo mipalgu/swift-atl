@@ -111,24 +111,43 @@ struct ATLRuleConflictTests {
         #expect(await run.elements("Summary").count == 2)
     }
 
-    @Test("Two rules extending one rule that both match an element are an error")
-    func siblingRules() async throws {
-        let message = try #require(
-            await conflict(
-                """
-                abstract rule Base {
-                    from s : Project!Task
-                    to t : Report!Summary (title <- s.name)
-                }
-                rule Urgent extends Base {
-                    from s : Project!Task (s.priority > 5)
-                    to t : Report!Summary (rank <- 1)
-                }
-                rule Important extends Base {
-                    from s : Project!Task (s.priority > 7)
-                    to t : Report!Summary (rank <- 2)
-                }
-                """ + projectRule))
+    @Test(
+        "Two rules extending one rule that both match an element apply the first with a warning, or are an error when strict",
+        arguments: [ATLOptions.standard, ATLOptions.legacy])
+    func siblingRules(options: ATLOptions) async throws {
+        let rules =
+            """
+            abstract rule Base {
+                from s : Project!Task
+                to t : Report!Summary (title <- s.name)
+            }
+            rule Urgent extends Base {
+                from s : Project!Task (s.priority > 5)
+                to t : Report!Summary (rank <- 1)
+            }
+            rule Important extends Base {
+                from s : Project!Task (s.priority > 7)
+                to t : Report!Summary (rank <- 2)
+            }
+            """ + projectRule
+        let capture = ConsoleCapture()
+        let run = try await fixture.run(rules, priorities: [8, 3], options: options, capture: capture)
+        let summaries = await run.elements("Summary")
+        #expect(summaries.count == 1)
+        #expect(summaries.first?.eGet("title") as? String == "t1")
+        #expect(summaries.first?.eGet("rank") as? Int == 1)
+        let warnings = run.machine.getStatistics().warnings
+        #expect(warnings.count == 1)
+        let warning = try #require(warnings.first)
+        #expect(warning.contains("'Urgent'"))
+        #expect(warning.contains("'Important'"))
+        #expect(warning.contains("Task 't1'"))
+        #expect(warning.contains("only 'Urgent' is applied"))
+        #expect(capture.errors == [ATLExecutionMessage.warningPrefix + warning])
+
+        var strict = options
+        strict.siblingRuleConflicts = .error
+        let message = try #require(await conflict(rules, options: strict))
         #expect(message.contains("'Urgent'"))
         #expect(message.contains("'Important'"))
         #expect(message.contains("Task 't1'"))

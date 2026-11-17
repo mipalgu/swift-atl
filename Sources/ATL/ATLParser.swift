@@ -1765,7 +1765,7 @@ private class ATLSyntaxParser {
             advance()
             return ATLLiteralExpression(value: value, origin: origin(from: start))
 
-        case .identifier(let name) where name == "Tuple":
+        case .identifier(let name) where name == ATLLanguage.tupleLiteral:
             // Parse tuple expression: Tuple{field1 : Type1 = expr1, field2 : Type2 = expr2, ...}
             return try parseTupleExpression()
 

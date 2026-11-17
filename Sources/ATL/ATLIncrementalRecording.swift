@@ -41,6 +41,9 @@ public enum ATLIncrementalHazard {
     /// A change could not be summarised precisely, such as the rebinding of an element to
     /// another class.
     public static let unboundedChange = "a change affects the whole model"
+
+    /// A source element of a match is no longer part of a source model.
+    static let missingSourceElement = "a matched source element is missing"
 }
 
 extension ATLExecutionContext {

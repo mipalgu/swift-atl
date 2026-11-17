@@ -9,7 +9,6 @@ import ECore
 import EMFBase
 import Foundation
 import OCL
-import OrderedCollections
 
 // MARK: - Async Utilities
 
@@ -926,8 +925,8 @@ public struct ATLLetExpression: ATLExpression, Sendable, Equatable, Hashable {
 
 /// Represents an ATL/OCL tuple expression with typed fields.
 ///
-/// Tuple expressions create structured composite values with named fields,
-/// following the OCL syntax:
+/// Tuple expressions create structured composite values with named fields, which
+/// evaluate to an ``ATLTupleValue``, following the OCL syntax:
 /// ```
 /// Tuple{field1 : Type1 = value1, field2 : Type2 = value2, ...}
 /// ```
@@ -965,19 +964,20 @@ public struct ATLTupleExpression: ATLExpression, Sendable, Equatable, Hashable {
         self.origin = origin
     }
 
+    /// Evaluates the fields into a tuple value.
+    ///
+    /// - Parameter context: The execution context.
+    /// - Returns: An ``ATLTupleValue`` with one part per field, in field order; a field
+    ///   whose value is undefined gives an undefined part.
+    /// - Throws: The errors of evaluating a field.
     @MainActor
     public func evaluate(in context: ATLExecutionContext) async throws -> (any EcoreValue)? {
-        var result: OrderedDictionary<String, any EcoreValue> = [:]
-
+        var parts: [(name: String, value: (any EcoreValue)?)] = []
+        parts.reserveCapacity(fields.count)
         for field in fields {
-            let value = try await field.value.evaluate(in: context)
-            if let value = value {
-                result[field.name] = value
-            }
+            parts.append((field.name, try await field.value.evaluate(in: context)))
         }
-
-        // Return as a dictionary-like structure
-        return result as? (any EcoreValue)
+        return ATLTupleValue(parts: parts)
     }
 
     public static func == (lhs: ATLTupleExpression, rhs: ATLTupleExpression) -> Bool {
@@ -1387,8 +1387,9 @@ public struct ATLMethodCallExpression: ATLExpression, Sendable, Equatable, Hasha
 
     /// Handles `toString()`.
     ///
-    /// A collection is written as a collection literal, as ``ATLValueText`` writes it
-    /// for `debug` and query results, and any other value as its text.
+    /// A collection is written as a collection literal and a tuple as ATL writes a tuple,
+    /// as ``ATLValueText`` writes them for `debug` and query results, and any other value
+    /// as its text.
     ///
     /// - Parameter receiverValue: The receiver.
     /// - Returns: The text of the receiver.
@@ -1397,7 +1398,7 @@ public struct ATLMethodCallExpression: ATLExpression, Sendable, Equatable, Hasha
         guard let value = receiverValue else {
             return "null"
         }
-        if ATLCollections.isCollection(value) {
+        if ATLCollections.isCollection(value) || value is ATLTupleValue {
             return ATLValueText.render(value)
         }
         return "\(value)"
@@ -2104,6 +2105,111 @@ enum ATLExecutionMessage {
 
     /// The words for a tuple of source elements that the message does not list.
     static let sameSourceElements = "the same source elements"
+
+    /// Describes sub-rules of one rule that match the same source element, or bind the same
+    /// tuple of source elements to the same variables, and the one of them that is applied.
+    ///
+    /// - Parameters:
+    ///   - elements: The text of the matched source element, as ATL writes it, or the
+    ///     text of ``boundSourceElements(_:)`` for a tuple of source elements.
+    ///   - parent: The name of the rule that the sub-rules extend.
+    ///   - siblings: The names of the sub-rules, in the order in which they are tried.
+    ///   - applied: The name of the sub-rule that is applied.
+    /// - Returns: The message.
+    static func siblingRules(elements: String, parent: String, siblings: [String], applied: String) -> String {
+        let quoted = siblings.map { "'\($0)'" }
+        let names = quoted.count > 1
+            ? quoted.dropLast().joined(separator: ", ") + " and " + (quoted.last ?? "") : quoted.joined()
+        let quantifier = siblings.count > 2 ? "all" : "both"
+        return "Rules \(names), which extend rule '\(parent)', \(quantifier) match \(elements); "
+            + "only '\(applied)' is applied, because sub-rules with a guard are tried before those "
+            + "without one, each in declaration order"
+    }
+
+    /// Describes source pattern variables of a rule that a rule extending it does not declare.
+    ///
+    /// - Parameters:
+    ///   - variables: The names of the variables.
+    ///   - rule: The name of the rule extending the other.
+    ///   - extended: The name of the rule it extends.
+    /// - Returns: The message.
+    static func missingSourceVariables(_ variables: [String], rule: String, extended: String) -> String {
+        "Rule '\(rule)' extends rule '\(extended)' but does not declare its source pattern "
+            + "\(variableList(variables)); a rule must declare the source pattern variables of the "
+            + "rule it extends, by name"
+    }
+
+    /// Describes source pattern variables of a rule that the rule it extends does not declare.
+    ///
+    /// - Parameters:
+    ///   - variables: The names of the variables.
+    ///   - rule: The name of the rule extending the other.
+    ///   - extended: The name of the rule it extends.
+    /// - Returns: The message.
+    static func extraSourceVariables(_ variables: [String], rule: String, extended: String) -> String {
+        "Rule '\(rule)' declares the source pattern \(variableList(variables)), which rule "
+            + "'\(extended)' that it extends does not declare; a rule must declare the source "
+            + "pattern variables of the rule it extends, and no others"
+    }
+
+    /// Describes a source pattern variable of a rule whose type does not conform to the type
+    /// of the variable it stands for in the rule it extends.
+    ///
+    /// - Parameters:
+    ///   - variable: The name of the variable.
+    ///   - type: The qualified type of the variable.
+    ///   - rule: The name of the rule extending the other.
+    ///   - extendedVariable: The name of the variable of the rule extended.
+    ///   - extendedType: The qualified type of that variable.
+    ///   - extended: The name of the rule extended.
+    /// - Returns: The message.
+    static func nonConformingSourceVariable(
+        _ variable: String, type: String, rule: String, extendedVariable: String, extendedType: String,
+        extended: String
+    ) -> String {
+        let counterpart = extendedVariable == variable ? "" : " '\(extendedVariable)'"
+        return "Source pattern variable '\(variable)' of rule '\(rule)' has type '\(type)', which does not "
+            + "conform to the type '\(extendedType)' of variable\(counterpart) of rule '\(extended)' that it extends"
+    }
+
+    /// Names one or more variables.
+    ///
+    /// - Parameter variables: The names of the variables.
+    /// - Returns: `variable 'a'` or `variables 'a', 'b'`.
+    private static func variableList(_ variables: [String]) -> String {
+        (variables.count == 1 ? "variable " : "variables ") + variables.map { "'\($0)'" }.joined(separator: ", ")
+    }
+
+    /// Describes a part that a tuple does not have.
+    ///
+    /// - Parameters:
+    ///   - part: The name of the part.
+    ///   - tuple: The text of the tuple, as ATL writes it.
+    /// - Returns: The message.
+    static func missingTuplePart(_ part: String, tuple: String) -> String {
+        "\(tuple) has no part '\(part)'"
+    }
+
+    /// Describes a tuple given to `resolveTemp` that identifies no match.
+    ///
+    /// - Parameter tuple: The text of the tuple, as ATL writes it.
+    /// - Returns: The message.
+    static func unresolvedTemporaryTuple(_ tuple: String) -> String {
+        "resolveTemp() found no match of a rule with several source elements that binds "
+            + "them as \(tuple) does"
+    }
+
+    /// Describes a tuple bound to a reference that identifies no match.
+    ///
+    /// - Parameters:
+    ///   - tuple: The text of the tuple, as ATL writes it.
+    ///   - reference: The name of the reference.
+    ///   - className: The name of the class of the element being assigned.
+    /// - Returns: The message.
+    static func unresolvedTuple(_ tuple: String, reference: String, className: String) -> String {
+        "cannot assign \(tuple) to reference '\(reference)' of class '\(className)': no matched rule "
+            + "with several source elements binds them as the tuple does"
+    }
 
     /// Describes an iterator operation that the engine does not provide.
     ///
