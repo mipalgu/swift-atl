@@ -326,6 +326,7 @@ enum ATLOperatorSemantics {
 }
 
 /// Adaptation of expression results to the features they are assigned to.
+@MainActor
 enum ATLValueConversion {
 
     /// Prepares a value for storing into a structural feature.
@@ -338,17 +339,30 @@ enum ATLValueConversion {
     /// one-element array. For attributes typed by an
     /// enumeration, the value must name one of the enumeration's literals, by
     /// name or by literal text (an integer is mapped to the literal with that
-    /// value); the literal name is stored. Integers assigned to real attributes
-    /// become reals.
+    /// value); the literal name is stored.
+    ///
+    /// A value of an attribute typed by a primitive Ecore type, and each value of a
+    /// many-valued one, must have that type, as the Eclipse Modeling Framework requires:
+    /// an Integer for `EInt`, `ELong`, `EShort`, `EByte` and `EBigInteger` and their object
+    /// types, a Real or an Integer for `EDouble`, `EFloat` and `EBigDecimal` and their
+    /// object types, a Boolean for `EBoolean` and a String for `EString`. A Real is never
+    /// an Integer, even when its value is integral. Integers assigned to `EDouble` and
+    /// `EFloat` attributes become Reals. Attributes of other data types take any value,
+    /// and a collection assigned to a single-valued attribute that is not typed by an
+    /// enumeration is stored as a list.
     ///
     /// - Parameters:
     ///   - value: The evaluated value.
     ///   - feature: The feature the value is assigned to.
+    ///   - className: The name of the class whose element is assigned, which error
+    ///     messages name when it is given.
     /// - Returns: The value to store, or `nil` for the undefined value.
     /// - Throws: ``ATLExecutionError/invalidEnumerationLiteral(_:)`` when an enumeration-typed
-    ///   attribute is given a value that is not one of its literals.
-    static func prepare(_ value: Any?, for feature: any EStructuralFeature) throws
-        -> (any EcoreValue)?
+    ///   attribute is given a value that is not one of its literals, and
+    ///   ``ATLExecutionError/typeError(_:)`` when an attribute of a primitive Ecore type is
+    ///   given a value of another type.
+    static func prepare(_ value: Any?, for feature: any EStructuralFeature, in className: String? = nil)
+        throws -> (any EcoreValue)?
     {
         guard let value = value as? (any EcoreValue) else { return nil }
         let prepared = ATLCollections.storable(value)
@@ -362,14 +376,16 @@ enum ATLValueConversion {
             }
             let elements = flattened(prepared)
             return try manyValued(
-                elements.map { try convert($0, for: attribute, enumeration: enumeration) },
+                elements.map { try convert($0, for: attribute, enumeration: enumeration, in: className) },
                 of: attribute)
         }
         if let array = prepared as? EcoreValueArray, enumeration != nil {
             return EcoreValueArray(
-                try array.values.map { try convert($0, for: attribute, enumeration: enumeration) })
+                try array.values.map {
+                    try convert($0, for: attribute, enumeration: enumeration, in: className)
+                })
         }
-        return try convert(prepared, for: attribute, enumeration: enumeration)
+        return try convert(prepared, for: attribute, enumeration: enumeration, in: className)
     }
 
     /// Prepares a value for storing into a named feature of an object.
@@ -378,8 +394,10 @@ enum ATLValueConversion {
     ///   - value: The evaluated value.
     ///   - property: The feature name.
     ///   - object: The object whose class declares the feature.
-    /// - Returns: The value to store, converted as for ``prepare(_:for:)`` when the feature is known.
-    /// - Throws: ``ATLExecutionError/invalidEnumerationLiteral(_:)`` for an invalid enumeration literal.
+    /// - Returns: The value to store, converted as for ``prepare(_:for:in:)`` when the feature is known.
+    /// - Throws: ``ATLExecutionError/invalidEnumerationLiteral(_:)`` for an invalid enumeration
+    ///   literal and ``ATLExecutionError/typeError(_:)`` for a value of another type than the
+    ///   primitive Ecore type of the attribute.
     static func prepare(_ value: Any?, property: String, of object: any EObject) throws
         -> (any EcoreValue)?
     {
@@ -388,7 +406,7 @@ enum ATLValueConversion {
         else {
             return (value as? (any EcoreValue)).map(ATLCollections.storable)
         }
-        return try prepare(value, for: feature)
+        return try prepare(value, for: feature, in: eClass.name)
     }
 
     /// Lists the elements a value contributes to a many-valued feature.
@@ -403,13 +421,97 @@ enum ATLValueConversion {
         }
     }
 
+    /// Converts a single value for an attribute.
+    ///
+    /// - Parameters:
+    ///   - value: The value.
+    ///   - attribute: The attribute the value is assigned to.
+    ///   - enumeration: The enumeration that types the attribute, if any.
+    ///   - className: The name of the class whose element is assigned, if known.
+    /// - Returns: The value to store.
+    /// - Throws: ``ATLExecutionError/invalidEnumerationLiteral(_:)`` and
+    ///   ``ATLExecutionError/typeError(_:)`` as ``prepare(_:for:in:)`` describes.
     private static func convert(
-        _ value: any EcoreValue, for attribute: EAttribute, enumeration: EEnum?
+        _ value: any EcoreValue, for attribute: EAttribute, enumeration: EEnum?, in className: String?
     ) throws -> any EcoreValue {
         if let enumeration {
             return try literal(value, in: enumeration)
         }
-        return coerceNumber(value, to: attribute.eType.name)
+        return try checked(value, for: attribute, in: className)
+    }
+
+    /// The kinds of value that the attributes of the primitive Ecore types hold.
+    private enum PrimitiveKind {
+        /// Integers, for the integer types.
+        case integer
+        /// Reals, or Integers that stand for Reals, for the floating point and decimal types.
+        case real
+        /// Booleans.
+        case boolean
+        /// Strings.
+        case string
+
+        /// The kind of value of a data type, if it is a primitive Ecore type.
+        ///
+        /// - Parameter typeName: The name of the data type.
+        init?(typeName: String) {
+            switch EcoreDataType(rawValue: typeName) {
+            case .eInt, .eIntegerObject, .eLong, .eLongObject, .eShort, .eShortObject, .eByte,
+                .eByteObject, .eBigInteger:
+                self = .integer
+            case .eDouble, .eDoubleObject, .eFloat, .eFloatObject, .eBigDecimal:
+                self = .real
+            case .eBoolean, .eBooleanObject:
+                self = .boolean
+            case .eString, .eStringObject:
+                self = .string
+            default:
+                return nil
+            }
+        }
+    }
+
+    /// The primitive Ecore types whose attributes store Integers as Reals.
+    private static let widenedRealTypes: Set<String> = [
+        EcoreDataType.eDouble.rawValue, EcoreDataType.eDoubleObject.rawValue,
+        EcoreDataType.eFloat.rawValue, EcoreDataType.eFloatObject.rawValue,
+    ]
+
+    /// Checks that a single value suits an attribute.
+    ///
+    /// - Parameters:
+    ///   - value: The value.
+    ///   - attribute: The attribute the value is assigned to.
+    ///   - className: The name of the class whose element is assigned, if known.
+    /// - Returns: The value, with an Integer widened to a Real for an `EDouble` or `EFloat`
+    ///   attribute; a collection is returned as it is.
+    /// - Throws: ``ATLExecutionError/typeError(_:)`` when the attribute is typed by a
+    ///   primitive Ecore type that the value does not have.
+    private static func checked(_ value: any EcoreValue, for attribute: EAttribute, in className: String?)
+        throws -> any EcoreValue
+    {
+        let typeName = attribute.eType.name
+        guard let kind = PrimitiveKind(typeName: typeName), !ATLCollections.isCollection(value) else {
+            return value
+        }
+        let isInteger = value is any BinaryInteger
+        let isReal = value is any BinaryFloatingPoint || value is Decimal
+        switch kind {
+        case .integer where isInteger, .real where isReal, .boolean where value is Bool,
+            .string where value is String:
+            return value
+        case .real where isInteger:
+            guard widenedRealTypes.contains(typeName), let integer = value as? any BinaryInteger else {
+                return value
+            }
+            return Double(integer)
+        default:
+            throw ATLExecutionError.typeError(
+                ATLExecutionMessage.attributeType(
+                    value: ATLValueText.render(value), valueType: ATLTypeMatching.typeName(of: value),
+                    attribute: attribute.name, className: className, attributeType: typeName,
+                    suggestsInteger: kind == .integer && isReal))
+        }
     }
 
     /// Chooses the stored form of the values of a many-valued attribute.
@@ -460,13 +562,5 @@ enum ATLValueConversion {
         let known = enumeration.literals.map(\.name).joined(separator: ", ")
         throw ATLExecutionError.invalidEnumerationLiteral(
             "'\(value)' is not a literal of enumeration '\(enumeration.name)' (literals: \(known))")
-    }
-
-    private static func coerceNumber(_ value: any EcoreValue, to typeName: String) -> any EcoreValue {
-        let realTypes = [EcoreDataType.eDouble.rawValue, EcoreDataType.eDoubleObject.rawValue]
-        if let number = value as? Int, realTypes.contains(typeName) {
-            return Double(number)
-        }
-        return value
     }
 }

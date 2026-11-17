@@ -612,18 +612,22 @@ public final class ATLExecutionContext: Sendable {
     /// form stored in the target model: a source element transformed by a
     /// matched rule is replaced by that rule's default target element, an
     /// element of the same target model is stored by identifier, and any other
-    /// element is stored as a cross-resource proxy. See ``ATLReferenceStorage``.
-    /// Collection values are unwrapped, so their elements are resolved the same way,
-    /// and enumeration and numeric attribute values are validated and converted
-    /// by ``ATLValueConversion``.
+    /// element is stored as a cross-resource proxy. A source element that no
+    /// matched rule transforms is left out of a containment reference, because a
+    /// target element cannot contain it, and the run reports a warning for it.
+    /// See ``ATLReferenceStorage``. Collection values are unwrapped, so their
+    /// elements are resolved the same way, and the values of attributes are checked
+    /// against the types of the attributes and converted by ``ATLValueConversion``.
     ///
     /// - Parameters:
     ///   - element: The target element to modify
     ///   - name: The name of the feature to set
     ///   - value: The evaluated value to assign
     /// - Throws: ``ATLExecutionError`` if the element is not part of a target model,
-    ///   has no feature of that name, or the value is not valid for the feature (such as
-    ///   an unknown enumeration literal)
+    ///   has no feature of that name, or the value is not valid for the feature, such as
+    ///   an unknown enumeration literal (``ATLExecutionError/invalidEnumerationLiteral(_:)``)
+    ///   or a value of another type than the primitive Ecore type of an attribute, such as a
+    ///   Real for an `EInt` attribute (``ATLExecutionError/typeError(_:)``)
     public func assignFeature(on element: any EObject, feature name: String, value: (any EcoreValue)?)
         async throws
     {
@@ -648,9 +652,9 @@ public final class ATLExecutionContext: Sendable {
             )
         }
 
-        let prepared = try ATLValueConversion.prepare(value, for: feature)
+        let prepared = try ATLValueConversion.prepare(value, for: feature, in: eClass.name)
         let stored = await ATLReferenceStorage.storedValue(
-            for: prepared, feature: feature, in: resource, context: self)
+            for: prepared, feature: feature, of: eClass, in: resource, context: self)
         guard await resource.eSet(objectId: element.id, feature: name, value: stored) else {
             throw ATLExecutionError.runtimeError(
                 "Could not set property '\(name)' of class '\(eClass.name)'")
@@ -658,6 +662,29 @@ public final class ATLExecutionContext: Sendable {
         if debug {
             print("[ATL DEBUG] Updated property '\(name)' = '\(String(describing: value))'")
         }
+    }
+
+    /// Whether an element belongs to a source model.
+    ///
+    /// - Parameter id: The identifier of the element.
+    /// - Returns: `true` if a source model holds the element.
+    func isSourceElement(_ id: EUUID) async -> Bool {
+        for resource in sources.values where await resource.contains(id: id) {
+            return true
+        }
+        return false
+    }
+
+    /// Reports a warning about the run in progress.
+    ///
+    /// The warning is written to the error destination of the console, as `debug`
+    /// writes its text, and recorded in the warnings of the statistics of the virtual
+    /// machine running the transformation.
+    ///
+    /// - Parameter message: The warning.
+    func reportWarning(_ message: String) {
+        console.writeError(ATLExecutionMessage.warningPrefix + message)
+        virtualMachine?.recordWarning(message)
     }
 
     /// Finds the target model that holds an element.

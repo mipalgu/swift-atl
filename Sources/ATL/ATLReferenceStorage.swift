@@ -69,6 +69,9 @@ enum ATLReservedNames {
 /// element lives in the target resource, as `[ResourceProxy]` when every
 /// element lives elsewhere, and as an [`EcoreValueArray`](https://mipalgu.github.io/swift-ecore/documentation/emfbase/ecorevaluearray/) of identifiers and
 /// proxies when the two are mixed.
+///
+/// A containment reference holds only elements of target models: a source element
+/// that no matched rule transforms is left out of it, with a warning.
 enum ATLReferenceStorage {
 
     /// Computes the XPath-style fragment locating an element in its resource.
@@ -104,10 +107,15 @@ enum ATLReferenceStorage {
     ///
     /// Only values assigned to references are converted: model elements are
     /// replaced by identifiers or proxies, and other values are stored as given.
+    /// A source element that no matched rule transforms is left out of the value of
+    /// a containment reference, as Eclipse ATL leaves it out, because an element of
+    /// a target model cannot contain an element of a source model; the run reports a
+    /// warning naming the element, the reference and the class.
     ///
     /// - Parameters:
     ///   - value: The evaluated value
     ///   - feature: The feature being assigned
+    ///   - owner: The class of the element being assigned
     ///   - resource: The target resource owning the element being assigned
     ///   - context: The execution context holding the sources, targets and trace
     /// - Returns: The value to store
@@ -115,6 +123,7 @@ enum ATLReferenceStorage {
     static func storedValue(
         for value: (any EcoreValue)?,
         feature: any EStructuralFeature,
+        of owner: EClass,
         in resource: Resource,
         context: ATLExecutionContext
     ) async -> (any EcoreValue)? {
@@ -126,6 +135,13 @@ enum ATLReferenceStorage {
         var references: [any EcoreValue] = []
         for element in ATLCollectionValues.elements(of: value) {
             if let object = element as? (any EObject) {
+                if reference.containment, await isUntransformedSourceElement(object, context: context) {
+                    context.reportWarning(
+                        ATLExecutionMessage.untransformedContainedElement(
+                            element: ATLValueText.render(object), reference: reference.name,
+                            className: owner.name))
+                    continue
+                }
                 references.append(await referenceValue(for: object, in: resource, context: context))
             } else {
                 references.append(element)
@@ -146,6 +162,20 @@ enum ATLReferenceStorage {
     }
 
     // MARK: - Private Implementation
+
+    /// Whether an element belongs to a source model and no matched rule transforms it.
+    ///
+    /// - Parameters:
+    ///   - object: The element.
+    ///   - context: The execution context holding the sources and the trace.
+    /// - Returns: `true` for a source element without a default target element.
+    @MainActor
+    private static func isUntransformedSourceElement(
+        _ object: any EObject, context: ATLExecutionContext
+    ) async -> Bool {
+        guard context.defaultTargetID(for: object.id) == nil else { return false }
+        return await context.isSourceElement(object.id)
+    }
 
     /// Chooses the stored form for one element assigned to a reference.
     ///

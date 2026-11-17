@@ -127,6 +127,12 @@ To keep the 0.6 behaviour with the new APIs, pass ``ATLOptions/legacy``, for exa
 `ATLParser(options: .legacy)` or `ATLVirtualMachine(module: module, options: .legacy)`.
 Parse errors now also describe themselves through `localizedDescription`.
 
+Under both options, a value bound to an attribute of a primitive Ecore type must have that
+type, so a Real bound to an `EInt` attribute stops the run with a type error instead of
+being stored, and a source element that no rule transforms is left out of a containment
+reference with a warning instead of being stored as a reference into its source model, as
+<doc:UnderstandingATL> describes.
+
 A virtual machine created with
 ``ATLVirtualMachine/init(module:options:enableDebugging:unsetFeatureReads:nativeHelpers:fileOutput:)``
 evaluates expressions as its options select; one created without options truncates the

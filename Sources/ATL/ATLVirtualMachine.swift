@@ -951,34 +951,28 @@ public final class ATLVirtualMachine {
 
     /// Evaluates a property binding and assigns its value to a target element.
     ///
-    /// A binding that cannot be evaluated yet is retried once all rules have
-    /// been applied.
+    /// A binding whose expression cannot be evaluated yet is retried once all rules
+    /// have been applied. A value that cannot be assigned to the feature stops the run.
     ///
     /// - Parameters:
     ///   - binding: The binding to apply
     ///   - element: The target element to configure
     ///   - ordinal: The position of the binding among the bindings of its target pattern
-    /// - Throws: ``ATLExecutionError/invalidEnumerationLiteral(_:)`` when the value is
-    ///   not a literal of the enumeration the feature is typed by
+    /// - Throws: The errors of ``ATLExecutionContext/assignFeature(on:feature:value:)``, such as
+    ///   ``ATLExecutionError/invalidEnumerationLiteral(_:)`` when the value is not a literal
+    ///   of the enumeration the feature is typed by and ``ATLExecutionError/typeError(_:)``
+    ///   when the value does not have the primitive Ecore type of the attribute
     func applyBinding(_ binding: ATLPropertyBinding, to element: any EObject, ordinal: Int = 0) async throws {
         let journalled = incrementalJournal != nil
         if journalled { executionContext.dependencyRecorder.begin() }
+        let value: (any EcoreValue)?
         do {
-            let value = try await binding.expression.evaluate(in: executionContext)
-            try await executionContext.assignFeature(
-                on: element, feature: binding.property, value: value)
-            if journalled {
-                incrementalJournal?.bindings.append(
-                    ATLIncrementalJournal.BindingRecord(
-                        targetID: element.id, ordinal: ordinal,
-                        dependencies: executionContext.dependencyRecorder.end()))
-            }
+            value = try await binding.expression.evaluate(in: executionContext)
         } catch {
             if journalled {
                 executionContext.noteIncrementalHazard(ATLIncrementalHazard.deferredBinding)
                 executionContext.dependencyRecorder.end()
             }
-            if case ATLExecutionError.invalidEnumerationLiteral = error { throw error }
             if debug {
                 print(
                     "[ATL DEBUG] Binding evaluation failed for property '\(binding.property)': \(error)"
@@ -990,6 +984,20 @@ public final class ATLVirtualMachine {
                 property: binding.property,
                 expression: binding.expression
             )
+            return
+        }
+        do {
+            try await executionContext.assignFeature(
+                on: element, feature: binding.property, value: value)
+        } catch {
+            if journalled { executionContext.dependencyRecorder.end() }
+            throw error
+        }
+        if journalled {
+            incrementalJournal?.bindings.append(
+                ATLIncrementalJournal.BindingRecord(
+                    targetID: element.id, ordinal: ordinal,
+                    dependencies: executionContext.dependencyRecorder.end()))
         }
     }
 
@@ -1156,6 +1164,13 @@ public final class ATLVirtualMachine {
     }
 
     // MARK: - Statistics Access
+
+    /// Records a warning about the run in progress in the execution statistics.
+    ///
+    /// - Parameter message: The warning.
+    func recordWarning(_ message: String) {
+        statistics.addWarning(message)
+    }
 
     /// Retrieves current execution statistics.
     ///

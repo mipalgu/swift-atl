@@ -1061,6 +1061,11 @@ public struct ATLMethodCallExpression: ATLExpression, Sendable, Equatable, Hasha
         {
             return result.value
         }
+        // An iterator body cannot be evaluated without its iterator variables
+        if arguments.contains(where: { $0 is ATLLambdaExpression }) {
+            throw ATLExecutionError.unsupportedOperation(
+                ATLExecutionMessage.unknownIteratorOperation(methodName))
+        }
 
         // For collection operations that need lambda expressions, pass them directly
         if isCollectionOperation(methodName) && arguments.count == 1 {
@@ -1380,9 +1385,20 @@ public struct ATLMethodCallExpression: ATLExpression, Sendable, Equatable, Hasha
 
     // MARK: - Additional OCL Method Implementations
 
+    /// Handles `toString()`.
+    ///
+    /// A collection is written as a collection literal, as ``ATLValueText`` writes it
+    /// for `debug` and query results, and any other value as its text.
+    ///
+    /// - Parameter receiverValue: The receiver.
+    /// - Returns: The text of the receiver.
+    @MainActor
     private func handleToString(_ receiverValue: (any EcoreValue)?) throws -> (any EcoreValue)? {
         guard let value = receiverValue else {
             return "null"
+        }
+        if ATLCollections.isCollection(value) {
+            return ATLValueText.render(value)
         }
         return "\(value)"
     }
@@ -2017,6 +2033,57 @@ public enum ATLExecutionError: Error, LocalizedError, Sendable {
         case .invalidEnumerationLiteral(let message):
             return "Invalid enumeration literal: \(message)"
         }
+    }
+}
+
+/// The messages of the errors and warnings that a transformation run reports.
+enum ATLExecutionMessage {
+
+    /// The prefix of a warning written to the console.
+    static let warningPrefix = "Warning: "
+
+    /// Describes a value whose type does not suit the attribute it is assigned to.
+    ///
+    /// - Parameters:
+    ///   - value: The text of the value, as ATL writes it.
+    ///   - valueType: The ATL type of the value.
+    ///   - attribute: The name of the attribute.
+    ///   - className: The name of the class of the element being assigned, if known.
+    ///   - attributeType: The name of the data type of the attribute.
+    ///   - suggestsInteger: Whether to suggest the operations that give an Integer.
+    /// - Returns: The message.
+    static func attributeType(
+        value: String, valueType: String, attribute: String, className: String?, attributeType: String,
+        suggestsInteger: Bool
+    ) -> String {
+        let owner = className.map { " of class '\($0)'" } ?? ""
+        let message =
+            "cannot assign the \(valueType) value \(value) to attribute '\(attribute)'\(owner), "
+            + "whose type is \(attributeType)"
+        return suggestsInteger
+            ? message + "; use 'div', 'floor()' or 'round()' to obtain an Integer" : message
+    }
+
+    /// Describes a source element left out of a containment reference because no rule
+    /// transforms it.
+    ///
+    /// - Parameters:
+    ///   - element: The text of the element, as ATL writes it.
+    ///   - reference: The name of the containment reference.
+    ///   - className: The name of the class of the element being assigned.
+    /// - Returns: The message.
+    static func untransformedContainedElement(element: String, reference: String, className: String) -> String {
+        "\(element) is left out of containment reference '\(reference)' of class '\(className)', "
+            + "because no matched rule transforms it and a target element cannot contain an "
+            + "element of a source model"
+    }
+
+    /// Describes an iterator operation that the engine does not provide.
+    ///
+    /// - Parameter operation: The name of the operation.
+    /// - Returns: The message.
+    static func unknownIteratorOperation(_ operation: String) -> String {
+        "unknown iterator operation '\(operation)'"
     }
 }
 

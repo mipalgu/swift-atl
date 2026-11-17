@@ -321,6 +321,23 @@ elements of the same target model are stored by identifier, other elements are
 stored as cross-resource proxies, and enumeration-typed attributes accept only
 the literals the enumeration declares.
 
+A containment reference holds only elements of target models. A source element that no
+matched rule transforms is therefore left out of the value assigned to a containment
+reference, as Eclipse ATL leaves it out, and the run reports a warning that names the
+element, the reference and its class. The warning is written to standard error, as
+`debug` writes its text, and recorded in ``ATLExecutionStatistics/warnings``. A
+non-containment reference keeps such an element as a reference into its source model.
+
+An attribute typed by a primitive Ecore type accepts only values of that type, as the
+Eclipse Modeling Framework does: an Integer for `EInt`, `ELong`, `EShort`, `EByte` and
+`EBigInteger`, a Real or an Integer for `EDouble`, `EFloat` and `EBigDecimal`, a Boolean
+for `EBoolean` and a String for `EString`, together with their object types. Any other
+value stops the run with a ``ATLExecutionError/typeError(_:)`` that names the attribute,
+its class, its type and the type of the value. Because `/` gives a Real, the quotient
+`(done * 100) / total` cannot be bound to an `EInt` attribute, even when it happens to be
+integral; `(done * 100) div total` or `((done * 100) / total).round()` gives an Integer.
+Integers bound to `EDouble` and `EFloat` attributes become Reals.
+
 Because every matched rule creates its target elements before any binding is applied,
 the order of the rules never matters for references. Abstract rules, rule inheritance
 with `extends`, `unique lazy` rules, `entrypoint` and `endpoint` rules, `using`
@@ -428,8 +445,14 @@ of one element.
   `subSequence`, `subOrderedSet`, `including`, `includingAll`, `includingRange`,
   `excluding`, `excludingAll`, `union`, `intersection`, `symmetricDifference`,
   `indexOf`, `lastIndexOf`, `includesAll`, `excludesAll`, `isUnique`, `one`, `exists`
-  and `forAll` (with several iterator variables), `sortedBy`, `flatten`, `reverse`,
-  `max`, `min`, and the conversions `asSet`, `asOrderedSet`, `asSequence` and `asBag`.
+  and `forAll` (with several iterator variables), `sortedBy`, `collect`, `collectNested`,
+  `flatten`, `reverse`, `max`, `min`, and the conversions `asSet`, `asOrderedSet`,
+  `asSequence` and `asBag`. `collect` flattens the collections that its body yields by one
+  level, whereas `collectNested` keeps them, so `Sequence{1, 2}->collectNested(x |
+  Sequence{x, x})` is `Sequence{Sequence{1, 1}, Sequence{2, 2}}`; both give a Bag for a Set
+  or a Bag and a Sequence otherwise. An iterator operation that does not exist is reported
+  as unknown. `toString()` writes a collection as a collection literal, such as
+  `Sequence{30, 10}`, as `debug` and query results write it.
   `at` applies to Sequences and OrderedSets only and is an error on a Set or a Bag.
   `asSet()` and `asOrderedSet()` give a Set and an OrderedSet for every receiver, except
   that with ``ATLBagRepresentation/sequence`` `asSet()` on a Sequence gives a Sequence
