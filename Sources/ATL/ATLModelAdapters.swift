@@ -97,7 +97,7 @@ public struct ATLSourceModel: IModel {
                 continue
             }
 
-            if objectClass == type || isSubtype(objectClass, of: type) {
+            if objectClass.conforms(to: type) {
                 result.append(object.id)
             }
         }
@@ -134,22 +134,6 @@ public struct ATLSourceModel: IModel {
         }
 
         return result
-    }
-
-    /// Check if one EClass is a subtype of another.
-    ///
-    /// - Parameters:
-    ///   - child: Potential subtype
-    ///   - parent: Potential supertype
-    /// - Returns: `true` if child is a subtype of parent
-    private func isSubtype(_ child: EClass, of parent: EClass) -> Bool {
-        if child == parent {
-            return true
-        }
-
-        return child.eSuperTypes.contains { superType in
-            isSubtype(superType, of: parent)
-        }
     }
 }
 
@@ -248,7 +232,7 @@ public struct ATLTargetModel: IModel {
                 continue
             }
 
-            if objectClass == type || isSubtype(objectClass, of: type) {
+            if objectClass.conforms(to: type) {
                 result.append(object.id)
             }
         }
@@ -327,22 +311,6 @@ public struct ATLTargetModel: IModel {
     public func clearCreationTracking() async {
         await createdElements.clear()
         await typeCache.clear()
-    }
-
-    /// Check if one EClass is a subtype of another.
-    ///
-    /// - Parameters:
-    ///   - child: Potential subtype
-    ///   - parent: Potential supertype
-    /// - Returns: `true` if child is a subtype of parent
-    private func isSubtype(_ child: EClass, of parent: EClass) -> Bool {
-        if child == parent {
-            return true
-        }
-
-        return child.eSuperTypes.contains { superType in
-            isSubtype(superType, of: parent)
-        }
     }
 }
 

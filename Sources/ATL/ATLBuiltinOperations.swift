@@ -753,7 +753,8 @@ enum ATLBuiltinOperations {
             if context.dependencyRecorder.isRecording {
                 context.recordExtent(className, isSource: isSource)
             }
-            found.append(contentsOf: await resource.getAllInstancesOf(eClass).map { $0 as any EcoreValue })
+            found.append(
+                contentsOf: await ATLTypeMatching.instances(of: eClass, in: resource).map { $0 as any EcoreValue })
         }
         guard classFound else {
             throw ATLExecutionError.typeError("Class '\(className)' not found in the metamodels of the module")

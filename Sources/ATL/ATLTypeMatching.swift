@@ -41,7 +41,9 @@ enum ATLTypeMatching {
     ///
     /// The distance is zero when the value's own type is the named type, grows by
     /// one for each step up the supertype hierarchy, and is ``anyDistance`` for
-    /// `OclAny`. Contextual helper dispatch selects the smallest distance.
+    /// `OclAny`. Ecore's `EObject` is a supertype of every model object, one step beyond
+    /// its most distant other supertype. Contextual helper dispatch selects the smallest
+    /// distance.
     ///
     /// - Parameters:
     ///   - value: The value, or `nil` for the undefined value.
@@ -102,23 +104,55 @@ enum ATLTypeMatching {
         }
     }
 
+    /// Whether instances of a class are instances of another class.
+    ///
+    /// A class conforms to itself, to each of its supertypes and to Ecore's `EObject`.
+    /// As ATL names types by metamodel and class name, a class also conforms to a class
+    /// that has the name of the class or of one of its supertypes.
+    ///
+    /// - Parameters:
+    ///   - eClass: The class to test, such as the class of a source element.
+    ///   - type: The class to test against, such as the type of a source pattern.
+    /// - Returns: `true` when instances of `eClass` are instances of `type`.
+    static func conforms(_ eClass: EClass, to type: EClass) -> Bool {
+        eClass.conforms(to: type) || eClass.name == type.name
+            || eClass.allSuperTypes.contains { $0.name == type.name }
+    }
+
+    /// The instances of a class in a model, in document order.
+    ///
+    /// - Parameters:
+    ///   - type: The class whose instances to list.
+    ///   - resource: The model to search.
+    /// - Returns: The objects of `resource` whose class conforms to `type`.
+    static func instances(of type: EClass, in resource: Resource) async -> [any EObject] {
+        await resource.getAllObjectsIncludingContents().filter { object in
+            (object.eClass as? EClass).map { conforms($0, to: type) } ?? false
+        }
+    }
+
     // MARK: - Private
 
     /// Breadth-first search up the supertype hierarchy.
+    ///
+    /// `EObject` lies one level beyond the most distant other supertype, so that every
+    /// other supertype is nearer.
     private static func classDistance(of eClass: EClass, to name: String) -> Int? {
+        let toEObject = name == EcoreClassifier.eObject.rawValue
+        if eClass.isEObject { return toEObject ? 0 : nil }
         var level: [EClass] = [eClass]
         var visited: Set<String> = []
         var distance = 0
         while !level.isEmpty {
-            if level.contains(where: { $0.name == name }) { return distance }
+            if !toEObject, level.contains(where: { $0.name == name }) { return distance }
             var next: [EClass] = []
             for current in level where visited.insert(current.name).inserted {
-                next.append(contentsOf: current.eSuperTypes)
+                next.append(contentsOf: current.eSuperTypes.filter { !$0.isEObject })
             }
             level = next
             distance += 1
         }
-        return nil
+        return toEObject ? min(distance, anyDistance - 1) : nil
     }
 
     private static func primitiveOrCollectionDistance(of value: any EcoreValue, to name: String)
