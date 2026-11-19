@@ -146,9 +146,9 @@ rule Responsibility {
 }
 ```
 
-A rule and a rule that extends it transform a match they both make once, through the
-extending rule, and two rules that extend the same rule are applied one at a time, as
-Rule Inheritance below describes. Rules whose guards select different elements, or that
+A rule and a rule that extends it transform a match they both make once, through one of
+them, and two rules that extend the same rule are applied one at a time, as Rule
+Inheritance below describes. Rules whose guards select different elements, or that
 match an element together with different other elements, do not conflict. This holds
 under both ``ATLOptions/standard`` and ``ATLOptions/legacy``, in refining mode and in
 incremental updates.
@@ -184,18 +184,49 @@ pattern elements than the rule it extends stops the run with an
 ``ATLExecutionError/invalidOperation(_:)``, and a variable whose type does not conform
 with an ``ATLExecutionError/typeError(_:)``; both name the two rules and the variable.
 
-When several rules that extend the same rule match an element, or bind the same tuple of
-elements to the same variables, the element is transformed as in Eclipse ATL by the first
-of them that matches: the rules with a guard are tried before the rules without one, each
-in declaration order, and the rules that extend the chosen rule are tried in turn in the
-same way. The run then reports a warning that names the element, the rule they extend and
-the rules that match, and says which of them is applied. The warning is written to
-standard error and recorded in ``ATLExecutionStatistics/warnings``. Had `Member2Male`
-no guard, a female member would match both rules and be transformed by `Member2Female`,
-with a warning. With ``ATLSiblingRuleConflicts/error`` for
-``ATLOptions/siblingRuleConflicts``, such rules instead stop the run with the
-``ATLExecutionError/invalidOperation(_:)`` that two unrelated rules matching the same
-element give; both presets report a warning.
+When a rule and rules that extend it match an element, or bind the same tuple of elements
+to the same variables, one of them transforms it. By default, the rules are tried as in
+Eclipse ATL. For a rule that matches the element, the rules extending it that have a guard
+are tried first, then the rule itself if it has a guard, then the rules extending it that
+have none, and last the rule itself if it has none, each group in declaration order; an
+abstract rule is never itself applied. The first of them that matches transforms the
+element, and when that is a rule extending the other, the rules extending it are tried in
+turn in the same way. A rule with a guard therefore transforms every element that it
+matches in place of the rules extending it that have no guard:
+
+```atl
+rule Task2Urgent {
+    from s : Project!Task (s.priority > 5)
+    to t : Report!Summary (title <- s.name, rank <- 1)
+}
+-- Never applied by default: Task2Urgent matches every task that this rule matches
+rule Task2Plain extends Task2Urgent {
+    from s : Project!Task
+    to t : Report!Summary (rank <- 0)
+}
+```
+
+With ``ATLSubRulePrecedence/extendingRule`` for ``ATLOptions/subRulePrecedence``, which
+``ATLOptions/legacy`` selects, a rule that extends another always takes precedence over it
+instead, as in swift-atl 0.6, so `Task2Plain` transforms the urgent tasks above. A rule
+then transforms an element only when none of the rules extending it match, and of several
+rules extending it that match, the first in the order above applies.
+
+```swift
+var options = ATLOptions.standard
+options.subRulePrecedence = .extendingRule
+let machine = ATLVirtualMachine(module: module, options: options)
+```
+
+When several rules that extend the same rule match an element and are tried before the
+rule itself, the first of them transforms it, and the run reports a warning that names
+the element, the rule they extend and the rules that match, and says which of them is
+applied. The warning is written to standard error and recorded in
+``ATLExecutionStatistics/warnings``. Had `Member2Male` no guard, a female member would
+match both rules and be transformed by `Member2Female`, with a warning. With
+``ATLSiblingRuleConflicts/error`` for ``ATLOptions/siblingRuleConflicts``, such rules
+instead stop the run with the ``ATLExecutionError/invalidOperation(_:)`` that two
+unrelated rules matching the same element give; both presets report a warning.
 
 ```swift
 var options = ATLOptions.standard
@@ -203,14 +234,19 @@ options.siblingRuleConflicts = .error
 let machine = ATLVirtualMachine(module: module, options: options)
 ```
 
+Under ``ATLSubRulePrecedence/eclipse``, the rules without a guard that extend a matching
+rule with one are never tried, so they give neither a warning nor an error;
+under ``ATLSubRulePrecedence/extendingRule``, they do.
+
 Rule inheritance differs from Eclipse ATL in three respects:
 
 - A rule may extend a rule whose variables have other names, provided it declares as many;
   the variables whose names the two rules do not share stand for each other in
   declaration order. Eclipse ATL requires the same names.
-- A rule that extends another always takes precedence over it for an element they both
-  match. Eclipse ATL tries a rule that has a guard and is not abstract before the rules
-  extending it that have none, so such rules never transform an element there.
+- With ``ATLSubRulePrecedence/extendingRule``, a rule that extends another always takes
+  precedence over it for an element they both match. Eclipse ATL tries a rule that has a
+  guard and is not abstract before the rules extending it that have none, as
+  ``ATLSubRulePrecedence/eclipse`` does.
 - When an abstract rule that extends another matches an element but none of the rules
   extending it do, the next rule in order is tried. Eclipse ATL leaves such an element
   untransformed.

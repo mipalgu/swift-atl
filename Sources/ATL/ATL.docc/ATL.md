@@ -90,8 +90,10 @@ run on Eclipse ATL. `includingRange` is the portable alternative, and parsing wi
 
 When several rules that extend the same rule match an element, the first of them in the
 order of Eclipse ATL transforms it, as there, and the run also reports a warning;
-`ATLOptions(siblingRuleConflicts: .error)` makes this an error instead. A rule that extends
-another may declare the source pattern variables of that rule in any order, as in Eclipse
+`ATLOptions(siblingRuleConflicts: .error)` makes this an error instead. A rule that has a
+guard is tried before the rules extending it that have none, also as in Eclipse ATL;
+`ATLOptions(subRulePrecedence: .extendingRule)` lets a rule that extends another always take
+precedence over it instead. A rule that extends another may declare the source pattern variables of that rule in any order, as in Eclipse
 ATL, and may also give them other names. <doc:UnderstandingATL> describes rule
 inheritance, and where it differs from Eclipse ATL, in detail. Tuples written to the
 console or as query results list their parts in the order in which they were written,
@@ -116,6 +118,7 @@ deprecated in favour of the variant that takes options.
 | `/` on two Integers, such as `7 / 2` | ``ATLIntegerDivision/real``: a Real (`3.5`), as in OCL and Eclipse ATL | ``ATLOptions/integerDivision`` | ``ATLIntegerDivision/truncating``: an Integer truncated towards zero (`3`), as `div` gives |
 | Bag values, such as `Bag{1, 1}`, `asBag()`, `Set{...}->collect(...)` and a feature navigated over a Set | ``ATLBagRepresentation/bag``: Bags, as in OCL and the Eclipse ATL EMFTVM | ``ATLOptions/bagRepresentation`` | ``ATLBagRepresentation/sequence``: Sequences |
 | Two rules extending the same rule that match the same element | ``ATLSiblingRuleConflicts/warning``: the first in Eclipse ATL's order applies, with a warning, under both presets | ``ATLOptions/siblingRuleConflicts`` | Both were applied; ``ATLSiblingRuleConflicts/error`` stops the run instead |
+| A rule with a guard and a rule extending it without one that match the same element | ``ATLSubRulePrecedence/eclipse``: the rule with the guard applies, as in Eclipse ATL | ``ATLOptions/subRulePrecedence`` | ``ATLSubRulePrecedence/extendingRule``: the extending rule applies |
 
 With ``ATLCollectionRangeSyntax/eclipse``, `..` is read as two `.` tokens, and a range is
 reported as a syntax error whose message names the portable alternatives: listing the

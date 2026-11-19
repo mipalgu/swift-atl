@@ -63,6 +63,8 @@ same rule are the exception under ``ATLSiblingRuleConflicts/warning``: an update
 the first of them in Eclipse ATL's order, as a batch run does, and reports the warning for
 each element that it makes several of them match, unless an earlier execution or update
 reported it already. ``ATLIncrementalUpdate/warnings`` lists the warnings of an update.
+Of a rule and the rules extending it that match an element, an update applies the one that
+``ATLOptions/subRulePrecedence`` selects, as a batch run does.
 
 ## Topics
 

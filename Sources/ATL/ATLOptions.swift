@@ -139,14 +139,46 @@ public enum ATLSiblingRuleConflicts: String, Sendable, CaseIterable, Hashable {
     case error
 }
 
+/// Which rule transforms a source element that a rule and a rule extending it both match.
+///
+/// A rule and the rules that extend it, directly or through other rules, can all match a
+/// source element, or the same tuple of source elements, and only one of them transforms
+/// it. Eclipse ATL usually applies the rule that extends the other, but tries a rule that
+/// has a guard and is not abstract before the rules extending it that have none, so that
+/// those rules never transform an element that it matches. The raw value of each case is
+/// its spelling on a command line.
+public enum ATLSubRulePrecedence: String, Sendable, CaseIterable, Hashable {
+    /// The rules are tried in the order of Eclipse ATL.
+    ///
+    /// For a rule that matches an element, the rules extending it that have a guard are
+    /// tried first, then the rule itself if it has a guard, then the rules extending it that
+    /// have none, and last the rule itself if it has none, each group in declaration order;
+    /// an abstract rule is never itself applied. The first of them that matches transforms
+    /// the element, and when it is a rule extending the other, the rules extending it are
+    /// tried in turn in the same way. A rule extending another without a guard therefore
+    /// never transforms an element that the other matches with its guard. This is the
+    /// default.
+    case eclipse
+
+    /// A rule that extends another always takes precedence over it, as in swift-atl 0.6.
+    ///
+    /// A rule transforms an element only when none of the rules extending it match the
+    /// element. Of several rules extending one rule that match it, those with a guard are
+    /// tried before those without one, each in declaration order, as under ``eclipse``.
+    case extendingRule = "extending-rule"
+}
+
 /// Options that choose between the current behaviour of ATL processing and the
 /// behaviour of swift-atl 0.6.
 ///
 /// Each property selects one behaviour. The default options, also available as
 /// ``standard``, give the current behaviour; ``legacy`` gives the behaviour of
 /// swift-atl 0.6. APIs that existed in swift-atl 0.6 and take no options use
-/// ``legacy``. Both presets report two sub-rules that match the same element with a
-/// warning; ``siblingRuleConflicts`` makes that an error:
+/// ``legacy``. Under ``standard``, a rule and the rules extending it are tried in the order
+/// of Eclipse ATL; under ``legacy``, a rule extending another always takes precedence over
+/// it, and ``subRulePrecedence`` chooses between the two. Both presets report two sub-rules
+/// that match the same element with a warning; ``siblingRuleConflicts`` makes that an
+/// error:
 ///
 /// ```swift
 /// let parser = ATLParser(options: .standard)
@@ -185,6 +217,15 @@ public struct ATLOptions: Sendable, Hashable {
     /// an error whatever this selects.
     public var siblingRuleConflicts: ATLSiblingRuleConflicts
 
+    /// Which rule transforms a source element that a rule and a rule extending it both match.
+    ///
+    /// The virtual machine and the incremental transformation that are given the options
+    /// choose between a rule and the rules extending it as this selects. This also decides
+    /// which sub-rules of one rule compete for an element, and so which of them
+    /// ``siblingRuleConflicts`` reports: under ``ATLSubRulePrecedence/eclipse``, the rules
+    /// without a guard that extend a matching rule with one do not compete.
+    public var subRulePrecedence: ATLSubRulePrecedence
+
     /// Creates a set of options.
     ///
     /// - Parameters:
@@ -194,26 +235,31 @@ public struct ATLOptions: Sendable, Hashable {
     ///   - bagRepresentation: What a Bag value is when ATL expressions evaluate.
     ///   - siblingRuleConflicts: What a source element that two sub-rules of the same rule
     ///     both match gives.
+    ///   - subRulePrecedence: Which rule transforms a source element that a rule and a rule
+    ///     extending it both match.
     public init(
         collectionRangeSyntax: ATLCollectionRangeSyntax = .ocl,
         collectionRangeEncoding: ATLCollectionRangeEncoding = .collectionRange,
         integerDivision: ATLIntegerDivision = .real,
         bagRepresentation: ATLBagRepresentation = .bag,
-        siblingRuleConflicts: ATLSiblingRuleConflicts = .warning
+        siblingRuleConflicts: ATLSiblingRuleConflicts = .warning,
+        subRulePrecedence: ATLSubRulePrecedence = .eclipse
     ) {
         self.collectionRangeSyntax = collectionRangeSyntax
         self.collectionRangeEncoding = collectionRangeEncoding
         self.integerDivision = integerDivision
         self.bagRepresentation = bagRepresentation
         self.siblingRuleConflicts = siblingRuleConflicts
+        self.subRulePrecedence = subRulePrecedence
     }
 
     /// The current behaviour, which the default initialiser also gives.
     ///
     /// Collection literals accept OCL integer ranges, ranges are written to XMI
     /// as OCL collection ranges, `/` divides two Integers into a Real, Bags are
-    /// a collection kind of their own, and the first of two sub-rules that match the
-    /// same element transforms it, with a warning.
+    /// a collection kind of their own, a rule and the rules extending it are tried in the
+    /// order of Eclipse ATL, and the first of two sub-rules that match the same element
+    /// transforms it, with a warning.
     public static let standard = ATLOptions()
 
     /// The behaviour of swift-atl 0.6.
@@ -221,11 +267,13 @@ public struct ATLOptions: Sendable, Hashable {
     /// Collection ranges are rejected as syntax errors, as swift-atl 0.6 rejected them.
     /// Ranges built in code are written to XMI as OCL collection ranges, because
     /// swift-atl 0.6 had no ranges that it could write. `/` truncates the quotient of
-    /// two Integers to an Integer, and Bags are Sequences. As swift-atl 0.6 did not stop
-    /// a run for two sub-rules that match the same element, the first of them transforms
-    /// it, with a warning, as under ``standard``.
+    /// two Integers to an Integer, Bags are Sequences, and a rule that extends another
+    /// always takes precedence over it. As swift-atl 0.6 did not stop a run for two
+    /// sub-rules that match the same element, the first of them transforms it, with a
+    /// warning, as under ``standard``.
     public static let legacy = ATLOptions(
-        collectionRangeSyntax: .eclipse, integerDivision: .truncating, bagRepresentation: .sequence)
+        collectionRangeSyntax: .eclipse, integerDivision: .truncating, bagRepresentation: .sequence,
+        subRulePrecedence: .extendingRule)
 
     /// Creates the options that a choice of semantics selects.
     ///
