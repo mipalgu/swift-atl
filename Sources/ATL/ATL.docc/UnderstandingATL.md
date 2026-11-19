@@ -179,7 +179,8 @@ A rule that extends another declares the same source pattern variables, as in Ec
 ATL, and each of its variables stands for the variable of the same name of the rule it
 extends, in whatever order the two rules declare them; each rule sees the matched
 elements under its own variable names. The type of each variable must be the type of the
-variable it stands for or a subtype of it. A rule that declares fewer or more source
+variable it stands for or a subtype of it; every class is a subtype of `EObject`, so a
+rule on any class can extend a rule on `EObject`. A rule that declares fewer or more source
 pattern elements than the rule it extends stops the run with an
 ``ATLExecutionError/invalidOperation(_:)``, and a variable whose type does not conform
 with an ``ATLExecutionError/typeError(_:)``; both name the two rules and the variable.
@@ -433,7 +434,10 @@ Usage: `thisModule.sqlTypes.get('String')`
 
 Contextual helpers are identified by their context type and name. A call dispatches on the
 dynamic type of the receiver, and the most specific context type wins, so
-`helper context A def : f()` and `helper context B def : f()` can coexist. A helper
+`helper context A def : f()` and `helper context B def : f()` can coexist. A helper whose
+context is `EObject` applies to every model object, but every helper whose context is the
+receiver's class or one of its declared supertypes is more specific, and it is in turn more
+specific than a helper on `OclAny`. A helper
 declared without a parameter list (`def : name : Type = ...`) is an attribute whose value
 is computed once per receiver. A host application can add helpers written in Swift; see
 ``ATLNativeHelper``.
@@ -631,7 +635,10 @@ of one element.
   `toRadians`.
 - **Types**: `oclIsKindOf` and `oclIsTypeOf` (over the complete supertype closure),
   `oclAsType`, `oclType`, `oclIsUndefined`, `MM!Class.allInstances()` and
-  `MM!Class.allInstancesFrom('IN')`.
+  `MM!Class.allInstancesFrom('IN')`. As in EMF, every model object is an `EObject`:
+  `oclIsKindOf(ECORE!EObject)` holds for every model object, while `oclIsTypeOf` holds only
+  for an object whose class is `EObject` itself. Where a metamodel names `EObject`, such
+  as Ecore's own, `allInstances()` of it lists every object of the model.
 - **Reflection**: the operations described under Reflection and Containment below.
 
 ### Reflection and Containment

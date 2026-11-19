@@ -541,19 +541,8 @@ public final class ATLVirtualMachine {
         return try ATLRuleInheritance.effectiveRules(for: module.matchedRules) { sub, base in
             let subClass = try self.sourceClass(forType: sub.type).eClass
             let baseClass = try self.sourceClass(forType: base.type).eClass
-            return Self.conforms(subClass, to: baseClass)
+            return ATLTypeMatching.conforms(subClass, to: baseClass)
         }
-    }
-
-    /// Decides whether a class is the same as, or a subtype of, another class.
-    ///
-    /// - Parameters:
-    ///   - candidate: The potential subtype
-    ///   - base: The potential supertype
-    /// - Returns: `true` if `candidate` conforms to `base`
-    static func conforms(_ candidate: EClass, to base: EClass) -> Bool {
-        if candidate.name == base.name { return true }
-        return candidate.eSuperTypes.contains { conforms($0, to: base) }
     }
 
     /// Looks up the class and source model named by a qualified source type.
@@ -702,7 +691,7 @@ public final class ATLVirtualMachine {
             guard let resource = executionContext.getSource(alias) else {
                 throw ATLExecutionError.invalidOperation("Source model '\(alias)' not found")
             }
-            instanceLists.append(await resource.getAllInstancesOf(eClass))
+            instanceLists.append(await ATLTypeMatching.instances(of: eClass, in: resource))
         }
 
         var tuples: [[any EObject]] = [[]]

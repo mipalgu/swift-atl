@@ -1347,7 +1347,7 @@ public struct ATLMethodCallExpression: ATLExpression, Sendable, Equatable, Hasha
 
         // Get all instances of this class from the source resource
         if context.dependencyRecorder.isRecording { context.recordExtent(className, isSource: true) }
-        let instances = await sourceResource.getAllInstancesOf(eClass)
+        let instances = await ATLTypeMatching.instances(of: eClass, in: sourceResource)
 
         // Return an EcoreValueArray containing all instances
         return EcoreValueArray(instances.map { $0 as any EcoreValue })
@@ -1461,17 +1461,7 @@ public struct ATLMethodCallExpression: ATLExpression, Sendable, Equatable, Hasha
         guard let typeName = typeName as? String else {
             throw ATLExecutionError.typeError("oclIsKindOf() requires String type name argument")
         }
-        guard let eObject = receiverValue as? (any EObject),
-              let eClass = eObject.eClass as? EClass else {
-            return false
-        }
-        // Walk the class hierarchy
-        var current: EClass? = eClass
-        while let cls = current {
-            if cls.name == typeName { return true }
-            current = cls.eSuperTypes.first
-        }
-        return false
+        return ATLTypeMatching.isKind(receiverValue, of: typeName)
     }
 
     /// Handles `notEmpty()`, returns `true` when the collection or string is non-empty.

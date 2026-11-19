@@ -716,7 +716,7 @@ public final class ATLIncrementalTransformation {
         let affectedGuards = guardIndex.dependents(affectedBy: impact)
         let reorders = Self.reordersContents(changes, impact: impact)
         for position in rules.indices {
-            if reorders || !patternClassNames[position].isDisjoint(with: impact.affectedExtents) {
+            if reorders || extentsAffect(position, impact) {
                 let (evaluated, changed) = try await rematch(position, affectedGuards: affectedGuards)
                 guardsEvaluated += evaluated
                 candidatesChanged = candidatesChanged || changed
@@ -806,6 +806,22 @@ public final class ATLIncrementalTransformation {
         }
     }
 
+    /// Whether changes alter the instances of the classes of a rule's source patterns.
+    ///
+    /// A source pattern typed `EObject` has every object as an instance, so any change to
+    /// an extent alters its instances.
+    ///
+    /// - Parameters:
+    ///   - position: The position of the rule.
+    ///   - impact: The impact of the changes.
+    /// - Returns: `true` when an extent of a source pattern of the rule changed.
+    private func extentsAffect(_ position: Int, _ impact: ModelChangeImpact) -> Bool {
+        if patternClasses[position].contains(where: { $0.eClass.isEObject }) {
+            return !impact.affectedExtents.isEmpty
+        }
+        return !patternClassNames[position].isDisjoint(with: impact.affectedExtents)
+    }
+
     /// Matches a rule again against the current source models.
     ///
     /// Tuples whose guards were evaluated before and are not affected keep their outcome.
@@ -822,7 +838,7 @@ public final class ATLIncrementalTransformation {
             guard let resource = context.getSource(alias) else {
                 throw ATLExecutionError.invalidOperation("Source model '\(alias)' not found")
             }
-            lists.append(await resource.getAllInstancesOf(eClass))
+            lists.append(await ATLTypeMatching.instances(of: eClass, in: resource))
         }
         var tuples: [[any EObject]] = [[]]
         for instances in lists {
