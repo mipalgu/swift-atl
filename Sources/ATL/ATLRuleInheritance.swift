@@ -207,11 +207,13 @@ struct ATLMatchConflict: Error, Equatable {
 ///
 /// Matches with different ``ATLMatchIdentity`` values never affect each other. Among the
 /// matches with one identity, a match of a rule is not made when a rule extending it,
-/// directly or through other rules, makes the match too. Of two sub-rules of one rule that
-/// make the match, the sub-rule that Eclipse ATL tries first is applied: sub-rules with a
-/// guard before those without one, each in declaration order. With
-/// ``ATLSiblingRuleConflicts/error``, such sub-rules are a conflict instead, as are, under
-/// every option, two rules that do not extend a common rule.
+/// directly or through other rules, makes the match too, except that under
+/// ``ATLSubRulePrecedence/eclipse`` a match of a rule with a guard is made instead of the
+/// matches of the rules extending it without a guard, and of the rules extending those. Of
+/// two sub-rules of one rule that make the match, the sub-rule that Eclipse ATL tries
+/// first is applied: sub-rules with a guard before those without one, each in declaration
+/// order. With ``ATLSiblingRuleConflicts/error``, such sub-rules are a conflict instead, as
+/// are, under every option, two rules that do not extend a common rule.
 struct ATLMatchSelection {
 
     /// The positions of the matches that are made, in ascending order.
@@ -232,11 +234,13 @@ struct ATLMatchSelection {
     ///   - declarationOrder: The position of each matched rule of the module, abstract rules
     ///     included, by name.
     ///   - conflicts: What two sub-rules of one rule that make the same match give.
+    ///   - precedence: Which of a rule and the rules extending it that make the same match
+    ///     is applied.
     /// - Throws: ``ATLMatchConflict`` for the first two matches, in candidate order, with the
     ///   same identity that are both made.
     init(
         rules: [ATLEffectiveMatchedRule], identities: [ATLMatchIdentity], declarationOrder: [String: Int],
-        conflicts: ATLSiblingRuleConflicts
+        conflicts: ATLSiblingRuleConflicts, precedence: ATLSubRulePrecedence
     ) throws(ATLMatchConflict) {
         var comparisons = 0
         var made = Set<Int>()
@@ -245,12 +249,11 @@ struct ATLMatchSelection {
         for positions in groups.values {
             switch conflicts {
             case .error:
-                // Every match without a match of a rule extending it is made
+                // Every match that no match of another rule takes precedence over is made
                 for position in positions {
-                    let name = rules[position].rule.name
                     let hidden = positions.contains { other in
                         comparisons += 1
-                        return rules[other].rule.name != name && rules[other].chainNames.contains(name)
+                        return Self.precedes(rules[other], over: rules[position], precedence: precedence)
                     }
                     if !hidden { made.insert(position) }
                 }
@@ -258,7 +261,8 @@ struct ATLMatchSelection {
                 let hierarchies = Dictionary(grouping: positions) { rules[$0].chain[0].name }
                 for members in hierarchies.values {
                     let (winner, choice) = Self.firstMatch(
-                        among: members, rules: rules, declarationOrder: declarationOrder, comparisons: &comparisons)
+                        among: members, rules: rules, declarationOrder: declarationOrder, precedence: precedence,
+                        comparisons: &comparisons)
                     made.insert(winner)
                     if let choice { choices.append(choice) }
                 }
@@ -278,24 +282,56 @@ struct ATLMatchSelection {
         self.comparisons = comparisons
     }
 
+    /// Decides whether the match of one rule takes precedence over the match of another
+    /// with the same identity.
+    ///
+    /// - Parameters:
+    ///   - rule: The rule of the match that may take precedence.
+    ///   - other: The rule of the other match.
+    ///   - precedence: Which of a rule and the rules extending it is applied.
+    /// - Returns: `true` if `rule` extends `other`, directly or through other rules, and,
+    ///   under ``ATLSubRulePrecedence/eclipse``, `other` has no guard or `rule` extends it
+    ///   through a rule with a guard that extends `other` directly; also `true` under
+    ///   ``ATLSubRulePrecedence/eclipse`` if `other` extends `rule` through a rule without
+    ///   a guard that extends `rule` directly, and `rule` has a guard.
+    private static func precedes(
+        _ rule: ATLEffectiveMatchedRule, over other: ATLEffectiveMatchedRule, precedence: ATLSubRulePrecedence
+    ) -> Bool {
+        /// Whether a rule with a guard comes before the sub-rule that leads to a rule extending it.
+        func guardFirst(_ base: ATLMatchedRule, in chain: [ATLMatchedRule], at level: Int) -> Bool {
+            precedence == .eclipse && base.hasGuard && chain.indices.contains(level + 1)
+                && !chain[level + 1].hasGuard
+        }
+        guard rule.rule.name != other.rule.name else { return false }
+        if let level = rule.chainNames.firstIndex(of: other.rule.name) {
+            return !guardFirst(other.rule, in: rule.chain, at: level)
+        }
+        if let level = other.chainNames.firstIndex(of: rule.rule.name) {
+            return guardFirst(rule.rule, in: other.chain, at: level)
+        }
+        return false
+    }
+
     /// Finds the match that Eclipse ATL makes among matches of one rule hierarchy.
     ///
     /// Starting at the root rule, the sub-rules whose matches are among `members` are tried
     /// in order, and the first is descended into, until a rule with no such sub-rule is
-    /// reached.
+    /// reached. Under ``ATLSubRulePrecedence/eclipse``, a rule with a guard whose own match
+    /// is among `members` is applied before its sub-rules without a guard are tried.
     ///
     /// - Parameters:
     ///   - members: The positions of the candidate matches with one identity whose rules
     ///     share a root rule.
     ///   - rules: The rule of each candidate match.
     ///   - declarationOrder: The position of each matched rule of the module, by name.
+    ///   - precedence: Which of a rule and the rules extending it is applied.
     ///   - comparisons: The number of candidate matches examined, increased by those
     ///     examined here.
     /// - Returns: The position of the match made, and the first choice between sub-rules
     ///   that decided it, if any.
     private static func firstMatch(
         among members: [Int], rules: [ATLEffectiveMatchedRule], declarationOrder: [String: Int],
-        comparisons: inout Int
+        precedence: ATLSubRulePrecedence, comparisons: inout Int
     ) -> (winner: Int, choice: ATLSiblingChoice?) {
         var remaining = members
         var depth = 0
@@ -308,12 +344,16 @@ struct ATLMatchSelection {
                 let child = rules[member].chain[depth + 1]
                 branches[child.name, default: (child, [])].members.append(member)
             }
-            let tried = branches.values.map(\.rule).sorted {
+            let own = remaining.first { rules[$0].chain.count == depth + 1 }
+            let tried = branches.values.map(\.rule).filter {
+                // Eclipse ATL applies a matching rule with a guard before its sub-rules without one
+                precedence == .extendingRule || own == nil || !parent.hasGuard || $0.hasGuard
+            }.sorted {
                 ($0.hasGuard ? 0 : 1, declarationOrder[$0.name] ?? .max)
                     < ($1.hasGuard ? 0 : 1, declarationOrder[$1.name] ?? .max)
             }
             guard let next = tried.first, let nextMembers = branches[next.name]?.members else {
-                let winner = remaining.first { rules[$0].chain.count == depth + 1 } ?? remaining[0]
+                let winner = own ?? remaining[0]
                 let made = choice.map {
                     ATLSiblingChoice(position: winner, parent: $0.parent, siblings: $0.siblings, applied: $0.applied)
                 }

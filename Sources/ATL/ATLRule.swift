@@ -102,9 +102,10 @@ public struct ATLMatchedRule: Sendable, Equatable, Hashable {
     /// A sub-rule inherits the target patterns and bindings of its super rule
     /// and may override them. It declares the source pattern variables of its super
     /// rule, which are matched to them by name, in any order. When a source element
-    /// matches both a rule and one of its sub-rules, only the sub-rule is applied, and
-    /// when it matches several sub-rules of one rule, the first of them in the order of
-    /// Eclipse ATL is applied; see ``ATLOptions/siblingRuleConflicts``.
+    /// matches both a rule and one of its sub-rules, only one of them is applied, as
+    /// ``ATLOptions/subRulePrecedence`` selects, and when it matches several sub-rules of
+    /// one rule, the first of them in the order of Eclipse ATL is applied; see
+    /// ``ATLOptions/siblingRuleConflicts``.
     public let superRuleName: String?
 
     /// Whether the rule is abstract.

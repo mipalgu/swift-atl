@@ -21,7 +21,9 @@ This package provides the ATL library. The `swift-atl` command-line tool is part
   ATL, two matched rules that match the same source element, or bind the same source
   elements to the same variables, are reported as an error, unless both extend the same
   rule: then the first in Eclipse ATL's order applies, with a warning, or with an error
-  when `ATLOptions.siblingRuleConflicts` is `.error`
+  when `ATLOptions.siblingRuleConflicts` is `.error`; of a rule and the rules extending
+  it, the one that Eclipse ATL tries first applies, or always the extending rule when
+  `ATLOptions.subRulePrecedence` is `.extendingRule`
 - **OCL expressions**: navigation, collections and iterators, `let`, tuples, three-valued
   logic and a broad library of built-in and reflective operations
 - **Refining mode**: in-place transformations that keep unmatched elements, including
@@ -109,6 +111,17 @@ with a warning; set `siblingRuleConflicts` to `.error` to stop the run instead:
 ```swift
 var options = ATLOptions.standard
 options.siblingRuleConflicts = .error
+```
+
+Under `ATLOptions.standard`, a rule and the rules extending it are tried in the order of
+Eclipse ATL, so a rule with a guard transforms the elements it matches in place of the
+rules extending it that have no guard. `ATLOptions.legacy` lets a rule that extends
+another always take precedence over it instead, as swift-atl 0.6 did; set
+`subRulePrecedence` to choose either behaviour:
+
+```swift
+var options = ATLOptions.standard
+options.subRulePrecedence = .extendingRule
 ```
 
 ## Documentation

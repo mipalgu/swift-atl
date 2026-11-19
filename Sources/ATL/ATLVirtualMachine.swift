@@ -143,8 +143,8 @@ public final class ATLVirtualMachine {
     /// The monitor of the run in progress, if any.
     private var monitor: ATLRunMonitor?
 
-    /// The number of times the last run examined a match to decide whether a rule
-    /// extending another hides it.
+    /// The number of times the last run examined a match to decide whether the match of a
+    /// related rule takes precedence over it.
     ///
     /// Each examination looks at one match with the same identity, so the count grows
     /// with the number of matches rather than with its square.
@@ -591,10 +591,11 @@ public final class ATLVirtualMachine {
 
     /// Matches all rules against the source models and creates their target elements.
     ///
-    /// A source element matched by both a rule and a rule extending it is
-    /// transformed by the extending rule only. Of two rules extending the same rule that
-    /// both match an element, the first that Eclipse ATL tries transforms it, with a
-    /// warning, unless ``ATLOptions/siblingRuleConflicts`` makes that an error; see
+    /// A source element matched by both a rule and a rule extending it is transformed by
+    /// only one of them, as ``ATLOptions/subRulePrecedence`` selects. Of two rules extending
+    /// the same rule that both match an element, the first that Eclipse ATL tries
+    /// transforms it, with a warning, unless ``ATLOptions/siblingRuleConflicts`` makes that
+    /// an error; see
     /// ``ATLMatchSelection``. Any other two matches with the same ``ATLMatchIdentity``
     /// are an error, as in Eclipse ATL, because a source element resolves to the target
     /// element of the one rule that transforms it: two rules that match the same element,
@@ -625,7 +626,8 @@ public final class ATLVirtualMachine {
         do {
             selection = try ATLMatchSelection(
                 rules: candidates.map(\.rule), identities: candidates.map { $0.rule.matchIdentity(of: $0.sourceIDs) },
-                declarationOrder: ruleDeclarationOrder, conflicts: options.siblingRuleConflicts)
+                declarationOrder: ruleDeclarationOrder, conflicts: options.siblingRuleConflicts,
+                precedence: options.subRulePrecedence)
         } catch {
             throw Self.severalRulesError(
                 first: error.first, second: error.second, match: candidates[error.position])

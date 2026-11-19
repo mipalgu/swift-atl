@@ -913,7 +913,8 @@ public final class ATLIncrementalTransformation {
         do {
             selection = try ATLMatchSelection(
                 rules: keys.map { rules[$0.rule] }, identities: keys.map { rules[$0.rule].matchIdentity(of: $0.sources) },
-                declarationOrder: machine.ruleDeclarationOrder, conflicts: options.siblingRuleConflicts)
+                declarationOrder: machine.ruleDeclarationOrder, conflicts: options.siblingRuleConflicts,
+                precedence: options.subRulePrecedence)
         } catch {
             throw Fallback(
                 reason: ATLExecutionMessage.severalRules(
