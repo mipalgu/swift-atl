@@ -40,11 +40,12 @@ struct ATLCurrentTimeTests {
     @Test("The system clock counts the milliseconds since the Unix epoch")
     func systemClock() async throws {
         let context = try await context("helper def : now : Integer = thisModule.getCurrentTime();")
-        let before = Int((Date().timeIntervalSince1970 * 1000).rounded(.down))
+        // Integers narrower than 64 bits wrap around, so the readings are compared by difference.
+        let before = Int(truncatingIfNeeded: Int64((Date().timeIntervalSince1970 * 1000).rounded(.down)))
         let now = try #require(try await context.callHelper("now", arguments: []) as? Int)
-        let after = Int((Date().timeIntervalSince1970 * 1000).rounded(.up))
-        #expect(before <= now && now <= after)
-        #expect(ATLClock.system.millisecondsSinceEpoch() >= before)
+        let after = Int(truncatingIfNeeded: Int64((Date().timeIntervalSince1970 * 1000).rounded(.up)))
+        #expect(now &- before >= 0 && after &- now >= 0)
+        #expect(ATLClock.system.millisecondsSinceEpoch() &- before >= 0)
     }
 
     @Test("A helper of the module called getCurrentTime takes precedence over the operation")

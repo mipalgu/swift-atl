@@ -34,9 +34,11 @@ public struct ATLClock: Sendable {
 
     /// The clock of the system, which gives the current time.
     ///
-    /// The milliseconds are rounded down to a whole number.
+    /// The milliseconds are rounded down to a whole number.  On a platform whose integers
+    /// are narrower than 64 bits the count does not fit and wraps around, so that only the
+    /// difference between two readings is meaningful there.
     public static let system = ATLClock {
-        Int((Date().timeIntervalSince1970 * millisecondsPerSecond).rounded(.down))
+        Int(truncatingIfNeeded: Int64((Date().timeIntervalSince1970 * millisecondsPerSecond).rounded(.down)))
     }
 
     /// Creates a clock that always gives the same time.
