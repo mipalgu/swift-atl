@@ -97,7 +97,7 @@ public struct ATLSourceModel: IModel {
                 continue
             }
 
-            if objectClass.conforms(to: type) {
+            if ATLTypeMatching.isInstance(of: objectClass, of: type) {
                 result.append(object.id)
             }
         }
@@ -232,7 +232,7 @@ public struct ATLTargetModel: IModel {
                 continue
             }
 
-            if objectClass.conforms(to: type) {
+            if ATLTypeMatching.isInstance(of: objectClass, of: type) {
                 result.append(object.id)
             }
         }

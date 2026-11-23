@@ -168,6 +168,48 @@ public enum ATLSubRulePrecedence: String, Sendable, CaseIterable, Hashable {
     case extendingRule = "extending-rule"
 }
 
+/// What a source element gives that an abstract rule matches but none of the rules
+/// extending it match.
+///
+/// Eclipse ATL tries the rules that extend a rule one after another and commits to the
+/// first that matches an element, whether it is abstract or not. An abstract rule is then
+/// never itself applied: only the rules extending it are tried in turn, so the element is
+/// transformed by none of the rules of that hierarchy when none of them match. The raw value
+/// of each case is its spelling on a command line.
+public enum ATLAbstractRuleMatching: String, Sendable, CaseIterable, Hashable {
+    /// An abstract rule is tried like any other rule, as in Eclipse ATL.
+    ///
+    /// Once an abstract rule matches an element, only the rules extending it can transform
+    /// the element, and the rules that would have been tried after the abstract rule are
+    /// not. This is the default.
+    case eclipse
+
+    /// An abstract rule none of whose sub-rules match an element is passed over.
+    ///
+    /// The rules that would have been tried after the abstract rule are tried next, as
+    /// though the abstract rule had not matched, so that one of them can transform the
+    /// element.
+    case skip
+}
+
+/// What a source element gives that an abstract rule matches when no rule extends that
+/// abstract rule.
+///
+/// Eclipse ATL matches such a rule like any other and creates its target elements, but has
+/// no way to apply it, so the transformation fails. The raw value of each case is its
+/// spelling on a command line.
+public enum ATLAbstractLeafRules: String, Sendable, CaseIterable, Hashable {
+    /// The run stops with an error naming the rule and the element, before any rule creates
+    /// a target element, much as Eclipse ATL fails.
+    ///
+    /// The error is ``ATLExecutionError/invalidOperation(_:)``. A rule that matches no
+    /// element does not stop the run. This is the default.
+    case error
+
+    /// An abstract rule that no rule extends never matches, so it transforms nothing.
+    case ignore
+}
+
 /// Options that choose between the current behaviour of ATL processing and the
 /// behaviour of swift-atl 0.6.
 ///
@@ -226,6 +268,21 @@ public struct ATLOptions: Sendable, Hashable {
     /// without a guard that extend a matching rule with one do not compete.
     public var subRulePrecedence: ATLSubRulePrecedence
 
+    /// What a source element gives that an abstract rule matches but none of the rules
+    /// extending it match.
+    ///
+    /// The virtual machine and the incremental transformation that are given the options
+    /// let the abstract rule keep the rules tried after it from transforming the element, or
+    /// pass over it, as this selects.
+    public var abstractRuleMatching: ATLAbstractRuleMatching
+
+    /// What a source element gives that an abstract rule matches when no rule extends that
+    /// abstract rule.
+    ///
+    /// The virtual machine and the incremental transformation that are given the options
+    /// stop the run with an error, or let the abstract rule match nothing, as this selects.
+    public var abstractLeafRules: ATLAbstractLeafRules
+
     /// Creates a set of options.
     ///
     /// - Parameters:
@@ -237,13 +294,19 @@ public struct ATLOptions: Sendable, Hashable {
     ///     both match gives.
     ///   - subRulePrecedence: Which rule transforms a source element that a rule and a rule
     ///     extending it both match.
+    ///   - abstractRuleMatching: What a source element gives that an abstract rule matches
+    ///     but none of the rules extending it match.
+    ///   - abstractLeafRules: What a source element gives that an abstract rule matches when
+    ///     no rule extends that abstract rule.
     public init(
         collectionRangeSyntax: ATLCollectionRangeSyntax = .ocl,
         collectionRangeEncoding: ATLCollectionRangeEncoding = .collectionRange,
         integerDivision: ATLIntegerDivision = .real,
         bagRepresentation: ATLBagRepresentation = .bag,
         siblingRuleConflicts: ATLSiblingRuleConflicts = .warning,
-        subRulePrecedence: ATLSubRulePrecedence = .eclipse
+        subRulePrecedence: ATLSubRulePrecedence = .eclipse,
+        abstractRuleMatching: ATLAbstractRuleMatching = .eclipse,
+        abstractLeafRules: ATLAbstractLeafRules = .error
     ) {
         self.collectionRangeSyntax = collectionRangeSyntax
         self.collectionRangeEncoding = collectionRangeEncoding
@@ -251,6 +314,8 @@ public struct ATLOptions: Sendable, Hashable {
         self.bagRepresentation = bagRepresentation
         self.siblingRuleConflicts = siblingRuleConflicts
         self.subRulePrecedence = subRulePrecedence
+        self.abstractRuleMatching = abstractRuleMatching
+        self.abstractLeafRules = abstractLeafRules
     }
 
     /// The current behaviour, which the default initialiser also gives.
@@ -259,7 +324,9 @@ public struct ATLOptions: Sendable, Hashable {
     /// as OCL collection ranges, `/` divides two Integers into a Real, Bags are
     /// a collection kind of their own, a rule and the rules extending it are tried in the
     /// order of Eclipse ATL, and the first of two sub-rules that match the same element
-    /// transforms it, with a warning.
+    /// transforms it, with a warning. An abstract rule that matches an element keeps the rules
+    /// tried after it from transforming the element, and an abstract rule that no rule
+    /// extends stops the run once it matches, as in Eclipse ATL.
     public static let standard = ATLOptions()
 
     /// The behaviour of swift-atl 0.6.
@@ -268,12 +335,14 @@ public struct ATLOptions: Sendable, Hashable {
     /// Ranges built in code are written to XMI as OCL collection ranges, because
     /// swift-atl 0.6 had no ranges that it could write. `/` truncates the quotient of
     /// two Integers to an Integer, Bags are Sequences, and a rule that extends another
-    /// always takes precedence over it. As swift-atl 0.6 did not stop a run for two
+    /// always takes precedence over it. An abstract rule none of whose sub-rules match an
+    /// element is passed over, and an abstract rule that no rule extends transforms nothing.
+    /// As swift-atl 0.6 did not stop a run for two
     /// sub-rules that match the same element, the first of them transforms it, with a
     /// warning, as under ``standard``.
     public static let legacy = ATLOptions(
         collectionRangeSyntax: .eclipse, integerDivision: .truncating, bagRepresentation: .sequence,
-        subRulePrecedence: .extendingRule)
+        subRulePrecedence: .extendingRule, abstractRuleMatching: .skip, abstractLeafRules: .ignore)
 
     /// Creates the options that a choice of semantics selects.
     ///

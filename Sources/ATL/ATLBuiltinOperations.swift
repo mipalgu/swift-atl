@@ -746,7 +746,7 @@ enum ATLBuiltinOperations {
             let package =
                 isSource
                 ? context.module.sourceMetamodels[alias] : context.module.targetMetamodels[alias]
-            guard let eClass = package?.getClassifier(className) as? EClass else { continue }
+            guard let package, let eClass = ATLTypeMatching.eClass(named: className, in: package) else { continue }
             classFound = true
             let resource = isSource ? context.getSource(alias) : context.getTarget(alias)
             guard let resource else { continue }
@@ -927,13 +927,18 @@ enum ATLTypeOperations {
         switch (methodName, arguments.count) {
         case ("oclIsKindOf", 1):
             let name = try await typeName(arguments[0], context)
-            return ATLBuiltinResult(value: ATLTypeMatching.isKind(receiver, of: name))
+            return ATLBuiltinResult(
+                value: ATLTypeMatching.isKind(
+                    receiver, of: name, declaredEObject: context.module.declaresOwnEObject(name)))
         case ("oclIsTypeOf", 1):
             let name = try await typeName(arguments[0], context)
-            return ATLBuiltinResult(value: ATLTypeMatching.isType(receiver, of: name))
+            return ATLBuiltinResult(
+                value: ATLTypeMatching.isType(
+                    receiver, of: name, declaredEObject: context.module.declaresOwnEObject(name)))
         case ("oclAsType", 1):
             let name = try await typeName(arguments[0], context)
-            return ATLBuiltinResult(value: try cast(receiver, to: name))
+            return ATLBuiltinResult(
+                value: try cast(receiver, to: name, declaredEObject: context.module.declaresOwnEObject(name)))
         case ("oclType", 0):
             return ATLBuiltinResult(value: modelType(of: receiver))
         default:
@@ -960,7 +965,7 @@ enum ATLTypeOperations {
         }
     }
 
-    private static func cast(_ value: (any EcoreValue)?, to typeName: String) throws
+    private static func cast(_ value: (any EcoreValue)?, to typeName: String, declaredEObject: Bool) throws
         -> (any EcoreValue)?
     {
         guard let value else { return nil }
@@ -969,7 +974,7 @@ enum ATLTypeOperations {
         {
             return Double(integer)
         }
-        guard ATLTypeMatching.isKind(value, of: typeName) else {
+        guard ATLTypeMatching.isKind(value, of: typeName, declaredEObject: declaredEObject) else {
             throw ATLExecutionError.typeError(
                 "Cannot cast a value of type '\(ATLTypeMatching.typeName(of: value))' to '\(typeName)'")
         }

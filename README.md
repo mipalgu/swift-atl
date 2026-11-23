@@ -23,7 +23,8 @@ This package provides the ATL library. The `swift-atl` command-line tool is part
   rule: then the first in Eclipse ATL's order applies, with a warning, or with an error
   when `ATLOptions.siblingRuleConflicts` is `.error`; of a rule and the rules extending
   it, the one that Eclipse ATL tries first applies, or always the extending rule when
-  `ATLOptions.subRulePrecedence` is `.extendingRule`
+  `ATLOptions.subRulePrecedence` is `.extendingRule`; abstract rules match as in Eclipse
+  ATL (`ATLOptions.abstractRuleMatching` and `ATLOptions.abstractLeafRules`)
 - **OCL expressions**: navigation, collections and iterators, `let`, tuples, three-valued
   logic and a broad library of built-in and reflective operations
 - **Refining mode**: in-place transformations that keep unmatched elements, including
@@ -122,6 +123,22 @@ another always take precedence over it instead, as swift-atl 0.6 did; set
 ```swift
 var options = ATLOptions.standard
 options.subRulePrecedence = .extendingRule
+```
+
+Abstract rules also match as in Eclipse ATL under `ATLOptions.standard`: once an abstract
+rule matches an element, only the rules extending it can transform it, and an abstract rule
+that no rule extends stops the run once it matches. `ATLOptions.legacy` passes over an
+abstract rule none of whose sub-rules match, and lets an abstract rule that no rule extends
+match nothing; set `abstractRuleMatching` to `.skip` and `abstractLeafRules` to `.ignore`
+to choose these separately.
+
+`MM!EObject` denotes Ecore's `EObject`, the supertype of every class, unless the metamodel
+`MM` declares a class of that name, and `thisModule.getCurrentTime()` gives the current
+time in milliseconds since the Unix epoch, read from the clock of the virtual machine:
+
+```swift
+let vm = ATLVirtualMachine(module: module, options: .standard)
+vm.clock = .fixed(1_700_000_000_000)
 ```
 
 ## Documentation

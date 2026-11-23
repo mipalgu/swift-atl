@@ -135,7 +135,8 @@ extension ATLExecutionContext {
                 continue
             }
             guard let receiver,
-                let distance = ATLTypeMatching.distance(of: receiver, to: contextType),
+                let distance = ATLTypeMatching.distance(
+                    of: receiver, to: contextType, declaredEObject: module.declaresOwnEObject(contextType)),
                 includingOclAny || distance < ATLTypeMatching.anyDistance
             else { continue }
             if best == nil || distance < best!.distance { best = (candidate, distance) }

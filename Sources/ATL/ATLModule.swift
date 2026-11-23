@@ -361,6 +361,29 @@ public struct ATLModule: Sendable, Equatable, Hashable {
         Self.alias(forMetamodel: metamodelName, in: targetMetamodels, declared: declaredMetamodelNames)
     }
 
+    /// Whether a type name denotes a class called `EObject` that its metamodel declares for
+    /// itself, rather than Ecore's `EObject`, the supertype of every class.
+    ///
+    /// `MM!EObject` denotes a class of the metamodel `MM` when `MM` is a source or target
+    /// metamodel of the module, is not Ecore itself, and declares a classifier called
+    /// `EObject`. Every other type name, including an unqualified `EObject`, gives `false`.
+    ///
+    /// - Parameter typeName: A type name, such as `MM!EObject`.
+    /// - Returns: `true` when the type name denotes a class that its metamodel declares.
+    public func declaresOwnEObject(_ typeName: String) -> Bool {
+        guard ATLTypeMatching.baseName(typeName) == EcoreClassifier.eObject.rawValue,
+            let separator = typeName.firstIndex(of: ATLLanguage.metamodelSeparator)
+        else { return false }
+        let metamodelName = String(typeName[..<separator]).trimmingCharacters(in: .whitespaces)
+        let metamodel =
+            sourceAlias(forMetamodel: metamodelName).flatMap { sourceMetamodels[$0] }
+            ?? targetAlias(forMetamodel: metamodelName).flatMap { targetMetamodels[$0] }
+        guard let metamodel else { return false }
+        return !ATLTypeMatching.isUniversal(
+            ATLTypeMatching.eClass(named: EcoreClassifier.eObject.rawValue, in: metamodel)
+                ?? ATLTypeMatching.universalEObject)
+    }
+
     private static func alias(
         forMetamodel metamodelName: String,
         in metamodels: OrderedDictionary<String, EPackage>,

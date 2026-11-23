@@ -23,6 +23,9 @@ enum ATLReservedNames {
     /// The operation that looks up a named target element of a transformed source element.
     static let resolveTemp = "resolveTemp"
 
+    /// The module operation that gives the current time, in milliseconds since the Unix epoch.
+    static let getCurrentTime = "getCurrentTime"
+
     /// The pseudo-feature under which incremental execution records that a computation
     /// read the trace of a source element.
     ///

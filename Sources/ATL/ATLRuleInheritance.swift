@@ -59,6 +59,19 @@ struct ATLEffectiveMatchedRule {
     /// source elements of ``rule`` are bound to, in the order of the elements.
     let identityVariables: [String]
 
+    /// Whether another matched rule extends ``rule``.
+    let isExtended: Bool
+
+    /// Whether a match of ``rule`` only stands for the rules extending it.
+    ///
+    /// The match of an abstract rule that other rules extend is never made: it decides only
+    /// which of the rules extending it can be applied.
+    var isProbe: Bool { rule.isAbstract && isExtended }
+
+    /// Whether ``rule`` is abstract and no other matched rule extends it, so that it cannot
+    /// be applied.
+    var isAbstractLeaf: Bool { rule.isAbstract && !isExtended }
+
     /// Creates the effective rule of an inheritance chain.
     ///
     /// - Parameters:
@@ -67,11 +80,13 @@ struct ATLEffectiveMatchedRule {
     ///   - targetPatterns: The merged target patterns of the chain.
     ///   - sourcePositions: For each rule of `chain`, the position among the source elements
     ///     of `rule` of the element bound to each of its source pattern variables.
+    ///   - isExtended: Whether another matched rule extends `rule`.
     init(
         rule: ATLMatchedRule, chain: [ATLMatchedRule], targetPatterns: [ATLEffectiveTargetPattern],
-        sourcePositions: [[Int]]
+        sourcePositions: [[Int]], isExtended: Bool = false
     ) {
         self.rule = rule
+        self.isExtended = isExtended
         self.chain = chain
         self.targetPatterns = targetPatterns
         self.sourcePositions = sourcePositions
@@ -214,6 +229,14 @@ struct ATLMatchConflict: Error, Equatable {
 /// first is applied: sub-rules with a guard before those without one, each in declaration
 /// order. With ``ATLSiblingRuleConflicts/error``, such sub-rules are a conflict instead, as
 /// are, under every option, two rules that do not extend a common rule.
+///
+/// A candidate match of an abstract rule that other rules extend
+/// (``ATLEffectiveMatchedRule/isProbe``) takes part in the decision like the match of any
+/// other rule, but is never made, so that the element is transformed by none of the rules
+/// of its hierarchy unless a rule extending the abstract rule makes the match too. It does
+/// not conflict with the matches of rules of other hierarchies. A match of an abstract rule
+/// that no rule extends is decided like any other, and is reported in ``abstractLeaves``
+/// instead of being made.
 struct ATLMatchSelection {
 
     /// The positions of the matches that are made, in ascending order.
@@ -225,6 +248,12 @@ struct ATLMatchSelection {
 
     /// The number of times a candidate match was examined while deciding.
     let comparisons: Int
+
+    /// The positions of the matches of abstract rules that no rule extends which would be
+    /// made, in ascending order.
+    ///
+    /// Such a rule cannot be applied, so a run stops when there is any.
+    let abstractLeaves: [Int]
 
     /// Decides which candidate matches are made.
     ///
@@ -264,20 +293,31 @@ struct ATLMatchSelection {
                         among: members, rules: rules, declarationOrder: declarationOrder, precedence: precedence,
                         comparisons: &comparisons)
                     made.insert(winner)
-                    if let choice { choices.append(choice) }
+                    if let choice, !rules[winner].isProbe { choices.append(choice) }
                 }
             }
         }
         var selected: [Int] = []
-        var ruleByMatch: [ATLMatchIdentity: String] = [:]
+        var leaves: [Int] = []
+        var madeByMatch: [ATLMatchIdentity: [Int]] = [:]
         for position in made.sorted() {
-            let name = rules[position].rule.name
-            if let first = ruleByMatch.updateValue(name, forKey: identities[position]) {
-                throw ATLMatchConflict(first: first, second: name, position: position)
+            let rule = rules[position]
+            let conflicting = madeByMatch[identities[position], default: []].first { other in
+                // A match that is never made conflicts only within its own hierarchy
+                !(rule.isProbe || rules[other].isProbe) || rule.chain[0].name == rules[other].chain[0].name
             }
-            selected.append(position)
+            if let conflicting {
+                throw ATLMatchConflict(first: rules[conflicting].rule.name, second: rule.rule.name, position: position)
+            }
+            madeByMatch[identities[position], default: []].append(position)
+            if rule.isAbstractLeaf {
+                leaves.append(position)
+            } else if !rule.isProbe {
+                selected.append(position)
+            }
         }
         self.selected = selected
+        self.abstractLeaves = leaves
         self.choices = choices.sorted { $0.position < $1.position }
         self.comparisons = comparisons
     }
@@ -299,7 +339,7 @@ struct ATLMatchSelection {
     ) -> Bool {
         /// Whether a rule with a guard comes before the sub-rule that leads to a rule extending it.
         func guardFirst(_ base: ATLMatchedRule, in chain: [ATLMatchedRule], at level: Int) -> Bool {
-            precedence == .eclipse && base.hasGuard && chain.indices.contains(level + 1)
+            precedence == .eclipse && !base.isAbstract && base.hasGuard && chain.indices.contains(level + 1)
                 && !chain[level + 1].hasGuard
         }
         guard rule.rule.name != other.rule.name else { return false }
@@ -316,8 +356,9 @@ struct ATLMatchSelection {
     ///
     /// Starting at the root rule, the sub-rules whose matches are among `members` are tried
     /// in order, and the first is descended into, until a rule with no such sub-rule is
-    /// reached. Under ``ATLSubRulePrecedence/eclipse``, a rule with a guard whose own match
-    /// is among `members` is applied before its sub-rules without a guard are tried.
+    /// reached. Under ``ATLSubRulePrecedence/eclipse``, a rule with a guard that is not
+    /// abstract and whose own match is among `members` is applied before its sub-rules
+    /// without a guard are tried. The match reached may be that of an abstract rule.
     ///
     /// - Parameters:
     ///   - members: The positions of the candidate matches with one identity whose rules
@@ -347,7 +388,7 @@ struct ATLMatchSelection {
             let own = remaining.first { rules[$0].chain.count == depth + 1 }
             let tried = branches.values.map(\.rule).filter {
                 // Eclipse ATL applies a matching rule with a guard before its sub-rules without one
-                precedence == .extendingRule || own == nil || !parent.hasGuard || $0.hasGuard
+                precedence == .extendingRule || own == nil || parent.isAbstract || !parent.hasGuard || $0.hasGuard
             }.sorted {
                 ($0.hasGuard ? 0 : 1, declarationOrder[$0.name] ?? .max)
                     < ($1.hasGuard ? 0 : 1, declarationOrder[$1.name] ?? .max)
@@ -383,8 +424,16 @@ enum ATLRuleInheritance {
     /// declaration order. The type of each variable must conform to the type of the
     /// variable it stands for.
     ///
+    /// An abstract rule that other rules extend has an effective rule only under
+    /// ``ATLAbstractRuleMatching/eclipse``, and one that no rule extends only under
+    /// ``ATLAbstractLeafRules/error``; neither is ever applied.
+    ///
     /// - Parameters:
     ///   - rules: The matched rules of the module in declaration order
+    ///   - abstractRuleMatching: Whether the abstract rules that other rules extend take part
+    ///     in matching
+    ///   - abstractLeafRules: Whether the abstract rules that no rule extends take part in
+    ///     matching
     ///   - conforms: Decides whether the type of the first source pattern element, of a
     ///     sub-rule, conforms to that of the second, of the rule it extends, as the
     ///     sub-rule must match a subtype of its super rule
@@ -395,10 +444,12 @@ enum ATLRuleInheritance {
     ///   ``ATLExecutionError/typeError(_:)`` if the type of a source pattern element of a
     ///   sub-rule does not conform to the type of the element it stands for
     static func effectiveRules(
-        for rules: [ATLMatchedRule],
+        for rules: [ATLMatchedRule], abstractRuleMatching: ATLAbstractRuleMatching = .skip,
+        abstractLeafRules: ATLAbstractLeafRules = .ignore,
         conforms: (ATLSourcePattern, ATLSourcePattern) throws -> Bool
     ) throws -> [ATLEffectiveMatchedRule] {
         let rulesByName = Dictionary(rules.map { ($0.name, $0) }) { first, _ in first }
+        let extended = Set(rules.compactMap(\.superRuleName))
         var effective: [ATLEffectiveMatchedRule] = []
 
         for rule in rules {
@@ -420,11 +471,15 @@ enum ATLRuleInheritance {
                 chain.insert(superRule, at: 0)
                 current = superRule
             }
-            guard !rule.isAbstract else { continue }
+            let isExtended = extended.contains(rule.name)
+            if rule.isAbstract {
+                let matches = isExtended ? abstractRuleMatching == .eclipse : abstractLeafRules == .error
+                guard matches else { continue }
+            }
             effective.append(
                 ATLEffectiveMatchedRule(
                     rule: rule, chain: chain, targetPatterns: mergedTargetPatterns(of: chain),
-                    sourcePositions: positions))
+                    sourcePositions: positions, isExtended: isExtended))
         }
         return effective
     }

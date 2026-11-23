@@ -90,7 +90,8 @@ extension ATLExecutionContext {
         for candidate in candidates {
             guard let contextType = candidate.contextType,
                 candidate.parameters.count == argumentCount,
-                let distance = ATLTypeMatching.distance(of: receiver, to: contextType),
+                let distance = ATLTypeMatching.distance(
+                    of: receiver, to: contextType, declaredEObject: module.declaresOwnEObject(contextType)),
                 includingOclAny || distance < ATLTypeMatching.anyDistance
             else { continue }
             if best == nil || distance < best!.distance {
