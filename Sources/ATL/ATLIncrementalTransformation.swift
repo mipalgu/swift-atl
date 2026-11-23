@@ -244,6 +244,13 @@ public final class ATLIncrementalTransformation {
         didSet { machine.fileOutput = fileOutput }
     }
 
+    /// The clock that `thisModule.getCurrentTime()` reads.
+    ///
+    /// The default, ``ATLClock/system``, gives the current time.
+    public var clock: ATLClock = .system {
+        didSet { machine.clock = clock }
+    }
+
     /// The report of the latest update, if any.
     public private(set) var lastUpdate: ATLIncrementalUpdate?
 
@@ -572,6 +579,7 @@ public final class ATLIncrementalTransformation {
             module: module, options: options, unsetFeatureReads: unsetFeatureReads,
             nativeHelpers: nativeHelpers)
         machine.fileOutput = fileOutput
+        machine.clock = clock
         resetState()
         let propagates = strategy == .propagation
         if propagates { machine.incrementalJournal = ATLIncrementalJournal() }
@@ -816,7 +824,7 @@ public final class ATLIncrementalTransformation {
     ///   - impact: The impact of the changes.
     /// - Returns: `true` when an extent of a source pattern of the rule changed.
     private func extentsAffect(_ position: Int, _ impact: ModelChangeImpact) -> Bool {
-        if patternClasses[position].contains(where: { $0.eClass.isEObject }) {
+        if patternClasses[position].contains(where: { ATLTypeMatching.isUniversal($0.eClass) }) {
             return !impact.affectedExtents.isEmpty
         }
         return !patternClassNames[position].isDisjoint(with: impact.affectedExtents)
@@ -919,7 +927,8 @@ public final class ATLIncrementalTransformation {
     ///   which of them are made.
     /// - Throws: A fallback to executing the module again, which reports the error, when
     ///   two rules make matches with the same ``ATLMatchIdentity`` that rule inheritance
-    ///   does not decide between.
+    ///   does not decide between, or when an abstract rule that no rule extends would make
+    ///   a match.
     private func matchOrder() throws -> (matches: [MatchKey], choices: [(key: MatchKey, choice: ATLSiblingChoice)]) {
         var keys: [MatchKey] = []
         for (position, tuples) in candidates.enumerated() {
@@ -935,6 +944,11 @@ public final class ATLIncrementalTransformation {
             throw Fallback(
                 reason: ATLExecutionMessage.severalRules(
                     elements: ATLExecutionMessage.sameSourceElements, first: error.first, second: error.second))
+        }
+        if let leaf = selection.abstractLeaves.first {
+            throw Fallback(
+                reason: ATLExecutionMessage.abstractRuleWithoutSubRules(
+                    rules[keys[leaf].rule].rule.name, elements: ATLExecutionMessage.sameSourceElements))
         }
         return (selection.selected.map { keys[$0] }, selection.choices.map { (keys[$0.position], $0) })
     }

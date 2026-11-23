@@ -112,6 +112,11 @@ public final class ATLExecutionContext: Sendable {
     /// The default, ``ATLFileOutputPolicy/disabled``, makes both operations fail.
     public var fileOutput: ATLFileOutputPolicy = .disabled
 
+    /// The clock that `thisModule.getCurrentTime()` reads.
+    ///
+    /// The default, ``ATLClock/system``, gives the current time.
+    public var clock: ATLClock = .system
+
     /// The options that select how expressions are evaluated in this context.
     ///
     /// The ``ATLOptions/integerDivision`` decides whether `/` divides two Integers
@@ -416,7 +421,9 @@ public final class ATLExecutionContext: Sendable {
     /// This method resolves standard registered helpers and also handles ATL's
     /// `resolveTemp` operation as a built-in dispatch path. The built-in branch
     /// keeps trace-link resolution available even when the module does not expose
-    /// `resolveTemp` as an ordinary helper definition.
+    /// `resolveTemp` as an ordinary helper definition. Without a helper of that name,
+    /// `getCurrentTime` with no arguments gives the time of ``clock``, in milliseconds
+    /// since the Unix epoch.
     ///
     /// - Parameters:
     ///   - name: The helper name to call.
@@ -435,6 +442,9 @@ public final class ATLExecutionContext: Sendable {
         }
 
         guard let helper = globalHelper(named: name) else {
+            if name == ATLReservedNames.getCurrentTime, arguments.isEmpty {
+                return clock.millisecondsSinceEpoch()
+            }
             throw ATLExecutionError.helperNotFound(name)
         }
 

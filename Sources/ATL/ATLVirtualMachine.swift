@@ -171,6 +171,15 @@ public final class ATLVirtualMachine {
         set { executionContext.fileOutput = newValue }
     }
 
+    /// The clock that `thisModule.getCurrentTime()` reads.
+    ///
+    /// The default, ``ATLClock/system``, gives the current time. The clock applies to every
+    /// later run.
+    public var clock: ATLClock {
+        get { executionContext.clock }
+        set { executionContext.clock = newValue }
+    }
+
     // MARK: - Initialisation
 
     /// Creates a virtual machine that evaluates expressions as swift-atl 0.6 did.
@@ -538,7 +547,10 @@ public final class ATLVirtualMachine {
     /// - Returns: The non-abstract matched rules with their inheritance resolved
     /// - Throws: ATL execution errors for invalid `extends` relationships
     func effectiveMatchedRules() throws -> [ATLEffectiveMatchedRule] {
-        return try ATLRuleInheritance.effectiveRules(for: module.matchedRules) { sub, base in
+        return try ATLRuleInheritance.effectiveRules(
+            for: module.matchedRules, abstractRuleMatching: options.abstractRuleMatching,
+            abstractLeafRules: options.abstractLeafRules
+        ) { sub, base in
             let subClass = try self.sourceClass(forType: sub.type).eClass
             let baseClass = try self.sourceClass(forType: base.type).eClass
             return ATLTypeMatching.conforms(subClass, to: baseClass)
@@ -570,7 +582,7 @@ public final class ATLVirtualMachine {
         guard let sourceMetamodel = module.sourceMetamodels[modelAlias] else {
             throw ATLExecutionError.invalidOperation("Source metamodel '\(modelAlias)' not found")
         }
-        guard let eClass = sourceMetamodel.getClassifier(sourceClassName) as? EClass else {
+        guard let eClass = ATLTypeMatching.eClass(named: sourceClassName, in: sourceMetamodel) else {
             throw ATLExecutionError.typeError(
                 "Class '\(sourceClassName)' not found in metamodel '\(metamodelName)'"
             )
@@ -605,7 +617,7 @@ public final class ATLVirtualMachine {
             if debug {
                 print("[ATL] Matching rule: \(rule.rule.name)")
             }
-            statistics.rulesExecuted += 1
+            if !rule.rule.isAbstract { statistics.rulesExecuted += 1 }
             candidates.append(contentsOf: try await matchingCandidates(for: rule))
         }
 
@@ -622,6 +634,9 @@ public final class ATLVirtualMachine {
                 first: error.first, second: error.second, match: candidates[error.position])
         }
         hidingComparisons += selection.comparisons
+        if let leaf = selection.abstractLeaves.first {
+            throw Self.abstractLeafError(match: candidates[leaf])
+        }
         siblingWarnings = selection.choices.map { Self.siblingWarning($0, match: candidates[$0.position]) }
         for warning in siblingWarnings { executionContext.reportWarning(warning) }
         var matches: [PendingMatch] = []
@@ -652,6 +667,15 @@ public final class ATLVirtualMachine {
     {
         ATLExecutionError.invalidOperation(
             ATLExecutionMessage.severalRules(elements: matchedElements(of: match), first: first, second: second))
+    }
+
+    /// The error for a match of an abstract rule that no rule extends.
+    ///
+    /// - Parameter match: The match of the abstract rule.
+    /// - Returns: The error, naming the rule and the elements.
+    static func abstractLeafError(match: MatchCandidate) -> ATLExecutionError {
+        ATLExecutionError.invalidOperation(
+            ATLExecutionMessage.abstractRuleWithoutSubRules(match.rule.rule.name, elements: matchedElements(of: match)))
     }
 
     /// The warning for sub-rules of one rule that make the same match.

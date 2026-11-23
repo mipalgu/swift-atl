@@ -306,30 +306,44 @@ struct ATLSubRulePrecedenceTests {
         #expect(extending.warnings.isEmpty)
     }
 
+    /// An abstract rule extended by an abstract rule with a guard, whose only sub-rule has a
+    /// stricter guard, and by a rule with a weaker guard declared after it.
+    private let abstractMidLevelRules = """
+        abstract rule Base {
+            from s : Project!Task
+            to t : Report!Summary (title <- s.name)
+        }
+        abstract rule Mid extends Base {
+            from s : Project!Task (s.priority > 5)
+            to t : Report!Summary (rank <- 1)
+        }
+        rule Top extends Mid {
+            from s : Project!Task (s.priority > 7)
+            to t : Report!Summary (rank <- 2)
+        }
+        rule Other extends Base {
+            from s : Project!Task (s.priority > 1)
+            to t : Report!Summary (rank <- 3)
+        }
+        """
+
     @Test(
-        "An abstract sub-rule whose own sub-rules do not match lets the next rule apply under both precedences",
+        "An abstract sub-rule whose own sub-rules do not match lets the next rule apply when abstract rules are skipped",
         arguments: precedences)
     func abstractMidLevel(precedence: ATLSubRulePrecedence) async throws {
-        let result = try await outcome(
-            """
-            abstract rule Base {
-                from s : Project!Task
-                to t : Report!Summary (title <- s.name)
-            }
-            abstract rule Mid extends Base {
-                from s : Project!Task (s.priority > 5)
-                to t : Report!Summary (rank <- 1)
-            }
-            rule Top extends Mid {
-                from s : Project!Task (s.priority > 7)
-                to t : Report!Summary (rank <- 2)
-            }
-            rule Other extends Base {
-                from s : Project!Task (s.priority > 1)
-                to t : Report!Summary (rank <- 3)
-            }
-            """, priorities: [6], options: options(precedence))
+        var skipping = options(precedence)
+        skipping.abstractRuleMatching = .skip
+        let result = try await outcome(abstractMidLevelRules, priorities: [6], options: skipping)
         #expect(result.ranks == ["t1": 3])
+        #expect(result.warnings.isEmpty)
+    }
+
+    @Test(
+        "An abstract sub-rule that matches keeps the next rule from applying when its own sub-rules do not match",
+        arguments: precedences)
+    func abstractMidLevelEclipse(precedence: ATLSubRulePrecedence) async throws {
+        let result = try await outcome(abstractMidLevelRules, priorities: [6], options: options(precedence))
+        #expect(result.ranks.isEmpty)
         #expect(result.warnings.isEmpty)
     }
 

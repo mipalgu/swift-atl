@@ -12,10 +12,10 @@ import Testing
 
 @testable import ATL
 
-/// A garden metamodel whose package declares Ecore's `EObject`, and a label metamodel.
+/// A garden metamodel without a class of its own called `EObject`, and a label metamodel.
 ///
-/// `Garden!EObject` names Ecore's `EObject`, the implicit supertype of every class, so
-/// rules and `allInstances()` can use it. No garden class names it as a supertype.
+/// `Garden!EObject` therefore names Ecore's `EObject`, the implicit supertype of every
+/// class, so rules and `allInstances()` can use it.
 @MainActor
 struct GardenFixture {
     /// The name of the garden metamodel.
@@ -44,7 +44,6 @@ struct GardenFixture {
                 EAttribute(name: "name", eType: string),
                 EReference(name: "plants", eType: plant, upperBound: -1, containment: true),
             ])
-        let eObject = EClass(name: EcoreClassifier.eObject.rawValue)
         let label = EClass(name: "Label", eStructuralFeatures: [EAttribute(name: "text", eType: string)])
         self.plant = plant
         self.tree = tree
@@ -53,7 +52,7 @@ struct GardenFixture {
         self.label = label
         garden = EPackage(
             name: Self.gardenName, nsURI: "http://example.org/garden", nsPrefix: "gdn",
-            eClassifiers: [plant, tree, shrub, bed, eObject])
+            eClassifiers: [plant, tree, shrub, bed])
         labels = EPackage(
             name: Self.labelsName, nsURI: "http://example.org/labels", nsPrefix: "lbl", eClassifiers: [label])
     }
@@ -334,7 +333,7 @@ struct ATLEObjectConformanceTests {
         let eObject = EcorePackage.metaClass(.eObject)
         let local = EClass(name: EcoreClassifier.eObject.rawValue)
         #expect(ATLTypeMatching.conforms(fixture.tree, to: eObject))
-        #expect(ATLTypeMatching.conforms(fixture.bed, to: local))
+        #expect(!ATLTypeMatching.conforms(fixture.bed, to: local))
         #expect(ATLTypeMatching.conforms(fixture.tree, to: fixture.plant))
         #expect(ATLTypeMatching.conforms(fixture.tree, to: EClass(name: "Plant")))
         #expect(!ATLTypeMatching.conforms(eObject, to: fixture.tree))

@@ -17,6 +17,10 @@ import Foundation
 /// arguments (`Sequence(Integer)`); only the unqualified base name takes part
 /// in matching. A tuple conforms to `TupleType(...)`, whatever its parts, and to `Tuple`,
 /// the name of its type.
+///
+/// Ecore's `EObject` is the supertype of every class. `MM!EObject` names it unless the
+/// metamodel `MM`, other than Ecore itself, declares a class of its own called `EObject`,
+/// which is then a class like any other.
 enum ATLTypeMatching {
 
     /// The distance assigned to the top type `OclAny`, which is less specific than any other match.
@@ -37,6 +41,35 @@ enum ATLTypeMatching {
         return name.trimmingCharacters(in: .whitespaces)
     }
 
+    /// Ecore's `EObject`, the supertype of every class.
+    static var universalEObject: EClass { EcorePackage.metaClass(.eObject) }
+
+    /// Whether a class is Ecore's `EObject`, the supertype of every class.
+    ///
+    /// A class called `EObject` that a metamodel declares for itself is not.
+    ///
+    /// - Parameter eClass: The class to test.
+    /// - Returns: `true` when `eClass` is Ecore's `EObject`.
+    static func isUniversal(_ eClass: EClass) -> Bool {
+        eClass.id == universalEObject.id
+    }
+
+    /// Looks up the class that a metamodel name and a class name denote.
+    ///
+    /// `EObject` denotes Ecore's `EObject` in Ecore itself and in every metamodel that
+    /// declares no classifier of that name.
+    ///
+    /// - Parameters:
+    ///   - name: The unqualified name of the class.
+    ///   - metamodel: The metamodel that qualifies the name.
+    /// - Returns: The class, or `nil` when the metamodel has no class of that name.
+    static func eClass(named name: String, in metamodel: EPackage) -> EClass? {
+        let isEObject = name == EcoreClassifier.eObject.rawValue
+        if isEObject && metamodel.nsURI == EcorePackage.nsURI { return universalEObject }
+        if let eClass = metamodel.getClassifier(name) as? EClass { return eClass }
+        return isEObject && metamodel.getClassifier(name) == nil ? universalEObject : nil
+    }
+
     /// Measures how far a value's type is from a named type.
     ///
     /// The distance is zero when the value's own type is the named type, grows by
@@ -48,8 +81,11 @@ enum ATLTypeMatching {
     /// - Parameters:
     ///   - value: The value, or `nil` for the undefined value.
     ///   - typeName: The (possibly qualified) type name.
+    ///   - declaredEObject: Whether a type name `EObject` names a class that its metamodel
+    ///     declares for itself rather than Ecore's `EObject`; see
+    ///     ``ATLModule/declaresOwnEObject(_:)``.
     /// - Returns: The distance, or `nil` when the value does not conform to the type.
-    static func distance(of value: (any EcoreValue)?, to typeName: String) -> Int? {
+    static func distance(of value: (any EcoreValue)?, to typeName: String, declaredEObject: Bool = false) -> Int? {
         let name = baseName(typeName)
 
         guard let value else {
@@ -60,7 +96,7 @@ enum ATLTypeMatching {
 
         if let object = value as? any EObject {
             guard let eClass = object.eClass as? EClass else { return nil }
-            return classDistance(of: eClass, to: name)
+            return classDistance(of: eClass, to: name, declaredEObject: declaredEObject)
         }
         return primitiveOrCollectionDistance(of: value, to: name)
     }
@@ -70,9 +106,11 @@ enum ATLTypeMatching {
     /// - Parameters:
     ///   - value: The value to test.
     ///   - typeName: The (possibly qualified) type name.
+    ///   - declaredEObject: Whether a type name `EObject` names a class that its metamodel
+    ///     declares for itself rather than Ecore's `EObject`.
     /// - Returns: `true` when the value is of the type or of a subtype.
-    static func isKind(_ value: (any EcoreValue)?, of typeName: String) -> Bool {
-        distance(of: value, to: typeName) != nil
+    static func isKind(_ value: (any EcoreValue)?, of typeName: String, declaredEObject: Bool = false) -> Bool {
+        distance(of: value, to: typeName, declaredEObject: declaredEObject) != nil
     }
 
     /// Whether the value's own type is exactly the named type.
@@ -80,9 +118,11 @@ enum ATLTypeMatching {
     /// - Parameters:
     ///   - value: The value to test.
     ///   - typeName: The (possibly qualified) type name.
+    ///   - declaredEObject: Whether a type name `EObject` names a class that its metamodel
+    ///     declares for itself rather than Ecore's `EObject`.
     /// - Returns: `true` when the value's type, and no supertype, is the named type.
-    static func isType(_ value: (any EcoreValue)?, of typeName: String) -> Bool {
-        distance(of: value, to: typeName) == 0
+    static func isType(_ value: (any EcoreValue)?, of typeName: String, declaredEObject: Bool = false) -> Bool {
+        distance(of: value, to: typeName, declaredEObject: declaredEObject) == 0
     }
 
     /// The name of the type of a value, as reported by `oclType()` for non-model values.
@@ -115,8 +155,21 @@ enum ATLTypeMatching {
     ///   - type: The class to test against, such as the type of a source pattern.
     /// - Returns: `true` when instances of `eClass` are instances of `type`.
     static func conforms(_ eClass: EClass, to type: EClass) -> Bool {
-        eClass.conforms(to: type) || eClass.name == type.name
-            || eClass.allSuperTypes.contains { $0.name == type.name }
+        if isUniversal(type) || eClass.id == type.id || eClass.name == type.name { return true }
+        return eClass.allSuperTypes.contains { $0.id == type.id || $0.name == type.name }
+    }
+
+    /// Whether instances of a class are instances of another class, by class identity.
+    ///
+    /// A class is a subclass of itself, of each of its supertypes and of Ecore's `EObject`.
+    /// Unlike ``conforms(_:to:)``, classes of the same name are not taken to be the same.
+    ///
+    /// - Parameters:
+    ///   - eClass: The class of an object.
+    ///   - type: The class to test against.
+    /// - Returns: `true` when instances of `eClass` are instances of `type`.
+    static func isInstance(of eClass: EClass, of type: EClass) -> Bool {
+        isUniversal(type) || eClass.id == type.id || eClass.allSuperTypes.contains { $0.id == type.id }
     }
 
     /// The instances of a class in a model, in document order.
@@ -135,11 +188,12 @@ enum ATLTypeMatching {
 
     /// Breadth-first search up the supertype hierarchy.
     ///
-    /// `EObject` lies one level beyond the most distant other supertype, so that every
-    /// other supertype is nearer.
-    private static func classDistance(of eClass: EClass, to name: String) -> Int? {
-        let toEObject = name == EcoreClassifier.eObject.rawValue
-        if eClass.isEObject { return toEObject ? 0 : nil }
+    /// Ecore's `EObject` lies one level beyond the most distant other supertype, so that
+    /// every other supertype is nearer. A class called `EObject` that a metamodel declares
+    /// for itself is found like any other class.
+    private static func classDistance(of eClass: EClass, to name: String, declaredEObject: Bool) -> Int? {
+        let toEObject = name == EcoreClassifier.eObject.rawValue && !declaredEObject
+        if isUniversal(eClass) { return toEObject ? 0 : nil }
         var level: [EClass] = [eClass]
         var visited: Set<String> = []
         var distance = 0
@@ -147,7 +201,7 @@ enum ATLTypeMatching {
             if !toEObject, level.contains(where: { $0.name == name }) { return distance }
             var next: [EClass] = []
             for current in level where visited.insert(current.name).inserted {
-                next.append(contentsOf: current.eSuperTypes.filter { !$0.isEObject })
+                next.append(contentsOf: current.eSuperTypes.filter { !isUniversal($0) })
             }
             level = next
             distance += 1

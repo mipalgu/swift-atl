@@ -1215,7 +1215,7 @@ public struct ATLMethodCallExpression: ATLExpression, Sendable, Equatable, Hasha
         case let sig where sig.starts(with: "oclIsUndefined"):
             return handleOclIsUndefined(receiver)
         case let sig where sig.starts(with: "oclIsKindOf") && arguments.count == 1:
-            return try handleOclIsKindOf(receiver, arguments[0])
+            return try handleOclIsKindOf(receiver, arguments[0], context)
 
         // Numeric operations
         case let sig where sig.starts(with: "mod") && arguments.count == 1:
@@ -1339,7 +1339,7 @@ public struct ATLMethodCallExpression: ATLExpression, Sendable, Equatable, Hasha
         }
 
         // Find the specified class in the metamodel
-        guard let eClass = sourceMetamodel.getClassifier(className) as? EClass else {
+        guard let eClass = ATLTypeMatching.eClass(named: className, in: sourceMetamodel) else {
             throw ATLExecutionError.typeError(
                 "Class '\(className)' not found in metamodel '\(modelAlias)'"
             )
@@ -1457,11 +1457,21 @@ public struct ATLMethodCallExpression: ATLExpression, Sendable, Equatable, Hasha
 
     /// Handles `oclIsKindOf(typeName)`, returns `true` if the receiver's class matches
     /// or is a subtype of the named class.
-    private func handleOclIsKindOf(_ receiverValue: (any EcoreValue)?, _ typeName: (any EcoreValue)?) throws -> (any EcoreValue)? {
+    ///
+    /// - Parameters:
+    ///   - receiverValue: The value to test.
+    ///   - typeName: The name of the type, as a String.
+    ///   - context: The execution context, whose module decides what `MM!EObject` names.
+    /// - Returns: Whether the value conforms to the type.
+    /// - Throws: ``ATLExecutionError/typeError(_:)`` when the type name is not a String.
+    private func handleOclIsKindOf(
+        _ receiverValue: (any EcoreValue)?, _ typeName: (any EcoreValue)?, _ context: ATLExecutionContext
+    ) throws -> (any EcoreValue)? {
         guard let typeName = typeName as? String else {
             throw ATLExecutionError.typeError("oclIsKindOf() requires String type name argument")
         }
-        return ATLTypeMatching.isKind(receiverValue, of: typeName)
+        return ATLTypeMatching.isKind(
+            receiverValue, of: typeName, declaredEObject: context.module.declaresOwnEObject(typeName))
     }
 
     /// Handles `notEmpty()`, returns `true` when the collection or string is non-empty.
@@ -2091,6 +2101,19 @@ enum ATLExecutionMessage {
     /// - Returns: The description, such as `the source elements s = Task 't1', p = Project 'p'`.
     static func boundSourceElements(_ bindings: [(variable: String, element: String)]) -> String {
         "the source elements " + bindings.map { "\($0.variable) = \($0.element)" }.joined(separator: ", ")
+    }
+
+    /// Describes an abstract rule that no rule extends and that matches source elements.
+    ///
+    /// - Parameters:
+    ///   - rule: The name of the abstract rule.
+    ///   - elements: The text of the matched source element, as ATL writes it, or the
+    ///     description of the matched tuple.
+    /// - Returns: The message.
+    static func abstractRuleWithoutSubRules(_ rule: String, elements: String) -> String {
+        "Abstract rule '\(rule)' matches \(elements), but no rule extends it, so it cannot "
+            + "transform it; declare the rule without '\(ATLReservedNames.abstract)', or add a rule "
+            + "that extends it"
     }
 
     /// The words for a tuple of source elements that the message does not list.

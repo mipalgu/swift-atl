@@ -93,7 +93,14 @@ order of Eclipse ATL transforms it, as there, and the run also reports a warning
 `ATLOptions(siblingRuleConflicts: .error)` makes this an error instead. A rule that has a
 guard is tried before the rules extending it that have none, also as in Eclipse ATL;
 `ATLOptions(subRulePrecedence: .extendingRule)` lets a rule that extends another always take
-precedence over it instead. A rule that extends another may declare the source pattern variables of that rule in any order, as in Eclipse
+precedence over it instead. An abstract rule that matches an element keeps the rules tried
+after it from transforming the element when none of the rules extending it match, and an
+abstract rule that no rule extends stops the run once it matches, as Eclipse ATL fails;
+`ATLOptions(abstractRuleMatching: .skip)` and `ATLOptions(abstractLeafRules: .ignore)` keep
+the behaviour of 0.6 instead. `MM!EObject` denotes Ecore's `EObject`, the supertype of every
+class, for a metamodel `MM` that declares no class of that name; a helper on it applies to
+every model object, which the default virtual machine of Eclipse ATL does not do, and
+`thisModule.getCurrentTime()` is an extension that gives the current time. A rule that extends another may declare the source pattern variables of that rule in any order, as in Eclipse
 ATL, and may also give them other names. <doc:UnderstandingATL> describes rule
 inheritance, and where it differs from Eclipse ATL, in detail. Tuples written to the
 console or as query results list their parts in the order in which they were written,
@@ -119,6 +126,8 @@ deprecated in favour of the variant that takes options.
 | Bag values, such as `Bag{1, 1}`, `asBag()`, `Set{...}->collect(...)` and a feature navigated over a Set | ``ATLBagRepresentation/bag``: Bags, as in OCL and the Eclipse ATL EMFTVM | ``ATLOptions/bagRepresentation`` | ``ATLBagRepresentation/sequence``: Sequences |
 | Two rules extending the same rule that match the same element | ``ATLSiblingRuleConflicts/warning``: the first in Eclipse ATL's order applies, with a warning, under both presets | ``ATLOptions/siblingRuleConflicts`` | Both were applied; ``ATLSiblingRuleConflicts/error`` stops the run instead |
 | A rule with a guard and a rule extending it without one that match the same element | ``ATLSubRulePrecedence/eclipse``: the rule with the guard applies, as in Eclipse ATL | ``ATLOptions/subRulePrecedence`` | ``ATLSubRulePrecedence/extendingRule``: the extending rule applies |
+| An abstract rule that matches an element that none of the rules extending it match | ``ATLAbstractRuleMatching/eclipse``: no rule of the hierarchy transforms the element, as in Eclipse ATL | ``ATLOptions/abstractRuleMatching`` | ``ATLAbstractRuleMatching/skip``: the next rule in order is tried |
+| An abstract rule that no rule extends and that matches an element | ``ATLAbstractLeafRules/error``: the run stops with an error, as Eclipse ATL fails | ``ATLOptions/abstractLeafRules`` | ``ATLAbstractLeafRules/ignore``: the rule matches nothing |
 
 With ``ATLCollectionRangeSyntax/eclipse``, `..` is read as two `.` tokens, and a range is
 reported as a syntax error whose message names the portable alternatives: listing the
@@ -238,6 +247,7 @@ Related chapters:
 - ``ATLProgress``
 - ``ATLProgressPhase``
 - ``ATLFileOutputPolicy``
+- ``ATLClock``
 
 ### Modules and Rules
 
@@ -275,6 +285,9 @@ Related chapters:
 - ``ATLIntegerDivision``
 - ``ATLBagRepresentation``
 - ``ATLSiblingRuleConflicts``
+- ``ATLSubRulePrecedence``
+- ``ATLAbstractRuleMatching``
+- ``ATLAbstractLeafRules``
 - ``ATLMetamodelRegistry``
 
 ### Editor Support

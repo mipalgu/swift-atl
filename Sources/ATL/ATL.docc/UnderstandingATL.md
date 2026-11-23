@@ -158,7 +158,8 @@ incremental updates.
 A matched rule can extend another with `extends`. It inherits the target patterns and
 bindings of the rule it extends, redeclares target patterns of the same name to change
 their type or override bindings, and adds its own guard, which applies together with the
-guards of the rules it extends. An `abstract` rule matches nothing on its own.
+guards of the rules it extends. An `abstract` rule is never applied itself: it matches
+elements only so that the rules extending it can transform them.
 
 ```atl
 abstract rule Member2Person {
@@ -179,8 +180,8 @@ A rule that extends another declares the same source pattern variables, as in Ec
 ATL, and each of its variables stands for the variable of the same name of the rule it
 extends, in whatever order the two rules declare them; each rule sees the matched
 elements under its own variable names. The type of each variable must be the type of the
-variable it stands for or a subtype of it; every class is a subtype of `EObject`, so a
-rule on any class can extend a rule on `EObject`. A rule that declares fewer or more source
+variable it stands for or a subtype of it; every class is a subtype of Ecore's `EObject`,
+so a rule on any class can extend a rule on `MM!EObject`. A rule that declares fewer or more source
 pattern elements than the rule it extends stops the run with an
 ``ATLExecutionError/invalidOperation(_:)``, and a variable whose type does not conform
 with an ``ATLExecutionError/typeError(_:)``; both name the two rules and the variable.
@@ -239,7 +240,54 @@ Under ``ATLSubRulePrecedence/eclipse``, the rules without a guard that extend a 
 rule with one are never tried, so they give neither a warning nor an error;
 under ``ATLSubRulePrecedence/extendingRule``, they do.
 
-Rule inheritance differs from Eclipse ATL in three respects:
+An abstract rule takes its turn like any other rule, as in Eclipse ATL: once it matches an
+element, only the rules extending it can transform the element, so the element is left
+untransformed when none of them match, and the rules that would have been tried after the
+abstract rule are not tried. Below, a task of priority 6 matches `Urgent` but not
+`Critical`, and no summary is created for it, although `Routine` matches it too:
+
+```atl
+abstract rule Task2Summary {
+    from s : Project!Task
+    to t : Report!Summary (title <- s.name)
+}
+abstract rule Urgent extends Task2Summary {
+    from s : Project!Task (s.priority > 5)
+    to t : Report!Summary (rank <- 1)
+}
+rule Critical extends Urgent {
+    from s : Project!Task (s.priority > 7)
+    to t : Report!Summary (rank <- 2)
+}
+rule Routine extends Task2Summary {
+    from s : Project!Task (s.priority > 1)
+    to t : Report!Summary (rank <- 3)
+}
+```
+
+With ``ATLAbstractRuleMatching/skip`` for ``ATLOptions/abstractRuleMatching``, which
+``ATLOptions/legacy`` selects, an abstract rule none of whose sub-rules match an element is
+passed over instead, so `Routine` transforms the task above. With
+``ATLSiblingRuleConflicts/error``, an abstract rule that matches an element conflicts with
+another rule extending the same rule that matches it, as two rules that are not abstract do.
+
+An abstract rule that no rule extends cannot transform anything. Eclipse ATL matches it
+nonetheless, and the transformation then fails. By default, a run in which such a rule
+matches an element stops with an ``ATLExecutionError/invalidOperation(_:)`` that names the
+rule and the element, before any rule creates a target element; a rule that matches no
+element does not stop the run. With ``ATLAbstractLeafRules/ignore`` for
+``ATLOptions/abstractLeafRules``, which ``ATLOptions/legacy`` selects, such a rule matches
+nothing instead. An incremental transformation chooses between abstract rules and the
+rules extending them as a batch run does.
+
+```swift
+var options = ATLOptions.standard
+options.abstractRuleMatching = .skip
+options.abstractLeafRules = .ignore
+let machine = ATLVirtualMachine(module: module, options: options)
+```
+
+Rule inheritance differs from Eclipse ATL in four respects:
 
 - A rule may extend a rule whose variables have other names, provided it declares as many;
   the variables whose names the two rules do not share stand for each other in
@@ -248,9 +296,12 @@ Rule inheritance differs from Eclipse ATL in three respects:
   precedence over it for an element they both match. Eclipse ATL tries a rule that has a
   guard and is not abstract before the rules extending it that have none, as
   ``ATLSubRulePrecedence/eclipse`` does.
-- When an abstract rule that extends another matches an element but none of the rules
-  extending it do, the next rule in order is tried. Eclipse ATL leaves such an element
-  untransformed.
+- With ``ATLAbstractRuleMatching/skip``, when an abstract rule matches an element but none
+  of the rules extending it do, the next rule in order is tried. Eclipse ATL leaves such an
+  element untransformed, as ``ATLAbstractRuleMatching/eclipse`` does.
+- An abstract rule that no rule extends stops the run before any target element is
+  created, or with ``ATLAbstractLeafRules/ignore`` matches nothing. Eclipse ATL creates its
+  target elements and then fails when it applies the rules.
 
 ### Called Rules
 
@@ -435,9 +486,13 @@ Usage: `thisModule.sqlTypes.get('String')`
 Contextual helpers are identified by their context type and name. A call dispatches on the
 dynamic type of the receiver, and the most specific context type wins, so
 `helper context A def : f()` and `helper context B def : f()` can coexist. A helper whose
-context is `EObject` applies to every model object, but every helper whose context is the
+context is Ecore's `EObject`, written `MM!EObject` for any metamodel `MM` that declares no
+class of that name, applies to every model object, but every helper whose context is the
 receiver's class or one of its declared supertypes is more specific, and it is in turn more
-specific than a helper on `OclAny`. A helper
+specific than a helper on `OclAny`. This is an extension: the default virtual machine of
+Eclipse ATL looks a helper up only along the supertypes that the receiver's class declares,
+so it finds a helper on `EObject` only for a class that names `EObject` as a supertype. A
+helper
 declared without a parameter list (`def : name : Type = ...`) is an attribute whose value
 is computed once per receiver. A host application can add helpers written in Swift; see
 ``ATLNativeHelper``.
@@ -635,10 +690,23 @@ of one element.
   `toRadians`.
 - **Types**: `oclIsKindOf` and `oclIsTypeOf` (over the complete supertype closure),
   `oclAsType`, `oclType`, `oclIsUndefined`, `MM!Class.allInstances()` and
-  `MM!Class.allInstancesFrom('IN')`. As in EMF, every model object is an `EObject`:
-  `oclIsKindOf(ECORE!EObject)` holds for every model object, while `oclIsTypeOf` holds only
-  for an object whose class is `EObject` itself. Where a metamodel names `EObject`, such
-  as Ecore's own, `allInstances()` of it lists every object of the model.
+  `MM!Class.allInstancesFrom('IN')`. As in EMF, every model object is an instance of
+  Ecore's `EObject`, which `MM!EObject` denotes for Ecore and for every metamodel `MM` that
+  declares no class of that name: `oclIsKindOf(MM!EObject)` holds for every model object,
+  while `oclIsTypeOf` holds only for an object whose class is `EObject` itself;
+  `MM!EObject.allInstances()` lists every object of the models of `MM`, and a rule whose
+  source pattern element is typed `MM!EObject` matches each of them. A metamodel that
+  declares a class of its own called `EObject` keeps it: `MM!EObject` then denotes that
+  class, whose instances are only those of the class and of its subclasses, as in Eclipse
+  ATL. Eclipse ATL resolves `MM!EObject` only for a metamodel that refers to Ecore, as one
+  whose attributes have Ecore data types such as `EString` does.
+- **Module**: `thisModule.resolveTemp(...)`, described under Resolving References above,
+  and `thisModule.getCurrentTime()`, which gives the current time as an Integer number of
+  milliseconds since the Unix epoch, 1 January 1970 00:00:00 UTC. A helper of the module
+  called `getCurrentTime` takes precedence over the operation. `getCurrentTime()` is an
+  extension that Eclipse ATL does not provide; its time comes from the ``ATLClock`` of the
+  virtual machine (``ATLVirtualMachine/clock``), which a host can set to give runs a time
+  of its choice.
 - **Reflection**: the operations described under Reflection and Containment below.
 
 ### Reflection and Containment
