@@ -47,11 +47,12 @@ enum ATLTypeMatching {
     /// Whether a class is Ecore's `EObject`, the supertype of every class.
     ///
     /// A class called `EObject` that a metamodel declares for itself is not.
+    /// ``EClass/isEObject`` decides.
     ///
     /// - Parameter eClass: The class to test.
     /// - Returns: `true` when `eClass` is Ecore's `EObject`.
     static func isUniversal(_ eClass: EClass) -> Bool {
-        eClass.id == universalEObject.id
+        eClass.isEObject
     }
 
     /// Looks up the class that a metamodel name and a class name denote.
@@ -155,7 +156,7 @@ enum ATLTypeMatching {
     ///   - type: The class to test against, such as the type of a source pattern.
     /// - Returns: `true` when instances of `eClass` are instances of `type`.
     static func conforms(_ eClass: EClass, to type: EClass) -> Bool {
-        if isUniversal(type) || eClass.id == type.id || eClass.name == type.name { return true }
+        if type.isEObject || eClass.id == type.id || eClass.name == type.name { return true }
         return eClass.allSuperTypes.contains { $0.id == type.id || $0.name == type.name }
     }
 
@@ -169,7 +170,7 @@ enum ATLTypeMatching {
     ///   - type: The class to test against.
     /// - Returns: `true` when instances of `eClass` are instances of `type`.
     static func isInstance(of eClass: EClass, of type: EClass) -> Bool {
-        isUniversal(type) || eClass.id == type.id || eClass.allSuperTypes.contains { $0.id == type.id }
+        eClass.conforms(to: type)
     }
 
     /// The instances of a class in a model, in document order.
